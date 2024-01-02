@@ -1,95 +1,107 @@
-import Image from 'next/image'
+'use client';
 import styles from './page.module.css'
+import DesktopIntro from './components/intro/DesktopIntro'
+import { useEffect, useState } from 'react'
+
+interface AuthorImageData {
+    url: string,
+    title: string,
+    width: string,
+    height: string,
+}
+
+interface AuthorData {
+  first_name: string,
+  last_name: string,
+  location: string, 
+  job_title: string,
+  bio?: string, 
+  email?: string, 
+  github?: string,
+  image: AuthorImageData
+}
+interface AuthorEntryData {
+  author: AuthorData
+}
+interface HomePageData {
+  blog_authors: AuthorEntryData[],
+  body: string,
+}
+
+import { LoremIpsum } from "lorem-ipsum";
+const lorem = new LoremIpsum({
+  sentencesPerParagraph: {
+    max: 8,
+    min: 4
+  },
+  wordsPerSentence: {
+    max: 16,
+    min: 4
+  }
+}).generateParagraphs(7);
 
 export default function Home() {
+  const [blogAuthors, setBlogAuthors] = useState<AuthorEntryData | undefined>(undefined)
+  useEffect(() => {
+    fetch('https://randomuser.me/api/?format=json')
+    .then(response => response.json())
+    .then(data  =>{
+      const {results} = data;
+      const {name, location, email, picture} = results[0]
+
+      const {first, last} = name;
+      
+      const {city, state} = location;
+
+      const output:AuthorData = {
+        first_name: first,
+        last_name: last,
+        location: `${city}, ${state}`,
+        email,
+        image: {
+          url: picture.large,
+          title: 'this is a default profile image',
+          width: '500',
+          height: '500',
+        },
+        job_title: 'Fake Person!'
+      }
+
+      setBlogAuthors({author: output})
+    })
+
+  }, [])
+
   return (
-    <main className={styles.main}>
-      <div className={styles.description}>
-        <p>
-          Get started by editing&nbsp;
-          <code className={styles.code}>app/page.tsx</code>
-        </p>
-        <div>
-          <a
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            By{' '}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className={styles.vercelLogo}
-              width={100}
-              height={24}
-              priority
-            />
-          </a>
-        </div>
-      </div>
+    <div style={{display:"flex"}}>
+      <DesktopIntro blog_authors={blogAuthors && [blogAuthors]}/>
+<div style={{margin: "0 1rem"}}>
 
-      <div className={styles.center}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
-        />
-      </div>
+    {/* <div id="intro-mobile">
+        {% with  self.blog_authors.all|first as iter %}
+            {% image iter.author.image fill-400x600 id="profile-image" %}
+            <div style="text-align: center;">
+                <h1>{{ iter.author }}</h1>
+                <h2>{iter.author.job_title}</h2>
+                <h4>{iter.author.location}</h4>
+                <span>[ <a style="color: #006666;" href="mailto:{{iter.author.email}}">{iter.author.email}</a> ]</span>
+                {% if iter.author.github %}
+                    <br/>
+                    <span style="margin-top: .5rem;">[ <a style="color: #006666;" href="{{iter.author.github}}" target="_blank">{{iter.author.github}}</a> ]</span>
+                {% endif %}
+            </div>
+        {% endwith %}
+    </div> */}
 
-      <div className={styles.grid}>
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className={styles.card}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2>
-            Docs <span>-&gt;</span>
-          </h2>
-          <p>Find in-depth information about Next.js features and API.</p>
-        </a>
+    {/* {% include 'nav.html' %} */}
 
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className={styles.card}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2>
-            Learn <span>-&gt;</span>
-          </h2>
-          <p>Learn about Next.js in an interactive course with&nbsp;quizzes!</p>
-        </a>
+    <div className={styles.bio} >
+        {/* {{ page.body | richtext }} */}
+        {lorem}
+    </div>
 
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className={styles.card}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2>
-            Templates <span>-&gt;</span>
-          </h2>
-          <p>Explore starter templates for Next.js.</p>
-        </a>
-
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className={styles.card}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2>
-            Deploy <span>-&gt;</span>
-          </h2>
-          <p>
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
-      </div>
-    </main>
+    {/* {% include 'footer.html' %} */}
+</div>
+</div>
   )
 }
