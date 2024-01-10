@@ -1,0 +1,11 @@
+.header{
+    margin-top: 1rem;
+    margin: 0.5rem 4vw;
+}
+
+.nav{
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}

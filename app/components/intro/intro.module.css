@@ -6,6 +6,8 @@
   color: var(--secondary-color);
   padding-bottom: 1rem;
   width: 100%;
+  padding: 4rem;
+  height: 100vh;
 }
 
 .profileImage{

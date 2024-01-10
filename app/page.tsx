@@ -1,4 +1,3 @@
-'use client';
 import styles from './page.module.css'
 import DesktopIntro from './components/intro/DesktopIntro'
 import { useEffect, useState } from 'react'
@@ -29,6 +28,8 @@ interface HomePageData {
 }
 
 import { LoremIpsum } from "lorem-ipsum";
+import Nav from './components/layout/Nav';
+import Footer from './components/layout/Footer';
 const lorem = new LoremIpsum({
   sentencesPerParagraph: {
     max: 8,
@@ -40,10 +41,8 @@ const lorem = new LoremIpsum({
   }
 }).generateParagraphs(7);
 
-export default function Home() {
-  const [blogAuthors, setBlogAuthors] = useState<AuthorEntryData | undefined>(undefined)
-  useEffect(() => {
-    fetch('https://randomuser.me/api/?format=json')
+async function getAuthorData(){
+  return fetch('https://randomuser.me/api/?format=json')
     .then(response => response.json())
     .then(data  =>{
       const {results} = data;
@@ -62,15 +61,17 @@ export default function Home() {
           url: picture.large,
           title: 'this is a default profile image',
           width: '500',
-          height: '500',
+          height: '900',
         },
         job_title: 'Fake Person!'
       }
 
-      setBlogAuthors({author: output})
+      return {author: output}
     })
+}
 
-  }, [])
+export default async function Home() {
+  const blogAuthors: AuthorEntryData  = await getAuthorData();
 
   return (
     <div style={{display:"flex"}}>
@@ -93,14 +94,14 @@ export default function Home() {
         {% endwith %}
     </div> */}
 
-    {/* {% include 'nav.html' %} */}
-
+    <Nav />
     <div className={styles.bio} >
         {/* {{ page.body | richtext }} */}
         {lorem}
     </div>
 
     {/* {% include 'footer.html' %} */}
+    <Footer />
 </div>
 </div>
   )
