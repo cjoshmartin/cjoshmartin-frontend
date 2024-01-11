@@ -1,6 +1,10 @@
 import styles from './layout.module.css';
 
-function NavLink({title, link}){
+interface NavLinkProps {
+    title: string,
+    link: string
+}
+function NavLink({title, link}: NavLinkProps ){
     return (
         <a href={link} target="_black" className="nav-link">[ {title} ]</a>
     )

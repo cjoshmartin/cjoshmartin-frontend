@@ -1,19 +1,25 @@
 .intro {
   display: flex;
-  flex-direction: column;
-  align-items: center;
+  flex-direction: row;
   background-color: var(--primary-color);
   color: var(--secondary-color);
   padding-bottom: 1rem;
-  width: 100%;
-  padding: 4rem;
-  height: 100vh;
+  padding: 2rem;
+  gap: 2rem;
+  max-width: 1200px;
 }
 
+.introText {
+ display: flex; 
+ flex-direction: column;
+ justify-content: center;
+ align-items: center;
+ gap: 0.5rem;
+ width: 100%;
+}
 .profileImage{
-  max-width: 100%;
   height: auto;
-  padding: 2rem;
+  width: 20rem;
 }
 
 .clickableLink {
@@ -22,21 +28,8 @@
 
 
 @media only screen and (max-width: 900px){
-  .intro {
-      display: none;
-  }
   .profileImage {
       margin-bottom: 1rem;
       aspect-ratio: 4/5;
   }
-  div#intro-mobile {
-      display: flex;
-      background-color: var(--primary-color);
-      color: var(--secondary-color);
-      flex-direction: column;
-      align-items: center;
-      margin-top: 2rem;
-      padding: 2rem;
-  }
-
 }
