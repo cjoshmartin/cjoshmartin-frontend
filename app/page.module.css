@@ -8,6 +8,10 @@
   flex-direction: column;
   font-size: 1rem;
   margin: 1rem;
+  padding: 1rem;
+}
+.bio p {
+  margin: 1rem;
 }
 .bio p:last-child {
   display: inline-block;
@@ -30,5 +34,6 @@ animation: cursor-blink 1s steps(2) infinite;
 .body {
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  justify-content: center;
+  align-items: center;
 }

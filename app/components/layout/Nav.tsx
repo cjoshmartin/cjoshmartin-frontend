@@ -2,11 +2,12 @@ import styles from './layout.module.css';
 
 interface NavLinkProps {
     title: string,
-    link: string
+    link: string,
+    external?: boolean
 }
-function NavLink({title, link}: NavLinkProps ){
+function NavLink({title, link, external=false}: NavLinkProps ){
     return (
-        <a href={link} target="_black" className="nav-link">[ {title} ]</a>
+        <a href={link} target={external? "_blank": undefined} className="nav-link">[ {title} ]</a>
     )
 }
 

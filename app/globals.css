@@ -20,8 +20,7 @@
 body{
     background-color: var(--secondary-color);
     color: var(--font-color);
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 14px;
+    font-size: 18px;
     margin: 0;
     height: 100%;
     width: 100%;
@@ -41,7 +40,4 @@ img.richtext-image.full-width {
 
 li, ul {
     padding-left: 1rem;
-}
-#bio p {
-    margin-top: 1rem;
 }
