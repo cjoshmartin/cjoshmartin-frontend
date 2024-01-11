@@ -4,8 +4,8 @@ import DesktopIntro from './components/intro/DesktopIntro'
 interface AuthorImageData {
     url: string,
     title: string,
-    width: string,
-    height: string,
+    width: number,
+    height: number,
 }
 
 interface AuthorData {
