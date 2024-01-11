@@ -1,5 +1,6 @@
 import styles from './page.module.css'
 import DesktopIntro from './components/intro/DesktopIntro'
+import { redirect } from 'next/navigation'
 
 interface AuthorImageData {
     url: string,
@@ -41,9 +42,30 @@ async function getHomePageData(): Promise<HomePageData>{
       }
     })
 }
+async function getPages(){
+  const unfilteredPages = await fetch(`${URL}/api/v2/pages?fields=_,id,type`)
+  .then(response => response.json())
+  .then(data => data.items)
+  return unfilteredPages
+}
+
+async function processPage(id){
+  return await fetch(`${URL}/api/v2/pages/${id}`).then(data => data.json())
+}
 
 export default async function Home() {
   const {blog_authors, body}: HomePageData  = await getHomePageData();
+  const pages = await getPages();
+  const results = []
+  for (let i = 0; i < pages.length; i++){
+    const page = pages[i];
+    const {id} = page;
+    const result = await processPage(id);
+    results.push(result)
+  }
+
+
+  
 
   return (
     <div className={styles.body}>

@@ -80,6 +80,7 @@ export default function DesktopIntro(props: DesktopIntroProps){
                width={author?.image.width}
                height={author?.image?.height}
                className={styles.profileImage}
+               priority
             />
             <div className={styles.introText}>
                 <h1>{author?.first_name} {author?.last_name}</h1>
