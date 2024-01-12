@@ -26,8 +26,8 @@ export default async function Nav () {
             <NavLink link="/" title="Home" />
             {
                 pages
-                .filter(({meta}) => meta.type == "flex.FlexPage")
-                .map(page => <NavLink key={page.id} link={`/flex/${page.meta.slug}`} title={page.title} />)
+                .filter(({meta}: any) => meta.type == "flex.FlexPage")
+                .map((page :any)  => <NavLink key={page.id} link={`/flex/${page.meta.slug}`} title={page.title} />)
             } 
             {
                 count["blog.BlogPage"] > 0 && <NavLink key={"blog"} link={`/blog`} title={"Blog"} />

@@ -1,8 +1,8 @@
 import getHost from "./getHost";
 
-export default function generateURL(path: string, incommingHost=undefined){
-   let host : string | undefined= incommingHost; 
-   if(!incommingHost){
+export default function generateURL(path: string, incommingHost="" ){
+   let host : string= incommingHost; 
+   if(incommingHost.length < 1){
     host = getHost();
    }
     if (!host){

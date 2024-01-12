@@ -6,7 +6,7 @@ export async function GET(requst: Request){
   const pages = await fetch(`${URL}/api/v2/pages?fields=_,id,type,title,slug`)
   .then(response => response.json())
   .then(data => data.items.filter(({meta}: any) => meta.type !== "blog.BlogIndexPage"));
-  const count = pages.reduce((acc, {meta}) => {
+  const count = pages.reduce((acc: any, {meta} :any) => {
     if(!acc[meta?.type]){
         acc[meta?.type] = 1;
     }
