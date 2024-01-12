@@ -1,3 +1,4 @@
+import generateURL from '../generateURL';
 import styles from './layout.module.css';
 
 interface NavLinkProps {
@@ -11,12 +12,27 @@ function NavLink({title, link, external=false}: NavLinkProps ){
     )
 }
 
-export default function Nav () {
+async function getNav(){
+    return fetch(generateURL('/api/pages/count'))
+    .then((respone) => respone.json())
+}
+
+export default async function Nav () {
+    const {count, pages} = await getNav();
 
     return (
         <header className={styles.header}>
             <nav className={styles.nav} >
             <NavLink link="/" title="Home" />
+            {
+                pages
+                .filter(({meta}) => meta.type == "flex.FlexPage")
+                .map(page => <NavLink key={page.id} link={`/flex/${page.meta.slug}`} title={page.title} />)
+            } 
+            {
+                count["blog.BlogPage"] > 0 && <NavLink key={"blog"} link={`/blog`} title={"Blog"} />
+            }
+            
             </nav>
             </header>
     )
