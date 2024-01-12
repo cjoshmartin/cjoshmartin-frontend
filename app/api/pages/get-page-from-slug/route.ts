@@ -2,6 +2,7 @@ import URL from '@/app/components/defaulturl';
 import generateURL from '@/app/components/generateURL';
 
 export async function GET(request: Request){
+    // @ts-ignore
     const searchParams = request?.nextUrl?.searchParams
     const query = searchParams.get('query')
     if(!query){

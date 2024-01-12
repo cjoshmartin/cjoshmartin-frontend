@@ -1,6 +1,6 @@
 import generateURL from "@/app/components/generateURL"
 
-async function getPage(slug){
+async function getPage(slug: string){
     const url = generateURL(`/api/pages/get-page-from-slug?query=${slug}`)
     return await fetch(url)
     .then(data => data.json())

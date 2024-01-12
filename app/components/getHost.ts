@@ -11,6 +11,7 @@ export default function getHost() {
   }
 
   const request = new NextRequest(referer)
+  // @ts-ignore
   const host = request?.nextUrl?.origin;
 
   return host ?? undefined;
