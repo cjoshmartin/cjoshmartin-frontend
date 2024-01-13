@@ -9,7 +9,6 @@ async function getPage(slug: string){
 
 export default async function Page({ params }: { params: { slug: string } }){
     const {title, body} = await getPage(params.slug);
-    console.log(body[0].value)
     return (
         <div>
             <div 
