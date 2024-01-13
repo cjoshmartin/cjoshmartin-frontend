@@ -1,0 +1,25 @@
+.container {
+    display: flex;
+    flex-direction: column;
+
+    gap: 1rem;
+    max-width: 772px;
+}
+
+.headerImage {
+    object-fit: cover;
+    -webkit-mask-image: linear-gradient(black, transparent);
+    mask-image: linear-gradient(black, transparent);
+}
+
+.contentArea {
+    margin: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.content p {
+
+    margin: 1rem 0;
+}

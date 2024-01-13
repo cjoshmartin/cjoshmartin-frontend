@@ -6,7 +6,6 @@ async function getPage(slug: string){
     .then(data => data.json())
 }
 
-
 export default async function Page({ params }: { params: { slug: string } }){
     const {title, body} = await getPage(params.slug);
     return (
