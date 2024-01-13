@@ -7,7 +7,7 @@ export default function getHost() {
   const referer = headersList.get("referer")
   
   if (!referer) {
-    throw 'unable to find host'
+    return 'http://cjoshmartin.com'
   }
 
   const request = new NextRequest(referer)
