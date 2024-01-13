@@ -1,0 +1,36 @@
+.blogListContainer {
+    background-color: var(--primary-color);
+    color: var(--secondary-color);
+
+    display: flex;
+    flex: row;
+
+
+    padding: 2rem;
+    gap: 2rem;
+}
+
+.contantContainer {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+
+}
+
+.contantContainer h2 {
+
+    font-weight: 500;
+    text-transform: capitalize;
+}
+
+
+.contantContainer a {
+    background-color: white;
+    color: black;
+    font-weight: bold;
+    padding: 1rem;
+    border-radius: 1rem;
+    /* text-decoration: green wavy underline; */
+    text-decoration: underline;
+    width: fit-content;
+}

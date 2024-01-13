@@ -1,6 +1,7 @@
 import styles from './page.module.css'
 import DesktopIntro from './components/intro/DesktopIntro'
 import generateURL from './components/generateURL'
+import { PageTypes } from './PageTypes'
 
 interface AuthorImageData {
     url: string,
@@ -25,14 +26,6 @@ interface AuthorEntryData {
 interface HomePageData {
   blog_authors: AuthorEntryData[],
   body: string,
-}
-
-enum PageTypes {
-  HOME = "home.HomePage",
-  BLOG_INDEX = "blog.BlogIndexPage",
-  BLOG_POST = "blog.BlogPage",
-  FLEX = "flex.FlexPage"
-
 }
 
 async function getHomePageData(): Promise<HomePageData>{
