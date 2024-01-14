@@ -5,6 +5,9 @@
     gap: 1rem;
     max-width: 772px;
 }
+.container h2 {
+    text-transform: capitalize;
+}
 
 .headerImage {
     object-fit: cover;

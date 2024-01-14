@@ -1,0 +1,14 @@
+.container {
+    margin: 2rem;
+
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.container h2, .container h3, .container h4 {
+    margin: 1rem 0;
+}
+.container p, .container li {
+    margin: 0.5rem;
+}
