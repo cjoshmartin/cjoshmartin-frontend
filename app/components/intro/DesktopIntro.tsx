@@ -63,19 +63,14 @@ function ClickableLink(props: ClickableLinkProps) {
 export default function DesktopIntro(props: DesktopIntroProps){
 
     let author: AuthorData | undefined = undefined;
-    let authorImage: string | undefined = undefined
-
     if(props?.blog_authors &&  props?.blog_authors.length > 0){
         author = props?.blog_authors[0].author;
     }
 
-    if (author?.image.url) {
-        authorImage = `${URL}${author?.image.url}`;
-    }
     return (
     <div className={styles.intro}>
             <Image 
-               src={authorImage ?? ""} 
+               src={author?.image.url ??  ""} 
                alt={author?.image.title ?? ""}
                width={author?.image.width}
                height={author?.image?.height}

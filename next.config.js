@@ -2,7 +2,8 @@
 const nextConfig = {
     images: {
       domains: [
-        "images.unsplash.com"
+        "images.unsplash.com",
+        "nyc3.digitaloceanspaces.com"
       ],
         remotePatterns: [
           {
