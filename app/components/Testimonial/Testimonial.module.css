@@ -1,0 +1,43 @@
+.container {
+        display: flex;
+        flex-direction: row;
+        align-items: start;
+        padding: 1rem;
+}
+
+.image {
+    width: 208px;
+    height: 160px;
+    margin: 1.5rem 0;
+    font-size: 8px;
+    letter-spacing: -2px;
+    text-wrap: nowrap;
+    padding-top: 1rem;
+}
+
+.contentContainer {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+    margin: 1rem 0;
+    width: 350px;
+}
+
+@media only screen and (max-width: 900px){
+    .container {
+        flex-direction: column;
+       align-items: center; 
+       gap: 1rem;
+    }
+    .image {
+        padding-top: inherit;
+        margin: inherit;
+    }
+    .contentContainer {
+        margin: inherit;
+    }
+}
+
+.testimonialText {
+    min-height: 150px;
+}
