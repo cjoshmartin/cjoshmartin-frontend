@@ -1,6 +1,8 @@
 'use client'
 
 import TypeIt from "typeit-react";
+import { stripHtml } from "string-strip-html";
+
 import styles from './Testimonial.module.css'
 
 
@@ -37,10 +39,12 @@ export default function Testimonial({ testimonial }: TestimonialProps) {
           }}
           className={styles.testimonialText}
         >
-          <p dangerouslySetInnerHTML={{ __html: testimonial.body }} />
+          {stripHtml(testimonial.body).result}
         </TypeIt>
 
-        <div style={{ display: "flex", flexDirection: "row", gap: "0.5rem" }}>
+        <div 
+        className={styles.infoContainer}
+        >
           <h3>
             <a href={testimonial.link} target="blank">
               {testimonial.first_name} {testimonial.last_name}
@@ -48,10 +52,10 @@ export default function Testimonial({ testimonial }: TestimonialProps) {
           </h3>
           {/* eslint-disable-next-line react/jsx-no-comment-textnodes */}
           <h3>//</h3>
-          <h3 style={{ maxWidth: "15rem" }}>{testimonial.relationship}</h3>
+          <h3>{testimonial.job_title}</h3>
           {/* eslint-disable-next-line react/jsx-no-comment-textnodes */}
           <h3>//</h3>
-          <h3>{testimonial.job_title}</h3>
+          <h3 style={{ maxWidth: "15rem", textTransform:'capitalize'}}>{testimonial.relationship}</h3>
         </div>
       </div>
     </div>

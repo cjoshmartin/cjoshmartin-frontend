@@ -17,6 +17,7 @@
     "react-dom": "^18",
     "react-redux": "^9.0.4",
     "react-syntax-highlighter": "^15.5.0",
+    "string-strip-html": "^13.4.5",
     "typeit-react": "^2.7.1"
   },
   "devDependencies": {
