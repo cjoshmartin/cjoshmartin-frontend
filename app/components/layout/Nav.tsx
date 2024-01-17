@@ -24,11 +24,11 @@ export default async function Nav () {
         <header className={styles.header}>
             <nav className={styles.nav} >
             <NavLink link="/" title="Home" />
-            {
+            {/* {
                 pages
                 .filter(({meta}: any) => meta.type == "flex.FlexPage")
                 .map((page :any)  => <NavLink key={page.id} link={`/flex/${page.meta.slug}`} title={page.title} />)
-            } 
+            }  */}
             {
                 count["blog.BlogPage"] > 0 && <NavLink key={"blog"} link={`/blog`} title={"Blog"} />
             }
