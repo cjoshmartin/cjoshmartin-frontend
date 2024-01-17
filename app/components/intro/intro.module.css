@@ -17,8 +17,8 @@
  width: 100%;
 }
 .profileImage{
-  height: auto;
-  width: 20rem;
+  width: auto;
+  height: 35rem;
   border-radius: 1rem;
 }
 
@@ -33,7 +33,7 @@
     align-items: center;
   }
   .profileImage {
-    width: 200px;
+    height: 325px;
     object-fit: cover;
   }
 
