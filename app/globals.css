@@ -21,8 +21,7 @@
 }
 
 html {
-    width: 98vw;
-    margin: 1rem;
+    padding: 1rem;
 }
 
 body{
@@ -33,9 +32,6 @@ body{
     background-color: var(--secondary-color);
     color: var(--font-color);
     font-size: 14px;
-    height: 100%;
-    width: 95vw;
-    margin: 1rem;
 }
 
 a {

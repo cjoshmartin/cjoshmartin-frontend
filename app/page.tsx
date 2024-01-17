@@ -4,6 +4,7 @@ import generateURL from './components/generateURL'
 import { PageTypes } from './PageTypes'
 import Testimonial from './components/Testimonial'
 import PortfolioPreview from './components/PortfolioPreview/PortfolioPreview'
+import PersonalPortfolioPreview from './components/PersonalPortfolioPreview'
 
 interface AuthorImageData {
     url: string,
@@ -64,6 +65,14 @@ export default async function Home() {
       <br />
      <PortfolioPreview /> 
      <br />
+     <PersonalPortfolioPreview />
+     {/* <h2>Experence</h2>
+     <h2>Brands I have worked with</h2>
+     <h2>What do I Do?</h2> */}
+    <br />
+     <h2><a href='https://storage.googleapis.com/images-for-cms/documents/Josh_Martin_-_Resume.pdf'>[ contact@cjoshmartin.com ]</a></h2>
+     <a href='https://storage.googleapis.com/images-for-cms/documents/Josh_Martin_-_Resume.pdf'><h2>[ Download Resume ]</h2></a>
+
     </div>
   );
 }
