@@ -26,6 +26,7 @@ interface AuthorEntryData {
 
 interface DesktopIntroProps {
   blog_authors?: AuthorEntryData[],
+  bio: string,
 }
 
 enum LinkType {
@@ -61,29 +62,35 @@ function ClickableLink(props: ClickableLinkProps) {
 }
 
 export default function DesktopIntro(props: DesktopIntroProps){
+  let author: AuthorData | undefined = undefined;
+  if (props?.blog_authors && props?.blog_authors.length > 0) {
+    author = props?.blog_authors[0].author;
+  }
 
-    let author: AuthorData | undefined = undefined;
-    if(props?.blog_authors &&  props?.blog_authors.length > 0){
-        author = props?.blog_authors[0].author;
-    }
-
-    return (
-    <div className={styles.intro}>
-            <Image 
-               src={author?.image.url ??  ""} 
-               alt={author?.image.title ?? ""}
-               width={author?.image.width}
-               height={author?.image?.height}
-               className={styles.profileImage}
-               priority
-            />
-            <div className={styles.introText}>
-                <h1>{author?.first_name} {author?.last_name}</h1>
-                <h2>{author?.job_title}</h2>
-                <h4>{author?.location}</h4>
-                <ClickableLink link={author?.email ?? "contact@cjoshmartin.com"} type={LinkType.email} />
-                {author?.github && (<ClickableLink link={author?.github}/>)}
-            </div>
-</div>
-    );
+  return (
+      <div className={styles.intro}>
+        <Image
+          src={author?.image.url ?? ""}
+          alt={author?.image.title ?? ""}
+          width={author?.image.width}
+          height={author?.image?.height}
+          className={styles.profileImage}
+          priority
+        />
+        <div className={styles.introText}>
+            <h1>Who I Am?</h1>
+          <h2>
+            {author?.first_name} {author?.last_name}
+          </h2>
+          <h2>{author?.job_title}</h2>
+          <h2>{author?.location}</h2>
+          <ClickableLink
+            link={author?.email ?? "contact@cjoshmartin.com"}
+            type={LinkType.email}
+          />
+          {author?.github && <ClickableLink link={author?.github} />}
+          <div dangerouslySetInnerHTML={{__html: props.bio}}/>
+        </div>
+      </div>
+  );
 }

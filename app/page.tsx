@@ -57,10 +57,10 @@ export default async function Home() {
 
   return (
     <div className={styles.body}>
-
-      <DesktopIntro blog_authors={blog_authors && blog_authors} />
+      <DesktopIntro blog_authors={blog_authors && blog_authors} bio={body}/>
+      <br />
       <Testimonial testimonial={testimonials[randomIntFromInterval(0, testimonials.length - 1)].testimonial} />
-      <div className={styles.bio} dangerouslySetInnerHTML={{ __html: body }} />
+      <br />
     </div>
   );
 }
