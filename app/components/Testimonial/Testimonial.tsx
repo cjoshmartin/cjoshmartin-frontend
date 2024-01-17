@@ -27,35 +27,49 @@ interface TestimonialProps {
 
 export default function Testimonial({ testimonial }: TestimonialProps) {
   return (
-    <div className={styles.container}>
-      <div
-        className={styles.image}
-        dangerouslySetInnerHTML={{ __html: testimonial?.image?.value ?? "" }}
-      />
-      <div className={styles.contentContainer}>
-        <TypeIt
-          options={{
-            speed: 20,
-          }}
-          className={styles.testimonialText}
-        >
-          {stripHtml(testimonial.body).result}
-        </TypeIt>
+    <div 
+      style={{
+        backgroundColor: 'white',
+        color: 'black',
+        padding: "1rem",
+      }}
+    >
+      <h2><u>What People Have To Say: </u></h2>
 
-        <div 
-        className={styles.infoContainer}
-        >
-          <h3>
-            <a href={testimonial.link} target="blank">
-              {testimonial.first_name} {testimonial.last_name}
-            </a>
-          </h3>
-          {/* eslint-disable-next-line react/jsx-no-comment-textnodes */}
-          <h3>//</h3>
-          <h3>{testimonial.job_title}</h3>
-          {/* eslint-disable-next-line react/jsx-no-comment-textnodes */}
-          <h3>//</h3>
-          <h3 style={{ maxWidth: "15rem", textTransform:'capitalize'}}>{testimonial.relationship}</h3>
+      <div className={styles.container}>
+        <div>
+          <div
+            className={styles.image}
+            dangerouslySetInnerHTML={{
+              __html: testimonial?.image?.value ?? "",
+            }}
+          />
+        </div>
+        <div className={styles.contentContainer}>
+          <TypeIt
+            options={{
+              speed: 20,
+            }}
+            className={styles.testimonialText}
+          >
+            {stripHtml(testimonial.body).result}
+          </TypeIt>
+
+          <div className={styles.infoContainer}>
+            <h3>
+              <a href={testimonial.link} target="blank">
+                {testimonial.first_name} {testimonial.last_name}
+              </a>
+            </h3>
+            {/* eslint-disable-next-line react/jsx-no-comment-textnodes */}
+            <h3>//</h3>
+            <h3>{testimonial.job_title}</h3>
+            {/* eslint-disable-next-line react/jsx-no-comment-textnodes */}
+            <h3>//</h3>
+            <h3 style={{ maxWidth: "15rem", textTransform: "capitalize" }}>
+              {testimonial.relationship}
+            </h3>
+          </div>
         </div>
       </div>
     </div>
