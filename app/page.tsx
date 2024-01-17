@@ -3,6 +3,7 @@ import DesktopIntro from './components/intro/DesktopIntro'
 import generateURL from './components/generateURL'
 import { PageTypes } from './PageTypes'
 import Testimonial from './components/Testimonial'
+import PortfolioPreview from './components/PortfolioPreview/PortfolioPreview'
 
 interface AuthorImageData {
     url: string,
@@ -61,6 +62,8 @@ export default async function Home() {
       <br />
       <Testimonial testimonial={testimonials[randomIntFromInterval(0, testimonials.length - 1)].testimonial} />
       <br />
+     <PortfolioPreview /> 
+     <br />
     </div>
   );
 }

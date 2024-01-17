@@ -4,7 +4,7 @@
   font-size: 1rem;
 }
 .bio p {
-  margin: 1rem;
+  /* margin: 1rem; */
 }
 .bio p:last-child {
   display: inline-block;
