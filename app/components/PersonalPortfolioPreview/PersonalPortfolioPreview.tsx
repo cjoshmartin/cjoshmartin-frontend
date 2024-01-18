@@ -3,11 +3,14 @@
 import styles from './PersonalPortfolioPreview.module.css'
 
 import ledHat from '@/public/personal_projects/hat.gif'
-// import nerf_gun from '@/public/personal_projects/nerf_gun.gif'
+import nerf_gun from '@/public/personal_projects/gun.gif'
 import miata_key from '@/public/personal_projects/miata_key.jpg'
-// import power_badge from '@/public/personal_projects/power_badge.gif'
+import power_badge from '@/public/personal_projects/power_badge2.gif'
 
 
+// Gifs have to be smaller then 10Mb is the requirement from the backend.
+// you can create and edit your gifs in photoshop
+/// Clips mostly should be under 2 seconds so that you can get high qulity gifs
 export default function PortfolioPreview(){
     return (
       <div className={styles.container}>
@@ -25,7 +28,7 @@ export default function PortfolioPreview(){
             <div
               className={styles.profileImage}
               style={{
-                // backgroundImage: `url(${nerf_gun.src})`,
+                backgroundImage: `url(${nerf_gun.src})`,
               }}
             />
             <div
@@ -97,7 +100,7 @@ export default function PortfolioPreview(){
             <div
               className={styles.profileImage}
               style={{
-                // backgroundImage: `url(${power_badge.src})`,
+                backgroundImage: `url(${power_badge.src})`,
               }}
             />
             <div
