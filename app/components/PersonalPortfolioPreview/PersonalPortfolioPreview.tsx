@@ -20,22 +20,15 @@ export default function PortfolioPreview(){
         </div>
         <br />
         <div className={styles.profileContainer}>
-          <div
-            style={{
-              width: "200px",
-            }}
-          >
+          <div className={styles.projectContainer}>
             <div
               className={styles.profileImage}
               style={{
                 backgroundImage: `url(${nerf_gun.src})`,
               }}
             />
-            <div
-              style={{
-                padding: "1rem",
-              }}
-            >
+          <div className={styles.projectContainer}>
+
               <h3>Squid Games Nerf Gun</h3>
               <small>Media: Web, and IoT</small>
               <br />
@@ -44,11 +37,7 @@ export default function PortfolioPreview(){
               </small>
             </div>
           </div>
-          <div
-            style={{
-              width: "200px",
-            }}
-          >
+          <div className={styles.projectContainer}>
             <div
               className={styles.profileImage}
               style={{
@@ -68,11 +57,7 @@ export default function PortfolioPreview(){
               </small>
             </div>
           </div>
-          <div
-            style={{
-              width: "200px",
-            }}
-          >
+          <div className={styles.projectContainer}>
             <div
               className={styles.profileImage}
               style={{
@@ -92,11 +77,7 @@ export default function PortfolioPreview(){
               </small>
             </div>
           </div>
-          <div
-            style={{
-              width: "200px",
-            }}
-          >
+          <div className={styles.projectContainer}>
             <div
               className={styles.profileImage}
               style={{

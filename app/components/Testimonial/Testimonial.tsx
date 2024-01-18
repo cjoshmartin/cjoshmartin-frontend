@@ -35,6 +35,7 @@ export default function Testimonial({ testimonial }: TestimonialProps) {
       }}
     >
       <h2><u>What People Have To Say: </u></h2>
+      <br />
 
       <div className={styles.container}>
         <div>
