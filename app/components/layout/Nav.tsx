@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import generateURL from '../generateURL';
 import styles from './layout.module.css';
 
@@ -8,7 +9,7 @@ interface NavLinkProps {
 }
 function NavLink({title, link, external=false}: NavLinkProps ){
     return (
-        <a href={link} target={external? "_blank": undefined} className="nav-link">[ {title} ]</a>
+        <Link href={link} target={external? "_blank": undefined} className="nav-link">[ {title} ]</Link>
     )
 }
 
