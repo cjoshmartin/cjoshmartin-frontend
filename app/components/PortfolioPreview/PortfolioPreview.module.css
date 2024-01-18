@@ -6,20 +6,24 @@
 }
 
 .profileContainer {
-    /* display: grid;
-    gap: 1rem;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); */
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    /* gap: 1rem; */
 
-    display: flex;
+    /* display: flex;
     flex-direction: row;
     gap: 0.5rem 1rem;
-    flex-wrap: wrap;
+    flex-wrap: wrap; */
 
+}
+
+.projectContainer {
+    padding: 1rem;
 }
 
 .profileImage {
     background-color: black;
-    width: 150px;
+    /* width: 150px; */
     height: 150px;
     border: solid white 2px;
 }

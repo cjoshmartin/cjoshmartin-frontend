@@ -6,6 +6,11 @@ import simon from '@/public/preview/simon1.jpg'
 import documentor from '@/public/preview/documentor.jpeg'
 
 
+function ProjectItem(){
+
+}
+
+
 export default function PortfolioPreview(){
     return (
       <div className={styles.container}>
@@ -15,11 +20,7 @@ export default function PortfolioPreview(){
         </div>
         <br />
         <div className={styles.profileContainer}>
-          <div
-            style={{
-              width: "200px",
-            }}
-          >
+          <div className={styles.projectContainer}>
             <div
               className={styles.profileImage}
               style={{
@@ -41,11 +42,7 @@ export default function PortfolioPreview(){
               </small>
             </div>
           </div>
-          <div
-            style={{
-              width: "200px",
-            }}
-          >
+          <div className={styles.projectContainer}>
             <div
               className={styles.profileImage}
               style={{
@@ -67,11 +64,7 @@ export default function PortfolioPreview(){
               </small>
             </div>
           </div>
-          <div
-            style={{
-              width: "200px",
-            }}
-          >
+          <div className={styles.projectContainer}>
             <div
               className={styles.profileImage}
               style={{
@@ -93,11 +86,7 @@ export default function PortfolioPreview(){
               </small>
             </div>
           </div>
-          <div
-            style={{
-              width: "200px",
-            }}
-          >
+          <div className={styles.projectContainer}>
             <div
               className={styles.profileImage}
               style={{
