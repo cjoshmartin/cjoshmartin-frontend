@@ -6,13 +6,6 @@
 .bio p {
   /* margin: 1rem; */
 }
-.bio p:last-child {
-  display: inline-block;
-}
-.bio p:last-child br:last-child {
-  display: none;
-}
-
 .body {
   display: flex;
   flex-direction: column;
