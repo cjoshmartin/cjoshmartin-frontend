@@ -34,7 +34,7 @@ export default function Testimonial({ testimonial }: TestimonialProps) {
         padding: "1rem",
       }}
     >
-      <h2><u>What People Have To Say: </u></h2>
+      <h2 style={{paddingLeft: '1rem'}}>What People Have To Say,</h2>
       <br />
 
       <div className={styles.container}>
