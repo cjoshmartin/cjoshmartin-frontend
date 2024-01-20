@@ -1,4 +1,5 @@
 import styles from './PortfolioPreview.module.css';
+import Image from 'next/image';
 
 export interface ProjectItemProps {
   previewImage: string
@@ -11,6 +12,7 @@ export interface ProjectItemProps {
 
 
 export function ProjectItem(props: ProjectItemProps) {
+  
   const ParentCompoent = ({ children, className }: any) =>
     props.slug ? (
       <a href={`/projects/${props.slug}`}>{children}</a>
@@ -19,11 +21,13 @@ export function ProjectItem(props: ProjectItemProps) {
     );
   return (
     <ParentCompoent className={styles.projectContainer}>
-      <div
+      {/* <div
         className={styles.profileImage}
         style={{
           backgroundImage: `url(${props.previewImage})`,
-        }} />
+        }} /> */}
+
+        <Image src={props.previewImage}  className={styles.profileImage} alt={props.projectName} width={150} height={150}/>
       <div
         style={{
           padding: "1rem",

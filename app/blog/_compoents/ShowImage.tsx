@@ -3,7 +3,7 @@ import Image from 'next/image';
 export default function ShowImage({ url, alt, width, height, className }: any) {
 
     if (url) {
-        return <Image src={url} alt={alt} width={width} height={height}  className={className}/>;
+        return <Image src={url} alt={alt} width={width} height={height} className={className}/>;
     }
 
     return (

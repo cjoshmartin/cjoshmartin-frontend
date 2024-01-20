@@ -8,13 +8,6 @@
 .profileContainer {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    /* gap: 1rem; */
-
-    /* display: flex;
-    flex-direction: row;
-    gap: 0.5rem 1rem;
-    flex-wrap: wrap; */
-
 }
 
 .projectContainer {
@@ -23,16 +16,10 @@
 
 .profileImage {
     background-color: black;
-    /* width: 150px; */
+    width: 100%;
     height: 150px;
     border: solid white 2px;
-}
-
-.profileImage:first-child {
-    background-size: cover;
-    background-color: white;
-    background-repeat: no-repeat;
-    background-position: center;
+    object-fit: cover;
 }
 
 .readMoreClient {
