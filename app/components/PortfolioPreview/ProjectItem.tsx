@@ -1,0 +1,43 @@
+import styles from './PortfolioPreview.module.css';
+
+export interface ProjectItemProps {
+  previewImage: string
+  projectName: string
+  client?: string
+  media: string[]
+  technologies: string[]
+  slug?:string
+}
+
+
+export function ProjectItem(props: ProjectItemProps) {
+  const ParentCompoent = ({ children, className }: any) =>
+    props.slug ? (
+      <a href={`/projects/${props.slug}`}>{children}</a>
+    ) : (
+      <div className={className}>{children} </div>
+    );
+  return (
+    <ParentCompoent className={styles.projectContainer}>
+      <div
+        className={styles.profileImage}
+        style={{
+          backgroundImage: `url(${props.previewImage})`,
+        }} />
+      <div
+        style={{
+          padding: "1rem",
+        }}
+      >
+        <h3>{props.projectName}</h3>
+        <small>{props.client}</small>
+        <br />
+        <small>Medium: {props.media.join(', and ')}</small>
+        <br />
+        <small>
+          <i>Technologies: {props.technologies.join(", ")}</i>
+        </small>
+      </div>
+    </ParentCompoent>
+  );
+}

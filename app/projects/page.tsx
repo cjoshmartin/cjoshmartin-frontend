@@ -5,15 +5,13 @@ import ShowImage from "../blog/_compoents/ShowImage";
 import bad_idea from '@/public/projects_list_items/bad_ideas.png'
 import miata_key from '@/public/personal_projects/miata_key.jpg'
 import Link from 'next/link';
+import generateURL from '../components/generateURL';
+import { PageTypes } from '../PageTypes';
+import { ProjectType } from '../components/PortfolioPreview/ProjectType';
 
-enum ProjectType {
-    PERSONAL,
-    CLIENT 
-}
 
 interface ProjectListingItemProps {
-    type: ProjectType
-    headerImage?: string
+    data: any
 }
 
 
@@ -21,34 +19,37 @@ function generateClassList(classes: string[]){
     return classes.join(" ")
 }
 
-function ProjectListingItem({ type, headerImage }: ProjectListingItemProps) {
-
+function ProjectListingItem({ data }: ProjectListingItemProps) {
+      const {
+        project_type,
+        title,
+        content_image,
+        client,
+        medium,
+        technologies,
+        intro,
+      } = data;
     return (
         <div
           className={generateClassList([
             styles.projectContainer,
-            type === ProjectType.PERSONAL
+            project_type === ProjectType.Personal
               ? styles.personalProjectContainer
               : "",
           ])}
         >
-          <ShowImage width={480} height={320} url={headerImage} />
+          <ShowImage width={480} height={320} url={content_image?.url} />
           <div>
             <div className={styles.projectInfo}>
-              <h2>Bad Ideas (Online Card Game)</h2>
-              <h3 style={{ fontWeight: "400" }}>Client: Design Concentric</h3>
-              <h4>Media: Web</h4>
+              <h2>{title}</h2>
+              {client && <h3 style={{ fontWeight: "400" }}>Client: {client}</h3>}
+              <h4>Medium: {medium?.join(', and ')}</h4>
               <h5>
-                Technologies: Next.js(React.js), Framer Motion, Sanity CMS
+                Technologies: {technologies.join(", ")}
               </h5>
             </div>
             <div>
-              <p>
-                Deploying to Google Cloud Platform (GCP) on Github actions has
-                not been a straight forward process. The blog posts online are
-                incomplete and hard to follow. So, hopefully I can help a little
-                bit with what I found to make it easy to deploy this...
-              </p>
+              <p>{intro}</p>
               <Link href='/projects/fake-project'
                 style={{ color: 'black', padding: '1rem' }}
               >Read More...</Link>
@@ -58,15 +59,82 @@ function ProjectListingItem({ type, headerImage }: ProjectListingItemProps) {
     );
 }
 
-export default function Page() {
 
+async function getResults(){
+  return fetch(generateURL("/api/pages"))
+    .then((response) => response.json())
+    .then((dataset) => { 
+      const homePageData = dataset.filter(
+        ({ meta }: any) => meta.type === PageTypes.PROJECT 
+      );
+      const counts = homePageData.reduce((acc: any, {project_type, medium, technologies} : any) => {
+
+        medium.forEach((m: string) =>{
+          const name = m.trim();
+          if(!acc['medium'][name]){
+             acc['medium'][name] = 1;
+          }
+          else{
+            acc['medium'][name] +=1;
+          }
+        })
+
+        technologies.forEach((t: string) =>{
+          const name = t.trim();
+          if(!acc['technologies'][name]){
+             acc['technologies'][name] = 1;
+          }
+          else{
+            acc['technologies'][name] +=1;
+          }
+        })
+
+        if(!acc["project_type"][project_type]){
+          acc["project_type"][project_type] = 1;
+        }
+        else {
+          acc["project_type"][project_type] += 1;
+        }
+
+        return acc;
+      }, {medium: {}, technologies: {}, project_type: {}})
+      return {homePageData, counts}
+    })
+}
+
+function Tags({title, tags }: any) {
+  const sortedTags = Object.keys(tags)
+            .sort((a: string,b: string) => {
+
+              return tags[b]- tags[a];
+            });
+
+    sortedTags.length = Math.min(sortedTags.length, 10);
+  return (
+        <div className={styles.mediaContainer}>
+          <h3>{title}:</h3>
+          <div className={styles.mediaLinkContainer}>
+            {sortedTags
+            .map((key) => (
+              <a href="#" key={key}>
+                {key}({tags[key]})
+              </a>
+            ))}
+          </div>
+        </div>
+  )
+}
+
+export default async function Page() {
+    const {homePageData, counts} = await getResults();
+    const {project_type, medium, technologies} = counts;
     return (
       <div className={styles.container}>
         <h1>(All) Project Page</h1>
         <div className={styles.buttonGroup}>
-          <button>All (10) Projects</button>
-          <button>Client (6) Projects</button>
-          <button>Personal (4) Projects</button>
+          <button>All ({project_type[ProjectType.Client] + project_type[ProjectType.Personal]}) Projects</button>
+          <button>Client ({project_type[ProjectType.Client]}) Projects</button>
+          <button>Personal ({project_type[ProjectType.Personal]}) Projects</button>
         </div>
         {/* <input
           type="text"
@@ -74,31 +142,17 @@ export default function Page() {
           autoComplete="search"
           placeholder="search projects"
         /> */}
-        <div className={styles.mediaContainer}>
-          <h3>Media:</h3>
-            <div className={styles.mediaLinkContainer}>
-               <a href='#'>Web(5)</a>
-               <a href='#'>IoT(2)</a>
-               <a href='#'>Mobile(3)</a>
-               <a href='#'>3D Printing(2)</a>
-               <a href='#'>CAD(1)</a>
-               <a href='#'>Circuit Board Design(1)</a>
-            </div>
-        </div>
-        <div className={styles.mediaContainer}>
-            <h3>Technologies: </h3>
-            <div className={styles.techLinkContainer}>
-               <a href='#'>ReactJS(5)</a>
-               <a href='#'>Framer Motion(2)</a>
-               <a href='#'>Sanity CMS(3)</a>
-               <a href='#'>Arduino(2)</a>
-               <a href='#'>Redux(1)</a>
-               <a href='#'>UI Kitten(1)</a>
-            </div>
-        </div>
+        <Tags title="Medium" tags={medium}/>
+        <Tags title="Technologies" tags={technologies} />
         <div className={styles.listItems}>
-          <ProjectListingItem type={ProjectType.CLIENT}  headerImage={bad_idea.src}/>
-          <ProjectListingItem type={ProjectType.PERSONAL} headerImage={miata_key.src}/>
+          {
+            homePageData.map((project: any)=> (
+              <ProjectListingItem
+                data={project}
+                key={project.title}
+              />
+            ))
+          }
         </div>
       </div>
     );
