@@ -1,73 +1,86 @@
-import styles from './projects.module.css'
-
-import ShowImage from "../blog/_compoents/ShowImage";
-
-import bad_idea from '@/public/projects_list_items/bad_ideas.png'
-import miata_key from '@/public/personal_projects/miata_key.jpg'
-import Link from 'next/link';
 import generateURL from '../components/generateURL';
-import { PageTypes } from '../PageTypes';
 import { ProjectType } from '../components/PortfolioPreview/ProjectType';
+import { PageTypes } from '../PageTypes';
+import ProjectListingItem from './__components/ProjectListingItem';
+import Tags from './__components/Tags';
+import styles from './projects.module.css'
+import Link from 'next/link';
 
-
-interface ProjectListingItemProps {
-    data: any
-}
-
-
-function generateClassList(classes: string[]){
-    return classes.join(" ")
-}
-
-function ProjectListingItem({ data }: ProjectListingItemProps) {
-      const {
-        project_type,
-        title,
-        content_image,
-        client,
-        medium,
-        technologies,
-        intro,
-      } = data;
-    return (
-        <div
-          className={generateClassList([
-            styles.projectContainer,
-            project_type === ProjectType.Personal
-              ? styles.personalProjectContainer
-              : "",
-          ])}
-        >
-          <ShowImage width={480} height={320} url={content_image?.url} />
-          <div>
-            <div className={styles.projectInfo}>
-              <h2>{title}</h2>
-              {client && <h3 style={{ fontWeight: "400" }}>Client: {client}</h3>}
-              <h4>Medium: {medium?.join(', and ')}</h4>
-              <h5>
-                Technologies: {technologies.join(", ")}
-              </h5>
-            </div>
-            <div>
-              <p>{intro}</p>
-              <Link href='/projects/fake-project'
-                style={{ color: 'black', padding: '1rem' }}
-              >Read More...</Link>
-            </div>
-          </div>
-        </div>
-    );
-}
-
+/*
+  three query parameters:
+  1) type of clients
+    * all
+    * profrontal 
+    * personal
+  2) Medium
+    can all select one medium at a time
+  3) Techologies
+    can all select one techologies at a time 
+*/
 
 async function getResults(){
   return fetch(generateURL("/api/pages"))
     .then((response) => response.json())
     .then((dataset) => { 
-      const homePageData = dataset.filter(
+      return dataset.filter(
         ({ meta }: any) => meta.type === PageTypes.PROJECT 
-      );
-      const counts = homePageData.reduce((acc: any, {project_type, medium, technologies} : any) => {
+      ) 
+    })
+}
+
+export default async function Page({searchParams}: any) {
+    const homePageData = await getResults();
+
+      const projectTypeCounts = homePageData.reduce((acc: any, {project_type}: any) => {
+        if(!acc[project_type]){
+          acc[project_type] = 1;
+        }
+        else {
+          acc[project_type] += 1;
+        }
+
+        return acc;
+      }, {})
+
+
+      const filteredData = homePageData
+            .reduce((acc: any, project: any) => {
+              const { medium, technologies, project_type } = project;
+              if (!searchParams || Object.keys(searchParams).length < 1) {
+                acc.push(project);
+                return acc;
+              }
+
+              let shouldPush = false;
+
+              if (
+                !!searchParams?.project_type &&
+                project_type === searchParams?.project_type
+              ) {
+                shouldPush = true;
+              }
+
+              if (
+                !!searchParams?.medium &&
+                medium.includes(searchParams?.medium)
+              ) {
+                shouldPush = true;
+              }
+              if (
+                !!searchParams?.technologies &&
+                technologies.includes(searchParams?.technologies)
+              ) {
+                shouldPush = true;
+              }
+
+              if (shouldPush) {
+                acc.push(project);
+              }
+
+              return acc;
+            }, [])
+      
+      const counts = filteredData.reduce((acc: any, {medium, technologies} : any) => {
 
         medium.forEach((m: string) =>{
           const name = m.trim();
@@ -89,70 +102,66 @@ async function getResults(){
           }
         })
 
-        if(!acc["project_type"][project_type]){
-          acc["project_type"][project_type] = 1;
-        }
-        else {
-          acc["project_type"][project_type] += 1;
-        }
-
         return acc;
-      }, {medium: {}, technologies: {}, project_type: {}})
-      return {homePageData, counts}
-    })
-}
+      }, {medium: {}, technologies: {}})
 
-function Tags({title, tags }: any) {
-  const sortedTags = Object.keys(tags)
-            .sort((a: string,b: string) => {
+    const {medium, technologies} = counts;
 
-              return tags[b]- tags[a];
-            });
+    const ProjectLookUpText = {
+      [ProjectType.Personal]: 'Personal',
+      [ProjectType.Client]: 'Client',
+    }
 
-    sortedTags.length = Math.min(sortedTags.length, 10);
-  return (
-        <div className={styles.mediaContainer}>
-          <h3>{title}:</h3>
-          <div className={styles.mediaLinkContainer}>
-            {sortedTags
-            .map((key) => (
-              <a href="#" key={key}>
-                {key}({tags[key]})
-              </a>
-            ))}
-          </div>
-        </div>
-  )
-}
 
-export default async function Page() {
-    const {homePageData, counts} = await getResults();
-    const {project_type, medium, technologies} = counts;
     return (
       <div className={styles.container}>
-        <h1>(All) Project Page</h1>
+        <h1>
+
+          ({searchParams?.project_type ? 
+          // @ts-ignore
+          ProjectLookUpText[searchParams?.project_type] : "All"})
+          Projects
+        </h1>
         <div className={styles.buttonGroup}>
-          <button>All ({project_type[ProjectType.Client] + project_type[ProjectType.Personal]}) Projects</button>
-          <button>Client ({project_type[ProjectType.Client]}) Projects</button>
-          <button>Personal ({project_type[ProjectType.Personal]}) Projects</button>
+          <Link
+            href={{
+              pathname: "/projects",
+              query: { ...searchParams, project_type: undefined },
+            }}
+          >
+            All (
+            {projectTypeCounts[ProjectType.Client] +
+             projectTypeCounts[ProjectType.Personal]}
+            ) Projects
+          </Link>
+          <Link
+            href={{
+              pathname: "/projects",
+              query: { ...searchParams, project_type: ProjectType.Client },
+            }}
+          >
+            Client ({projectTypeCounts[ProjectType.Client]}) Projects
+          </Link>
+          <Link
+            href={{
+              pathname: "/projects",
+              query: { ...searchParams, project_type: ProjectType.Personal },
+            }}
+          >
+            Personal ({projectTypeCounts[ProjectType.Personal]}) Projects
+          </Link>
         </div>
-        {/* <input
-          type="text"
-          className={styles.searchBox}
-          autoComplete="search"
-          placeholder="search projects"
-        /> */}
-        <Tags title="Medium" tags={medium}/>
-        <Tags title="Technologies" tags={technologies} />
+        <Tags title="Medium" tags={medium} searchParams={searchParams} />
+        <Tags
+          title="Technologies"
+          tags={technologies}
+          searchParams={searchParams}
+        />
         <div className={styles.listItems}>
-          {
-            homePageData.map((project: any)=> (
-              <ProjectListingItem
-                data={project}
-                key={project.title}
-              />
-            ))
-          }
+          {filteredData
+            .map((project: any) => (
+              <ProjectListingItem data={project} key={project.title} />
+            ))}
         </div>
       </div>
     );

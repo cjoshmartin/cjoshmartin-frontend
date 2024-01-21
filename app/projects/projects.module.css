@@ -9,19 +9,19 @@
     gap: 1rem;
 }
 
-.buttonGroup button {
+.buttonGroup a {
     padding: 1rem;
     border-radius: 1rem;
     font-weight: 700;
 }
 
-.buttonGroup button:first-child {
+.buttonGroup a:first-child {
     background-color: black;
     color: white;
 }
 
 
-.buttonGroup button:nth-child(2) {
+.buttonGroup a:nth-child(2) {
     background-color: var(--primary-color);
     color: var(--secondary-color);
 }
