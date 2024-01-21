@@ -130,8 +130,7 @@ export default async function Page({searchParams}: any) {
             <Link href="/projects" className={styles.clearFiltersLink}>
               <FontAwesomeIcon
                 icon={faCircleXmark}
-                className="fas fa-check"
-                style={{ color: "green", fontSize: 28 }}
+                className={styles.clearFiltersIcon}
               />
               Clear Filters
             </Link>

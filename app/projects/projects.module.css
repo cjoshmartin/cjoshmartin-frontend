@@ -18,6 +18,11 @@
     padding: 1rem;
 
     background-color: var(--third-color);
+    color: black !important;
+}
+
+.clearFiltersIcon{
+    font-size: 2rem;
 }
 
 .activeTagLink {
