@@ -18,6 +18,8 @@ export default function Tags({ title, tags, searchParams }: any) {
     });
 
   sortedTags.length = Math.min(sortedTags.length, 10);
+  const searchKey = title.toLowerCase();
+
   return (
     <div className={styles.mediaContainer}>
       <h3>{title}:</h3>
@@ -25,18 +27,25 @@ export default function Tags({ title, tags, searchParams }: any) {
         <Link
           href={{
             pathname: "/projects",
-            query: removeKey(searchParams, title.toLowerCase()),
+            query: removeKey(searchParams, searchKey),
           }}
+          className={
+            !searchParams[searchKey] ? styles.activeTagLink : undefined
+          }
         >
-         All 
+          All
         </Link>
         {sortedTags.map((key) => (
           <Link
             href={{
               pathname: "/projects",
-              query: { ...searchParams, [title.toLowerCase()]: key },
+              query: { ...searchParams, [searchKey]: key },
             }}
             key={key}
+
+          className={
+            searchParams[searchKey] === key ? styles.activeTagLink : undefined
+          }
           >
             {key}({tags[key]})
           </Link>

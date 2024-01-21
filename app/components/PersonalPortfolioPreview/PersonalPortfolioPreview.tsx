@@ -52,7 +52,7 @@ export default async function PortfolioPreview(){
             display: 'flex'
           }}
         >
-          <a className={styles.readMoreClient} href='/projects'>See More (Personal) Projects</a>
+          <a className={styles.readMoreClient} href='/projects?project_type=PER'>See More (Personal) Projects</a>
         </div>
       </div>
     );

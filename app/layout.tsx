@@ -7,6 +7,11 @@ import StoreProvider from './StoreProvider';
 
 import styles from './layout.module.css'
 
+import "@fortawesome/fontawesome-svg-core/styles.css";
+import { config } from "@fortawesome/fontawesome-svg-core";
+config.autoAddCss = false;
+
+
 const inter = IBM_Plex_Mono({ subsets: ['latin'], weight: ["100","200","300",'400',"500","600","700"] })
 
 export const metadata: Metadata = {

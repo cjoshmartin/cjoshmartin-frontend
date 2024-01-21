@@ -1,3 +1,4 @@
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import generateURL from '../components/generateURL';
 import { ProjectType } from '../components/PortfolioPreview/ProjectType';
 import { PageTypes } from '../PageTypes';
@@ -5,6 +6,7 @@ import ProjectListingItem from './__components/ProjectListingItem';
 import Tags from './__components/Tags';
 import styles from './projects.module.css'
 import Link from 'next/link';
+import { faCircleXmark } from '@fortawesome/free-solid-svg-icons';
 
 /*
   three query parameters:
@@ -115,53 +117,66 @@ export default async function Page({searchParams}: any) {
 
     return (
       <div className={styles.container}>
-        <h1>
-
-          ({searchParams?.project_type ? 
-          // @ts-ignore
-          ProjectLookUpText[searchParams?.project_type] : "All"})
-          Projects
-        </h1>
-        <div className={styles.buttonGroup}>
-          <Link
-            href={{
-              pathname: "/projects",
-              query: { ...searchParams, project_type: undefined },
-            }}
-          >
-            All (
-            {projectTypeCounts[ProjectType.Client] +
-             projectTypeCounts[ProjectType.Personal]}
+        <div className={styles.filterContainer}>
+          <h1>
+            (
+            {searchParams?.project_type
+              ? // @ts-ignore
+                ProjectLookUpText[searchParams?.project_type]
+              : "All"}
             ) Projects
-          </Link>
-          <Link
-            href={{
-              pathname: "/projects",
-              query: { ...searchParams, project_type: ProjectType.Client },
-            }}
-          >
-            Client ({projectTypeCounts[ProjectType.Client]}) Projects
-          </Link>
-          <Link
-            href={{
-              pathname: "/projects",
-              query: { ...searchParams, project_type: ProjectType.Personal },
-            }}
-          >
-            Personal ({projectTypeCounts[ProjectType.Personal]}) Projects
-          </Link>
+          </h1>
+          { !!searchParams && Object.keys(searchParams).length > 0 && (
+            <Link href="/projects" className={styles.clearFiltersLink}>
+              <FontAwesomeIcon
+                icon={faCircleXmark}
+                className="fas fa-check"
+                style={{ color: "green", fontSize: 28 }}
+              />
+              Clear Filters
+            </Link>
+          )
+          }
+          <div className={styles.buttonGroup}>
+            <Link
+              href={{
+                pathname: "/projects",
+                query: { ...searchParams, project_type: undefined },
+              }}
+            >
+              All (
+              {projectTypeCounts[ProjectType.Client] +
+                projectTypeCounts[ProjectType.Personal]}
+              ) Projects
+            </Link>
+            <Link
+              href={{
+                pathname: "/projects",
+                query: { ...searchParams, project_type: ProjectType.Client },
+              }}
+            >
+              Client ({projectTypeCounts[ProjectType.Client]}) Projects
+            </Link>
+            <Link
+              href={{
+                pathname: "/projects",
+                query: { ...searchParams, project_type: ProjectType.Personal },
+              }}
+            >
+              Personal ({projectTypeCounts[ProjectType.Personal]}) Projects
+            </Link>
+          </div>
+          <Tags title="Medium" tags={medium} searchParams={searchParams} />
+          <Tags
+            title="Technologies"
+            tags={technologies}
+            searchParams={searchParams}
+          />
         </div>
-        <Tags title="Medium" tags={medium} searchParams={searchParams} />
-        <Tags
-          title="Technologies"
-          tags={technologies}
-          searchParams={searchParams}
-        />
         <div className={styles.listItems}>
-          {filteredData
-            .map((project: any) => (
-              <ProjectListingItem data={project} key={project.title} />
-            ))}
+          {filteredData.map((project: any) => (
+            <ProjectListingItem data={project} key={project.title} />
+          ))}
         </div>
       </div>
     );

@@ -21,7 +21,7 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
           : "",
       ])}
     >
-      <ShowImage width={480} height={320} url={content_image?.url} alt={title}/>
+      <ShowImage width={480} height={320} url={content_image?.url} alt={title} className={styles.projectImage}/>
       <div>
         <div className={styles.projectInfo}>
           <h2>{title}</h2>
