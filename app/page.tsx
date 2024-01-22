@@ -61,7 +61,9 @@ export default async function Home() {
     <div className={styles.body}>
       <DesktopIntro blog_authors={blog_authors && blog_authors} bio={body}/>
       <br />
-      <Testimonial testimonial={testimonials[randomIntFromInterval(0, testimonials.length - 1)].testimonial} />
+      <Testimonial 
+      title='What People Have To Say,'
+      testimonial={testimonials[randomIntFromInterval(0, testimonials.length - 1)].testimonial} />
       <br />
      <PortfolioPreview /> 
      <br />

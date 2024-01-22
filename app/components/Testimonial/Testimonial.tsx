@@ -23,19 +23,24 @@ interface TestimonialObject {
 
 interface TestimonialProps {
   testimonial: TestimonialObject;
+  title?: string
 }
 
-export default function Testimonial({ testimonial }: TestimonialProps) {
+export default function Testimonial({ testimonial, title }: TestimonialProps) {
   return (
-    <div 
+    <div
       style={{
-        backgroundColor: 'white',
-        color: 'black',
+        backgroundColor: "white",
+        color: "black",
         padding: "1rem",
       }}
     >
-      <h2 style={{paddingLeft: '1rem'}}>What People Have To Say,</h2>
-      <br />
+      {title && (
+        <>
+          <h2 style={{ paddingLeft: "1rem" }}>{title}</h2>
+          <br />
+        </>
+      )}
 
       <div className={styles.container}>
         <div>

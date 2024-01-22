@@ -10,7 +10,7 @@ interface ProjectListingItemProps {
 
 export default function ProjectListingItem({ data }: ProjectListingItemProps) {
   const {
-    project_type, title, content_image, client, medium, technologies, intro,
+    project_type, title, content_image, client, medium, technologies, intro, meta
   } = data;
   return (
     <div
@@ -21,19 +21,19 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
           : "",
       ])}
     >
-      <ShowImage width={480} height={320} url={content_image?.url} alt={title} className={styles.projectImage}/>
+      <ShowImage width={ content_image?.width ?? 480} height={ content_image?.height ?? 320} url={content_image?.url} alt={title} className={styles.projectImage}/>
       <div>
         <div className={styles.projectInfo}>
           <h2>{title}</h2>
           {client && <h3 style={{ fontWeight: "400" }}>Client: {client}</h3>}
           <h4>Medium: {medium?.join(', and ')}</h4>
           <h5>
-            Technologies: {technologies.join(", ")}
+          Technologies: {technologies.join(", ")}
           </h5>
         </div>
         <div>
           <p>{intro}</p>
-          <Link href='/projects/fake-project'
+          <Link href={`/projects/${meta.slug}`}
             style={{ color: 'black', padding: '1rem' }}
           >Read More...</Link>
         </div>
