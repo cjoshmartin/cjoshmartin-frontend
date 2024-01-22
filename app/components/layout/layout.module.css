@@ -1,6 +1,4 @@
 .header{
-    /* margin-top: 1rem; */
-    /* margin: 1rem; */
     font-size: 1rem;
 }
 
@@ -9,10 +7,16 @@
     justify-content: center;
     gap: 12px;
     flex-wrap: wrap;
+    align-items: center;
+}
+
+/* active link */
+.activeLink {
+    background-color: var(--primary-color);
+    padding: 0.5rem;
 }
 
 .footer {
-    /* position: absolute; */
     bottom: 0;
     width: 100%;
     margin: 1rem;

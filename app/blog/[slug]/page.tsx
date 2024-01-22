@@ -5,6 +5,7 @@ import styles from './blogpost.module.css'
 import moment from "moment"
 import HtmlGenerator from "@/app/components/HtmlGenerator"
 import Link from "next/link"
+import Comments from "./Comments"
 
 async function getPage(slug: string){
     const url = generateURL(`/api/pages/get-page-from-slug?query=${slug}`)
@@ -13,7 +14,7 @@ async function getPage(slug: string){
 }
 
 export default async function Page({ params }: { params: { slug: string } }){
-    const {title, body, date} = await getPage(params.slug);
+    const {title, body, date, id} = await getPage(params.slug);
     return (
       <div className={styles.container}>
         <Link href="/blog">
@@ -24,8 +25,11 @@ export default async function Page({ params }: { params: { slug: string } }){
           <h2>{title}</h2>
           <small>{moment(date).format("MMMM DD, YYYY")}</small>
           <div className={styles.content}>
-            <HtmlGenerator body={body}/>
+            <HtmlGenerator body={body} />
           </div>
+
+
+          <Comments slug={params.slug} id={id} title={title} />
         </div>
       </div>
     );

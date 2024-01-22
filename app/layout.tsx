@@ -3,12 +3,12 @@ import { IBM_Plex_Mono } from 'next/font/google'
 import './globals.css'
 import Nav from './components/layout/Nav';
 import Footer from './components/layout/Footer';
-import StoreProvider from './StoreProvider';
 
 import styles from './layout.module.css'
 
 import "@fortawesome/fontawesome-svg-core/styles.css";
 import { config } from "@fortawesome/fontawesome-svg-core";
+import generateURL from './components/generateURL';
 config.autoAddCss = false;
 
 
@@ -19,24 +19,27 @@ export const metadata: Metadata = {
   description: 'Freelancer Josh Martin\'s website',
 }
 
-export default function RootLayout({
+async function getNav(){
+    return fetch(generateURL('/api/pages/count'))
+    .then((respone) => respone.json())
+}
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+    const {count} = await getNav();
   return (
-    <StoreProvider>
       <html lang="en">
         <body className={inter.className}>
           <div className={styles.bodyContent}>
             <div className={styles.innerBodyContent}>
-              <Nav />
+              <Nav  count={count}/>
               {children}
             </div>
             <Footer />
           </div>
         </body>
       </html>
-    </StoreProvider>
   );
 }

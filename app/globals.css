@@ -52,3 +52,12 @@ img.richtext-image.full-width {
 li, ul {
     padding-left: 1rem;
 }
+
+.responsive-object {
+    padding-bottom: 0 !important;
+}
+
+code {
+    color: #008000;
+    background-color: #ffffff;
+}
