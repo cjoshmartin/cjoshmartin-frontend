@@ -5,6 +5,7 @@ import { PageTypes } from './PageTypes'
 import Testimonial from './components/Testimonial'
 import PortfolioPreview from './components/PortfolioPreview/PortfolioPreview'
 import PersonalPortfolioPreview from './components/PersonalPortfolioPreview'
+import { RandomIntFromInterval } from './randomIntFromInterval'
 
 interface AuthorImageData {
     url: string,
@@ -30,10 +31,6 @@ interface HomePageData {
   blog_authors: AuthorEntryData[],
   body: string,
   testimonials: any[]
-}
-
-function randomIntFromInterval(min: number, max: number) { // min and max included 
-  return Math.floor(Math.random() * (max - min + 1) + min)
 }
 
 async function getHomePageData(): Promise<HomePageData> {
@@ -62,7 +59,9 @@ export default async function Home() {
       <DesktopIntro blog_authors={blog_authors && blog_authors} bio={body}/>
       <Testimonial 
       title='What People Have To Say,'
-      testimonial={testimonials[randomIntFromInterval(0, testimonials.length - 1)].testimonial} />
+      testimonial={testimonials[RandomIntFromInterval(0, testimonials.length - 1)].testimonial} 
+      all={testimonials}
+      />
      <PortfolioPreview /> 
      <PersonalPortfolioPreview />
      {/* <h2>Experence</h2>

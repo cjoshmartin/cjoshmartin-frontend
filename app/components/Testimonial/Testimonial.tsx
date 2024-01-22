@@ -4,6 +4,11 @@ import TypeIt from "typeit-react";
 import { stripHtml } from "string-strip-html";
 
 import styles from './Testimonial.module.css'
+import { faRotateRight } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { useEffect, useState } from "react";
+import { RandomIntFromInterval } from "@/app/randomIntFromInterval";
+import { motion } from "framer-motion";
 
 
 interface TestimonialImage {
@@ -21,12 +26,36 @@ interface TestimonialObject {
   body: string;
 }
 
-interface TestimonialProps {
-  testimonial: TestimonialObject;
-  title?: string
+interface FromAPI {
+ testimonial: TestimonialObject
 }
 
-export default function Testimonial({ testimonial, title }: TestimonialProps) {
+interface TestimonialProps {
+  testimonial: TestimonialObject;
+  title?: string,
+  all?: FromAPI[]
+}
+
+export default function Testimonial({ testimonial, title, all }: TestimonialProps) {
+  const [test , setTest] = useState<TestimonialObject>(testimonial);
+  // const [copyText, setCopyText] = useState<any | null>(null);
+
+  // useEffect(() => {
+  //   const comp = (
+  //     <TypeIt
+  //       options={{
+  //         speed: 20,
+  //       }}
+  //       className={styles.testimonialText}
+  //     >
+  //       {stripHtml(test.body).result}
+  //     </TypeIt>
+  //   );
+  //   setCopyText(comp);
+  //   console.log("firing!!!")
+  //   console.log(test.body)
+  // }, [test])
+
   return (
     <div
       style={{
@@ -43,42 +72,57 @@ export default function Testimonial({ testimonial, title }: TestimonialProps) {
         </>
       )}
 
-      <div className={styles.container}>
+      <motion.div
+        className={styles.container}
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ ease: "easeOut", duration: 0.5 }}
+        exit={{ opacity: 0, y: 20 }}
+        key={test.job_title}
+      >
         <div>
           <div
             className={styles.image}
             dangerouslySetInnerHTML={{
-              __html: testimonial?.image?.value ?? "",
+              __html: test?.image?.value ?? "",
             }}
           />
         </div>
         <div className={styles.contentContainer}>
-          <TypeIt
-            options={{
-              speed: 20,
-            }}
-            className={styles.testimonialText}
-          >
-            {stripHtml(testimonial.body).result}
-          </TypeIt>
-
+          {stripHtml(test.body).result}
           <div className={styles.infoContainer}>
             <h3>
-              <a href={testimonial.link} target="blank">
-                {testimonial.first_name} {testimonial.last_name}
+              <a href={test.link} target="blank">
+                {test.first_name} {test.last_name}
               </a>
             </h3>
             {/* eslint-disable-next-line react/jsx-no-comment-textnodes */}
             <h3>//</h3>
-            <h3>{testimonial.job_title}</h3>
+            <h3>{test.job_title}</h3>
             {/* eslint-disable-next-line react/jsx-no-comment-textnodes */}
             <h3>//</h3>
             <h3 style={{ maxWidth: "15rem", textTransform: "capitalize" }}>
-              {testimonial.relationship}
+              {test.relationship}
             </h3>
           </div>
         </div>
-      </div>
+      </motion.div>
+      {!!all && (
+        <div className={styles.testimonialButtonContainer}>
+          <motion.button
+            className={styles.testimonialButton}
+            // @ts-ignore
+            onClick={() =>
+              setTest(all[RandomIntFromInterval(0, all.length - 1)].testimonial)
+            }
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.9 }}
+          >
+            <FontAwesomeIcon icon={faRotateRight} />
+            Get a different testimonial
+          </motion.button>
+        </div>
+      )}
     </div>
   );
 }

@@ -78,3 +78,30 @@
         width: auto;
     }
 }
+
+.testimonialButtonContainer {
+    width: auto;
+    display: block;
+    padding: initial;
+}
+
+.testimonialButton {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+
+    padding: 0.5rem;
+    gap: 0.7rem;
+    border: 1px solid;
+    border-radius: 1rem;
+}
+
+@media only screen and (max-width: 900px){
+
+.testimonialButtonContainer {
+    display: flex;
+    flex-direction: row;
+    padding-top: 1rem;
+    justify-content: center;
+}
+}
