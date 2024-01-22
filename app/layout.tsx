@@ -9,6 +9,7 @@ import styles from './layout.module.css'
 import "@fortawesome/fontawesome-svg-core/styles.css";
 import { config } from "@fortawesome/fontawesome-svg-core";
 import generateURL from './components/generateURL';
+import AnimationContainer from './components/layout/AnimationContainer';
 config.autoAddCss = false;
 
 
@@ -30,16 +31,18 @@ export default async function RootLayout({
 }) {
     const {count} = await getNav();
   return (
-      <html lang="en">
-        <body className={inter.className}>
-          <div className={styles.bodyContent}>
-            <div className={styles.innerBodyContent}>
-              <Nav  count={count}/>
+    <html lang="en">
+      <body className={inter.className}>
+        <div className={styles.bodyContent}>
+          <div className={styles.innerBodyContent}>
+            <Nav count={count} />
+            <AnimationContainer>
               {children}
-            </div>
-            <Footer />
+              <Footer />
+            </AnimationContainer>
           </div>
-        </body>
-      </html>
+        </div>
+      </body>
+    </html>
   );
 }

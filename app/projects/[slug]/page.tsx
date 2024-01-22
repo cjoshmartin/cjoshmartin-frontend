@@ -21,8 +21,8 @@ export default async function Page({ params }: { params: { slug: string } }){
           <u>{"<<< Go back"}</u>
         </Link>
         <ShowImage
-          width={content_image.width}
-          height={content_image.height}
+          width={content_image?.width ?? 770}
+          height={content_image?.height ?? 360}
           url={content_image.url}
           className={styles.headerImage}
         />

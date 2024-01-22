@@ -1,6 +1,8 @@
+'use client'
+
 import Image from 'next/image'
 import styles from './intro.module.css'
-import URL from '../defaulturl';
+import { motion } from 'framer-motion'
 
 interface AuthorImageData {
     url: string,
@@ -69,13 +71,15 @@ export default function DesktopIntro(props: DesktopIntroProps){
 
   return (
       <div className={styles.intro}>
-        <Image
+        <motion.img
           src={author?.image.url ?? ""}
           alt={author?.image.title ?? ""}
           width={author?.image.width}
           height={author?.image?.height}
           className={styles.profileImage}
-          priority
+           initial={{opacity: 0, x: 20 }} 
+           animate={{opacity: 1, x: 0, transition: {delay: 0.3}}} 
+           exit={{opacity: 0, x: 20}} 
         />
         <div className={styles.introText}>
             <h1>Who I Am?</h1>

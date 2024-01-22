@@ -5,6 +5,7 @@ import styles from './layout.module.css';
 import { PageTypes } from '@/app/PageTypes';
 import { usePathname } from 'next/navigation';
 import { generateClassList } from '@/app/projects/__components/generateClassList';
+import { motion } from 'framer-motion';
 
 interface NavLinkProps {
     title: string,
@@ -34,7 +35,11 @@ export default function Nav (props: any) {
 
     return (
       <header className={styles.header}>
-        <nav className={styles.nav}>
+        <motion.nav 
+        className={styles.nav}
+           initial={{opacity: 0, y: -20}} 
+           animate={{opacity: 1, y: 0}} 
+        >
           <NavLink link="/" title="Home" isActive={pathName === "/"} />
           {/* {
                 pages
@@ -54,7 +59,7 @@ export default function Nav (props: any) {
               isActive={pathName.includes("blog")}
             />
           )}
-        </nav>
+        </motion.nav>
       </header>
     );
 }
