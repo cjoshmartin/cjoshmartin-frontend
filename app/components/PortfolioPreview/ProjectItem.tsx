@@ -15,17 +15,12 @@ export function ProjectItem(props: ProjectItemProps) {
   
   const ParentCompoent = ({ children, className }: any) =>
     props.slug ? (
-      <a href={`/projects/${props.slug}`}>{children}</a>
+      <a href={`/projects/${props.slug}`} className={className}>{children}</a>
     ) : (
       <div className={className}>{children} </div>
     );
   return (
     <ParentCompoent className={styles.projectContainer}>
-      {/* <div
-        className={styles.profileImage}
-        style={{
-          backgroundImage: `url(${props.previewImage})`,
-        }} /> */}
 
         <Image src={props.previewImage}  className={styles.profileImage} alt={props.projectName} width={150} height={150}/>
       <div

@@ -60,18 +60,14 @@ export default async function Home() {
   return (
     <div className={styles.body}>
       <DesktopIntro blog_authors={blog_authors && blog_authors} bio={body}/>
-      <br />
       <Testimonial 
       title='What People Have To Say,'
       testimonial={testimonials[randomIntFromInterval(0, testimonials.length - 1)].testimonial} />
-      <br />
      <PortfolioPreview /> 
-     <br />
      <PersonalPortfolioPreview />
      {/* <h2>Experence</h2>
      <h2>Brands I have worked with</h2>
      <h2>What do I Do?</h2> */}
-    <br />
      <h2><a href='https://storage.googleapis.com/images-for-cms/documents/Josh_Martin_-_Resume.pdf'>[ contact@cjoshmartin.com ]</a></h2>
      <a href='https://storage.googleapis.com/images-for-cms/documents/Josh_Martin_-_Resume.pdf' target='_blank'><h2>[ Download Resume ]</h2></a>
 

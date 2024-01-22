@@ -12,6 +12,7 @@
 
 .projectContainer {
     padding: 1rem;
+    color: var(--secondary-color) !important;
 }
 
 .profileImage {

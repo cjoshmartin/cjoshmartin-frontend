@@ -13,6 +13,7 @@
 /* active link */
 .activeLink {
     background-color: var(--primary-color);
+    color: black !important;
     padding: 0.5rem;
 }
 

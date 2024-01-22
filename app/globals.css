@@ -61,3 +61,9 @@ code {
     color: #008000;
     background-color: #ffffff;
 }
+
+.nav-link:hover {
+    background-color: var(--primary-color);
+    color: black !important;
+    padding: 0.5rem;
+}
