@@ -33,6 +33,7 @@ export default function Testimonial({ testimonial, title }: TestimonialProps) {
         backgroundColor: "white",
         color: "black",
         padding: "1rem",
+        width: "100%",
       }}
     >
       {title && (
