@@ -1,11 +1,13 @@
+
+
 import generateURL from "@/app/components/generateURL"
 import ShowImage from '@/app/blog/_compoents/ShowImage'
 
 import styles from './blogpost.module.css'
 import moment from "moment"
 import HtmlGenerator from "@/app/components/HtmlGenerator"
-import Link from "next/link"
 import Comments from "./Comments"
+import { GoBackLink } from "./GoBackLink"
 
 async function getPage(slug: string){
     const url = generateURL(`/api/pages/get-page-from-slug?query=${slug}`)
@@ -17,9 +19,8 @@ export default async function Page({ params }: { params: { slug: string } }){
     const {title, body, date, id} = await getPage(params.slug);
     return (
       <div className={styles.container}>
-        <Link href="/blog">
-          <u>{"<<< Go back"}</u>
-        </Link>
+
+        <GoBackLink  href="/blog"/>
         <ShowImage width={772} height={360} className={styles.headerImage} />
         <div className={styles.contentArea}>
           <h2>{title}</h2>

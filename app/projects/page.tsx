@@ -1,24 +1,11 @@
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import generateURL from '../components/generateURL';
 import { ProjectType } from '../components/PortfolioPreview/ProjectType';
 import { PageTypes } from '../PageTypes';
 import ProjectListingItem from './__components/ProjectListingItem';
 import Tags from './__components/Tags';
 import styles from './projects.module.css'
-import Link from 'next/link';
-import { faCircleXmark } from '@fortawesome/free-solid-svg-icons';
-
-/*
-  three query parameters:
-  1) type of clients
-    * all
-    * profrontal 
-    * personal
-  2) Medium
-    can all select one medium at a time
-  3) Techologies
-    can all select one techologies at a time 
-*/
+import ClearFilters from './ClearFilters';
+import { ProjectTypeButtons } from './ProjectTypeButtons';
 
 async function getResults(){
   return fetch(generateURL("/api/pages"))
@@ -126,45 +113,8 @@ export default async function Page({searchParams}: any) {
               : "All"}
             ) Projects
           </h1>
-          { !!searchParams && Object.keys(searchParams).length > 0 && (
-            <Link href="/projects" className={styles.clearFiltersLink}>
-              <FontAwesomeIcon
-                icon={faCircleXmark}
-                className={styles.clearFiltersIcon}
-              />
-              Clear Filters
-            </Link>
-          )
-          }
-          <div className={styles.buttonGroup}>
-            <Link
-              href={{
-                pathname: "/projects",
-                query: { ...searchParams, project_type: undefined },
-              }}
-            >
-              All (
-              {projectTypeCounts[ProjectType.Client] +
-                projectTypeCounts[ProjectType.Personal]}
-              ) Projects
-            </Link>
-            <Link
-              href={{
-                pathname: "/projects",
-                query: { ...searchParams, project_type: ProjectType.Client },
-              }}
-            >
-              Client ({projectTypeCounts[ProjectType.Client]}) Projects
-            </Link>
-            <Link
-              href={{
-                pathname: "/projects",
-                query: { ...searchParams, project_type: ProjectType.Personal },
-              }}
-            >
-              Personal ({projectTypeCounts[ProjectType.Personal]}) Projects
-            </Link>
-          </div>
+          <ClearFilters searchParams={searchParams}/>
+          <ProjectTypeButtons searchParams={searchParams} projectTypeCounts={projectTypeCounts}/>
           <Tags title="Medium" tags={medium} searchParams={searchParams} />
           <Tags
             title="Technologies"

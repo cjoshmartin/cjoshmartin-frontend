@@ -1,7 +1,9 @@
 'use client';
+import { motion } from 'framer-motion';
 import styles from '../projects.module.css';
 
 import Link from 'next/link';
+import { generateClassList } from './generateClassList';
 
 function removeKey(params: object, key: string){
   const query = {...params};
@@ -23,32 +25,53 @@ export default function Tags({ title, tags, searchParams }: any) {
   return (
     <div className={styles.mediaContainer}>
       <h3>{title}:</h3>
-      <div className={styles.mediaLinkContainer}>
-        <Link
-          href={{
-            pathname: "/projects",
-            query: removeKey(searchParams, searchKey),
+      <div
+        className={generateClassList(["tag-links", styles.mediaLinkContainer])}
+      >
+        <motion.span
+          whileHover={{
+            scale: 1.1,
+            backgroundColor: "#85ffa7",
+            color: "black",
+            padding: "0.5rem",
           }}
-          className={
-            !searchParams[searchKey] ? styles.activeTagLink : undefined
-          }
         >
-          All
-        </Link>
-        {sortedTags.map((key) => (
           <Link
             href={{
               pathname: "/projects",
-              query: { ...searchParams, [searchKey]: key },
+              query: removeKey(searchParams, searchKey),
             }}
-            key={key}
-
-          className={
-            searchParams[searchKey] === key ? styles.activeTagLink : undefined
-          }
+            className={generateClassList([
+              !searchParams[searchKey] ? styles.activeTagLink : "",
+              "tag-links",
+            ])}
           >
-            {key}({tags[key]})
+            All
           </Link>
+        </motion.span>
+        {sortedTags.map((key) => (
+          <motion.span
+            key={key}
+            whileHover={{
+              scale: 1.1,
+              backgroundColor: "#85ffa7",
+              color: "black",
+              padding: "0.5rem",
+            }}
+          >
+            <Link
+              href={{
+                pathname: "/projects",
+                query: { ...searchParams, [searchKey]: key },
+              }}
+              className={generateClassList([
+                searchParams[searchKey] === key ? styles.activeTagLink : "",
+                "tag-links",
+              ])}
+            >
+              {key}({tags[key]})
+            </Link>
+          </motion.span>
         ))}
       </div>
     </div>

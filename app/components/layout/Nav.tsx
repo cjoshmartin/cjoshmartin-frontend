@@ -17,16 +17,20 @@ interface NavLinkProps {
 function NavLink({title, link, external=false, isActive}: NavLinkProps ){
     generateClassList
     return (
-      <Link
-        href={link}
-        target={external ? "_blank" : undefined}
-        className={generateClassList([
-          "nav-link",
-          isActive ? styles.activeLink : "",
-        ])}
+      <motion.span 
+      whileHover={{ scale: 1.1, backgroundColor: '#85ffa7', color:'black', padding:'0.5rem' }}
       >
+        <Link
+          href={link}
+          target={external ? "_blank" : undefined}
+          className={generateClassList([
+            "nav-link",
+            isActive ? styles.activeLink : "",
+          ])}
+        >
           {isActive ? title : `[${title}]`}
-      </Link>
+        </Link>
+      </motion.span>
     );
 }
 

@@ -62,8 +62,8 @@ code {
     background-color: #ffffff;
 }
 
-.nav-link:hover {
-    background-color: var(--primary-color);
+.nav-link:hover, .tag-links:hover {
+    /* background-color: var(--primary-color); */
     color: black !important;
-    padding: 0.5rem;
-}
+    /* padding: 0.5rem; */
+} 

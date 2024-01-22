@@ -4,6 +4,7 @@ import Link from 'next/link';
 import generateURL from '@/app/components/generateURL';
 import HtmlGenerator from '@/app/components/HtmlGenerator';
 import Testimonial from "@/app/components/Testimonial";
+import { GoBackLink } from "@/app/blog/[slug]/GoBackLink";
 
 
 async function getPage(slug: string){
@@ -17,9 +18,7 @@ export default async function Page({ params }: { params: { slug: string } }){
 
     return (
       <div className={styles.container}>
-        <Link href="/projects">
-          <u>{"<<< Go back"}</u>
-        </Link>
+        <GoBackLink href={'/projects'} />
         <ShowImage
           width={content_image?.width ?? 770}
           height={content_image?.height ?? 360}
