@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion';
 import styles from './PortfolioPreview.module.css';
+import ShowImage from '@/app/blog/_compoents/ShowImage';
 
 export interface ProjectItemProps {
   previewImage: string
@@ -27,15 +28,14 @@ export function ProjectItem(props: ProjectItemProps) {
       whileHover={{ scale: 1.1 }}
       className={styles.projectContainer}
     >
-      <motion.img
-        src={props.previewImage}
+      <ShowImage 
+        url={props.previewImage}
         className={styles.profileImage}
         alt={props.projectName}
         width={150}
         height={150}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1, transition: {delay: 0.3}}}
       />
+
       <div
         style={{
           padding: "1rem",
