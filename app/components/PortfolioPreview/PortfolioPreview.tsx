@@ -25,10 +25,10 @@ export default async function PortfolioPreview(){
       <div className={styles.container}>
         <div>
           <h2 style={{ paddingLeft: "1rem" }}> Recent (Client) Projects</h2>
-          <p>
+          {/* <p>
             These are the projects I have found to pay my bills so far and you
             can look at the kind of work I can help you with in the future
-          </p>
+          </p> */}
         </div>
         <br />
         <div className={styles.profileContainer}>

@@ -27,10 +27,10 @@ export default async function PortfolioPreview(){
       <div className={styles.container}>
         <div>
           <h2 style={{ paddingLeft: "1rem" }}> Recent (Personal) Projects</h2>
-          <p>
+          {/* <p>
             These are the projects I have done for myself as a learning exercise
             and keep me going in the morning
-          </p>
+          </p> */}
         </div>
         <br />
         <div className={styles.profileContainer}>
