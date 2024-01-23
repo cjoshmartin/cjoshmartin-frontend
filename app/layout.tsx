@@ -10,6 +10,7 @@ import "@fortawesome/fontawesome-svg-core/styles.css";
 import { config } from "@fortawesome/fontawesome-svg-core";
 import generateURL from './components/generateURL';
 import AnimationContainer from './components/layout/AnimationContainer';
+import LoaderContainer from './components/Loader/LoaderContainer';
 config.autoAddCss = false;
 
 
@@ -36,10 +37,12 @@ export default async function RootLayout({
         <div className={styles.bodyContent}>
           <div className={styles.innerBodyContent}>
             <Nav count={count} />
-            <AnimationContainer>
-              {children}
-              <Footer />
-            </AnimationContainer>
+            <LoaderContainer>
+              <AnimationContainer>
+                {children}
+                <Footer />
+              </AnimationContainer>
+            </LoaderContainer>
           </div>
         </div>
       </body>

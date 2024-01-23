@@ -6,6 +6,7 @@ import Testimonial from './components/Testimonial'
 import PortfolioPreview from './components/PortfolioPreview/PortfolioPreview'
 import PersonalPortfolioPreview from './components/PersonalPortfolioPreview'
 import { RandomIntFromInterval } from './randomIntFromInterval'
+import Loader from './components/Loader/Loader'
 
 interface AuthorImageData {
     url: string,
@@ -69,7 +70,6 @@ export default async function Home() {
      <h2>What do I Do?</h2> */}
      <h2><a href='https://storage.googleapis.com/images-for-cms/documents/Josh_Martin_-_Resume.pdf'>[ contact@cjoshmartin.com ]</a></h2>
      <a href='https://storage.googleapis.com/images-for-cms/documents/Josh_Martin_-_Resume.pdf' target='_blank'><h2>[ Download Resume ]</h2></a>
-
     </div>
   );
 }
