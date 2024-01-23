@@ -1,5 +1,6 @@
 import URL from '@/app/components/defaulturl';
 
+export const dynamic = 'force-dynamic' // defaults to auto
 export async function GET(requst: Request){
   
   const pages = await fetch(`${URL}/api/v2/pages?fields=_,id,type,title`)
