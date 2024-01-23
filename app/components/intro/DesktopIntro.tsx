@@ -3,6 +3,7 @@
 import Image from 'next/image'
 import styles from './intro.module.css'
 import { motion } from 'framer-motion'
+import ShowImage from '@/app/blog/_compoents/ShowImage'
 
 interface AuthorImageData {
     url: string,
@@ -71,8 +72,8 @@ export default function DesktopIntro(props: DesktopIntroProps){
 
   return (
       <div className={styles.intro}>
-        <motion.img
-          src={author?.image.url ?? ""}
+        <ShowImage
+          url={author?.image.url ?? ""}
           alt={author?.image.title ?? ""}
           width={author?.image.width}
           height={author?.image?.height}
@@ -80,6 +81,7 @@ export default function DesktopIntro(props: DesktopIntroProps){
            initial={{opacity: 0, x: 20 }} 
            animate={{opacity: 1, x: 0, transition: {delay: 0.3}}} 
            exit={{opacity: 0, x: 20}} 
+           shouldHideImageOnFail={true}
         />
         <div className={styles.introText}>
             <h1>Who I Am?</h1>
