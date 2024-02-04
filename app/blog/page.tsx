@@ -1,3 +1,4 @@
+import { Metadata } from "next";
 import { PageTypes } from "../PageTypes";
 import generateURL from "../components/generateURL";
 import BlogListItem from "./_compoents/BlogListItem";
@@ -16,6 +17,11 @@ async function getBlogPosts(){
     
 
 }
+
+export const metadata: Metadata = {
+  title: 'Blog - Josh Martin\'s Website',
+}
+
 export default async function Blog(){
     const blogPosts = await getBlogPosts();
 

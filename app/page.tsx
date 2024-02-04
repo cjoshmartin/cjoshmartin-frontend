@@ -6,7 +6,6 @@ import Testimonial from './components/Testimonial'
 import PortfolioPreview from './components/PortfolioPreview/PortfolioPreview'
 import PersonalPortfolioPreview from './components/PersonalPortfolioPreview'
 import { RandomIntFromInterval } from './randomIntFromInterval'
-import Loader from './components/Loader/Loader'
 
 interface AuthorImageData {
     url: string,

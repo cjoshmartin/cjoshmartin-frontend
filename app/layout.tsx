@@ -16,9 +16,11 @@ config.autoAddCss = false;
 
 const inter = IBM_Plex_Mono({ subsets: ['latin'], weight: ["100","200","300",'400',"500","600","700"] })
 
+
 export const metadata: Metadata = {
-  title: 'Josh Martin\'s Website',
-  description: 'Freelancer Josh Martin\'s website',
+  title: 'Home - Josh Martin\'s Website',
+  description: 'This website showcase the work of Josh Martin.\
+  A Chicago based (freelance) programmer who can create your next mobile app, web application or embedded project',
 }
 
 async function getNav(){

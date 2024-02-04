@@ -6,6 +6,7 @@ import Tags from './__components/Tags';
 import styles from './projects.module.css'
 import ClearFilters from './ClearFilters';
 import { ProjectTypeButtons } from './ProjectTypeButtons';
+import { Metadata, ResolvingMetadata } from 'next';
 
 async function getResults(){
   return fetch(generateURL("/api/pages"))
@@ -15,6 +16,30 @@ async function getResults(){
         ({ meta }: any) => meta.type === PageTypes.PROJECT 
       ) 
     })
+}
+type Props = {
+  params: { id: string }
+  searchParams: any 
+}
+
+export async function generateMetadata(
+  { params, searchParams }: Props,
+  parent: ResolvingMetadata
+): Promise<Metadata> {
+
+    const ProjectLookUpText = {
+      [ProjectType.Personal]: 'Personal',
+      [ProjectType.Client]: 'Client',
+    }
+ 
+    const projecTypeText=(searchParams?.project_type
+              ? // @ts-ignore
+                ProjectLookUpText[searchParams?.project_type]
+              : "All")
+             + " Projects"
+  return {
+    title: `${projecTypeText} - Josh Martin\'s Website`,
+  }
 }
 
 export default async function Page({searchParams}: any) {

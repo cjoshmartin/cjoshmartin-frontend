@@ -5,12 +5,30 @@ import generateURL from '@/app/components/generateURL';
 import HtmlGenerator from '@/app/components/HtmlGenerator';
 import Testimonial from "@/app/components/Testimonial";
 import { GoBackLink } from "@/app/blog/[slug]/GoBackLink";
+import { Metadata, ResolvingMetadata } from "next";
 
 
 async function getPage(slug: string){
     const url = generateURL(`/api/pages/get-page-from-slug?query=${slug}`)
     return await fetch(url)
     .then(data => data.json())
+}
+
+type Props = {
+  params: any 
+  searchParams: any 
+}
+
+export async function generateMetadata(
+  { params, searchParams }: Props,
+  parent: ResolvingMetadata
+): Promise<Metadata> {
+  
+    const {title} = await getPage(params.slug);
+
+  return {
+    title: `${title} - Projects - Josh Martin\'s Website`,
+  }
 }
 
 export default async function Page({ params }: { params: { slug: string } }){

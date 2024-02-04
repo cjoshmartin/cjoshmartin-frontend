@@ -8,11 +8,24 @@ import moment from "moment"
 import HtmlGenerator from "@/app/components/HtmlGenerator"
 import Comments from "./Comments"
 import { GoBackLink } from "./GoBackLink"
+import { Metadata, ResolvingMetadata } from "next"
 
 async function getPage(slug: string){
     const url = generateURL(`/api/pages/get-page-from-slug?query=${slug}`)
     return await fetch(url)
     .then(data => data.json())
+}
+
+export async function generateMetadata(
+  { params, searchParams }: any,
+  parent: ResolvingMetadata
+): Promise<Metadata> {
+  
+    const {title} = await getPage(params.slug);
+
+  return {
+    title: `${title} - Blog - Josh Martin\'s Website`,
+  }
 }
 
 export default async function Page({ params }: { params: { slug: string } }){
