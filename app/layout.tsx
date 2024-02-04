@@ -26,6 +26,7 @@ export const metadata: Metadata = {
 async function getNav(){
     return fetch(generateURL('/api/pages/count'))
     .then((respone) => respone.json())
+    .catch(e => ({count: 0}))
 }
 export default async function RootLayout({
   children,
