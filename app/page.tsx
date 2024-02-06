@@ -34,7 +34,8 @@ interface HomePageData {
 }
 
 async function getHomePageData(): Promise<HomePageData> {
-  return fetch(generateURL("/api/pages"))
+  const url =generateURL("/api/pages");
+  return fetch(url)
     .then((response) => response.json())
     .then((dataset) => {
       const homePageData = dataset.find(

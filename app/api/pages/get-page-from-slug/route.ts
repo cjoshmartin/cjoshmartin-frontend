@@ -14,7 +14,7 @@ export async function GET(request: Request){
     .then(data => data.json())
     .then(({items}: any) => items[0].id)
 
-    const pageURL = generateURL(`/api/v2/pages/${id}`, URL)
+    const pageURL = generateURL(`/api/v2/pages/${id}/`, URL)
 
     const pageData = await fetch(pageURL)
     .then(data => data.json())
