@@ -4,7 +4,6 @@ import generateURL from '../generateURL'
 import { PageTypes } from '@/app/PageTypes'
 import { ProjectItem } from './ProjectItem'
 import { ProjectType } from './ProjectType'
-import Link from 'next/link'
 import ActionButton from './ActionButton'
 
 async function getResults(){

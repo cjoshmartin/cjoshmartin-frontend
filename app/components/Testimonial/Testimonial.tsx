@@ -33,10 +33,11 @@ interface FromAPI {
 interface TestimonialProps {
   testimonial: TestimonialObject;
   title?: string,
-  all?: FromAPI[]
+  all?: FromAPI[],
+  shouldHideImage?: boolean 
 }
 
-export default function Testimonial({ testimonial, title, all }: TestimonialProps) {
+export default function Testimonial({ testimonial, title, all, shouldHideImage }: TestimonialProps) {
   const [test , setTest] = useState<TestimonialObject>(testimonial);
   // const [copyText, setCopyText] = useState<any | null>(null);
 
@@ -80,7 +81,11 @@ export default function Testimonial({ testimonial, title, all }: TestimonialProp
         exit={{ opacity: 0, y: 20 }}
         key={test.job_title}
       >
-        <div>
+        <div 
+          style={{
+            display: shouldHideImage ? 'none': undefined
+          }}
+        >
           <div
             className={styles.image}
             dangerouslySetInnerHTML={{
