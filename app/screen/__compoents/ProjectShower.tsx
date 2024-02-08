@@ -5,6 +5,14 @@ import { ProjectType } from "@/app/components/PortfolioPreview/ProjectType";
 import { useEffect, useState } from "react"
 import styles from './ProjectShower.module.css'
 import Testimonial from "@/app/components/Testimonial";
+import ShowImage from "@/app/blog/_compoents/ShowImage";
+
+import TestImage from '@/public/personal_projects/gun.gif';
+import TestImage1 from '@/public/personal_projects/hat.gif';
+import TestImage2 from '@/public/preview/bad_ideas.png';
+
+const images = [TestImage, TestImage1, TestImage2]
+
 import { motion } from "framer-motion";
 
 interface Meta {
@@ -44,15 +52,17 @@ interface ProjectShowerProps {
 export default function ProjectShower(props: ProjectShowerProps) {
     const [currentProject, setCurrentProject] = useState<Project | undefined>();
     const [currentIndex, setCurrentIndex] = useState<number>(0);
+    const [image, setImage] = useState<typeof TestImage>();
     useEffect(() => { 
         setTimeout(() => {
             console.log("Changing State: ", currentProject?.title)
             setCurrentProject(props.projects[currentIndex])
+            setImage(images[currentIndex % images.length])
             const nextIndex = (currentIndex + 1) % props.projects.length;
             setCurrentIndex(nextIndex);
-        }, 5000)
+        }, 15000)
 
-    }, [currentIndex, currentProject?.title, props.projects])
+    }, [currentIndex, currentProject?.title, props.projects ])
 
     if (!currentProject){
         return (
@@ -69,15 +79,17 @@ export default function ProjectShower(props: ProjectShowerProps) {
       key={currentProject.title} className={styles.container}>
         <div className={styles.projectInfo}>
             <h2>{currentProject?.title}</h2>
-            {/* {currentProject?.client && <h3 style={{ fontWeight: "400" }}>Client: {currentProject?.client}</h3>} */}
-            <h4>Medium: {currentProject?.medium?.join(', and ')}</h4>
             <h5>Technologies: {currentProject?.technologies.join(", ")}</h5>
+            <h4>Medium: {currentProject?.medium?.join(', and ')}</h4>
         </div>
-        <div className={styles.placeHolderImage}>
-          <h2 className={styles.placeHolderText} >
-            Preview Image
-          </h2>
-        </div> 
+
+      <ShowImage 
+        url={image?.src}
+        className={styles.placeHolderImage}
+        alt={"Text image"}
+        width={150}
+        height={150}
+      />
         {currentProject?.testimonials &&
           currentProject?.testimonials.length > 0 && (
             <Testimonial
