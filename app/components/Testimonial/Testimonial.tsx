@@ -26,7 +26,7 @@ interface TestimonialObject {
   body: string;
 }
 
-interface FromAPI {
+export interface FromAPI {
  testimonial: TestimonialObject
 }
 
@@ -81,9 +81,9 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
         exit={{ opacity: 0, y: 20 }}
         key={test.job_title}
       >
-        <div 
+        <div
           style={{
-            display: shouldHideImage ? 'none': undefined
+            display: shouldHideImage ? "none" : undefined,
           }}
         >
           <div
@@ -95,7 +95,12 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
         </div>
         <div className={styles.contentContainer}>
           {stripHtml(test.body).result}
-          <div className={styles.infoContainer}>
+          <div
+            className={styles.infoContainer}
+            style={{
+              maxWidth: shouldHideImage ? "initial" : "450px",
+            }}
+          >
             <h3>
               <a href={test.link} target="blank">
                 {test.first_name} {test.last_name}
@@ -103,9 +108,13 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
             </h3>
             {/* eslint-disable-next-line react/jsx-no-comment-textnodes */}
             <h3>//</h3>
-            <h3>{test.job_title}</h3>
-            {/* eslint-disable-next-line react/jsx-no-comment-textnodes */}
-            <h3>//</h3>
+            {!shouldHideImage && (
+              <>
+                <h3>{test.job_title}</h3>
+                {/* eslint-disable-next-line react/jsx-no-comment-textnodes */}
+                <h3>//</h3>
+              </>
+            )}
             <h3 style={{ maxWidth: "15rem", textTransform: "capitalize" }}>
               {test.relationship}
             </h3>

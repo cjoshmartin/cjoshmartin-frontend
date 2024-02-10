@@ -1,11 +1,16 @@
 import { PageTypes } from '../PageTypes';
+import generateURL from '../components/generateURL';
 import ProjectShower from './__compoents/ProjectShower';
-import fakeData from './tempData';
 
-async function getData() {
-    return fakeData.filter(
+async function getData(){
+  return fetch(generateURL("/api/pages"))
+    .then((response) => response.json())
+    .then((dataset) => { 
+      const homePageData = dataset.filter(
         ({ meta }: any) => meta.type === PageTypes.PROJECT
-      )
+      );
+      return homePageData
+    })
 }
 
 
