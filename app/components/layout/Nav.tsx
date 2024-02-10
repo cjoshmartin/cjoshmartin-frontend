@@ -37,6 +37,10 @@ function NavLink({title, link, external=false, isActive}: NavLinkProps ){
 export default function Nav (props: any) {
     const pathName = usePathname();
 
+    if (pathName.includes('screen')) {
+      return null;
+    }
+
     return (
       <header className={styles.header}>
         <motion.nav 
