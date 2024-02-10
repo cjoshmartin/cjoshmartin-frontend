@@ -1,7 +1,8 @@
 'use client';
-import { Suspense } from "react";
-import { OrbitControls } from "@react-three/drei";
-import { Canvas, useLoader } from "@react-three/fiber";
+import { Suspense, useRef } from "react";
+import { Edges, OrbitControls } from "@react-three/drei";
+import { Canvas, useLoader,  useFrame  } from "@react-three/fiber";
+//@ts-ignore
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader";
 
 interface ModelRenderProps {
@@ -10,11 +11,25 @@ interface ModelRenderProps {
 
   function ModelRender({ url }: ModelRenderProps) {
     const geom = useLoader(STLLoader, url);
-    console.log(geom);
+    const boxRef = useRef();
+
+    useFrame(() => {
+        //@ts-ignore
+      boxRef.current.rotation.y += 0.001;
+    });
+  
+
     return (
-      <mesh geometry={geom}>
-        <meshPhongMaterial color="white" />
-      </mesh>
+      <group dispose={null}>
+        <mesh geometry={geom} 
+            rotation={[0, 10, 0]}
+            // @ts-ignore
+            ref={boxRef}
+        >
+          <meshStandardMaterial transparent />
+          <Edges color={"#008000"} threshold={15}/>
+        </mesh>
+      </group>
     );
   }
 
@@ -25,32 +40,28 @@ export function STLFileArea({ value }: any) {
 
 
     return (
-      <div className="App" style={{ backgroundColor: "white" }}>
+      <div className="App">
         <h3>{title}</h3>
         <Canvas
           style={{ height: "400px" }}
-          camera={{ position: [450, 650, 20], fov: 30 }}
+          camera={{ position: [450, 300, 0], fov: 30, zoom: 4 }}
         >
           <Suspense fallback={"loading..."}>
             <ModelRender
               url={
-                "https://cdn.thingiverse.com/assets/99/39/31/f9/33/90_Degree_-_4_Segments.stl"
+                "https://storage.googleapis.com/images-for-cms/documents/miata_key.stl"
               }
             />
           </Suspense>
-          <OrbitControls panSpeed={0.5} rotateSpeed={0.4} />
-          <spotLight
-            intensity={1.5}
-            angle={0.1}
-            penumbra={1}
-            position={[450, 350, 20]}
+          <OrbitControls
+            panSpeed={0.5}
+            rotateSpeed={0.4}
+            enableDamping={true}
+            enablePan={false}
+            enableZoom={false}
           />
-          <spotLight
-            intensity={1.5}
-            angle={2.5}
-            penumbra={1}
-            position={[250, 150, 40]}
-          />
+          <ambientLight intensity={1.5} />
+          {/* <axesHelper args={[20]} /> */}
         </Canvas>
       </div>
     );
