@@ -15,7 +15,6 @@ function RichTextArea({value, className}: any){
 
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { gruvboxDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import generateURL from './generateURL';
 
 function CodeArea({value}: any){
 
@@ -31,21 +30,9 @@ function CodeArea({value}: any){
     );
 }
 
-import URL from '@/app/components/defaulturl';
 import { ReactNode } from 'react';
+import { STLFileArea } from './STLFileArea';
 
-function STLFileArea({value} : any) {
-    const {scale, url, title} = value;
-    const downloadLink = generateURL(url, URL)
-
-    return (
-
-        <div>
-            <h4>{title}</h4>
-            <a href={downloadLink}>Download Link</a>
-        </div>
-    );
-}
 
 function AreaPicker({type, value}: any){
     switch (type) {
