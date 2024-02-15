@@ -8,13 +8,13 @@ export async function GET(request: Request){
     if(!query){
         throw "Need query preams"
     }
-    const baseURl = generateURL(`/api/v2/pages/?fields=_,id&slug=${query}`, URL)
+    const baseURl = generateURL(`/api/pages/?fields=_,id&slug=${query}`, URL)
 
     const id = await fetch(baseURl)
     .then(data => data.json())
     .then(({items}: any) => items[0].id)
 
-    const pageURL = generateURL(`/api/v2/pages/${id}/`, URL)
+    const pageURL = generateURL(`/api/pages/${id}/`, URL)
 
     const pageData = await fetch(pageURL)
     .then(data => data.json())

@@ -20,7 +20,7 @@ function NavLink({title, link, external=false, isActive}: NavLinkProps ){
       <motion.span 
       whileHover={{ scale: 1.1, backgroundColor: '#85ffa7', color:'black', padding:'0.5rem' }}
       >
-        <Link
+        <a
           href={link}
           target={external ? "_blank" : undefined}
           className={generateClassList([
@@ -29,7 +29,7 @@ function NavLink({title, link, external=false, isActive}: NavLinkProps ){
           ])}
         >
           {isActive ? title : `[${title}]`}
-        </Link>
+        </a>
       </motion.span>
     );
 }

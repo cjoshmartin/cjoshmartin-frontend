@@ -3,7 +3,7 @@ import URL from '@/app/components/defaulturl';
 export const dynamic = 'force-dynamic' // defaults to auto
 export async function GET(requst: Request){
   
-  const pages = await fetch(`${URL}/api/v2/pages/?fields=_,id,type,title&format=json`)
+  const pages = await fetch(`${URL}/api/pages/?fields=_,id,type,title&format=json`)
   .then(response => response.json())
   .then(data => data.items.filter(({meta}: any) => meta.type !== "blog.BlogIndexPage"));
 
@@ -11,7 +11,7 @@ export async function GET(requst: Request){
   for (let i = 0; i < pages.length; i++){
     const page = pages[i];
     const {id} = page;
-    const result = await fetch(`${URL}/api/v2/pages/${id}`).then((data) =>
+    const result = await fetch(`${URL}/api/pages/${id}`).then((data) =>
       data.json()
     );
     results.push(result);
