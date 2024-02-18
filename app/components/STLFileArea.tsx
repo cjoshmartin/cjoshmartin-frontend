@@ -48,9 +48,7 @@ export function STLFileArea({ value }: any) {
         >
           <Suspense fallback={"loading..."}>
             <ModelRender
-              url={
-                "https://storage.googleapis.com/images-for-cms/documents/miata_key.stl"
-              }
+              url={url}
             />
           </Suspense>
           <OrbitControls

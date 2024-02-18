@@ -37,7 +37,7 @@ export default async function PortfolioPreview(){
           {projects.map((project: any, i: number) => (
             <ProjectItem
               key={project.title}
-              previewImage={project.preview_image.url}
+              previewImage={project?.preview_image?.url}
               projectName={project.title}
               client={project.client}
               media={project.medium}
