@@ -1,5 +1,6 @@
 import URL from '@/app/components/defaulturl';
 import { PageTypes } from "@/app/PageTypes";
+import generateURL from '../generateURL';
 
 export async function getPages(){
 
@@ -19,4 +20,21 @@ export async function getPages(){
     }
 
     return results;
+}
+
+export async function getFromSlug(slug: string){
+
+    const baseURl = generateURL(`/api/pages/?fields=_,id&slug=${slug}`, URL)
+
+    const id = await fetch(baseURl)
+    .then(data => data.json())
+    .then(({items}: any) => items[0].id)
+
+    const pageURL = generateURL(`/api/pages/${id}/`, URL)
+
+    const pageData = await fetch(pageURL)
+    .then(data => data.json())
+
+    return pageData;
+
 }
