@@ -7,10 +7,10 @@ import styles from './projects.module.css'
 import ClearFilters from './ClearFilters';
 import { ProjectTypeButtons } from './ProjectTypeButtons';
 import { Metadata, ResolvingMetadata } from 'next';
+import { getPages } from '../components/api/pages';
 
 async function getResults(){
-  return fetch(generateURL("/api/pages"))
-    .then((response) => response.json())
+  return getPages()
     .then((dataset) => { 
       return dataset.filter(
         ({ meta }: any) => meta.type === PageTypes.PROJECT 
