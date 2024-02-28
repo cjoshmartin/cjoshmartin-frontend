@@ -69,7 +69,6 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
       {title && (
         <>
           <h2 style={{ paddingLeft: "1rem" }}>{title}</h2>
-          <br />
         </>
       )}
 

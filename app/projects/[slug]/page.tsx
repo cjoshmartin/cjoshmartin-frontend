@@ -37,7 +37,7 @@ export default async function Page({ params }: { params: { slug: string } }){
         <ShowImage
           width={content_image?.width ?? 770}
           height={content_image?.height ?? 360}
-          url={content_image.url}
+          url={content_image?.url}
           className={styles.headerImage}
         />
         <div className={styles.projectInfo}>

@@ -24,6 +24,7 @@ export const metadata: Metadata = {
   A Chicago based (freelance) programmer who can create your next mobile app, web application or embedded project',
 }
 
+
 async function getNav(){
   return (await getPages())
   .reduce((acc: any, {meta} :any) => {

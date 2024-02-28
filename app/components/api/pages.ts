@@ -1,6 +1,5 @@
 import URL from '@/app/components/defaulturl';
 import { PageTypes } from "@/app/PageTypes";
-import generateURL from '../generateURL';
 
 export async function getPages(){
 

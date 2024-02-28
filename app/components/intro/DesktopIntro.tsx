@@ -6,7 +6,7 @@ import { motion } from 'framer-motion'
 import ShowImage from '@/app/blog/_compoents/ShowImage'
 
 interface AuthorImageData {
-    url: string,
+    file: string,
     title: string,
     width: number,
     height: number,
@@ -73,8 +73,8 @@ export default function DesktopIntro(props: DesktopIntroProps){
   return (
       <div className={styles.intro}>
         <ShowImage
-          url={author?.image.url ?? ""}
-          alt={author?.image.title ?? ""}
+          url={author?.image?.file ?? ""}
+          alt={author?.image?.title ?? ""}
           width={author?.image.width}
           height={author?.image?.height}
           className={styles.profileImage}

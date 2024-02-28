@@ -1,6 +1,5 @@
 import styles from './page.module.css'
 import DesktopIntro from './components/intro/DesktopIntro'
-import generateURL from './components/generateURL'
 import { PageTypes } from './PageTypes'
 import Testimonial from './components/Testimonial'
 import PortfolioPreview from './components/PortfolioPreview/PortfolioPreview'
@@ -56,7 +55,9 @@ export default async function Home() {
 
   return (
     <div className={styles.body}>
-      <DesktopIntro blog_authors={blog_authors && blog_authors} bio={body}/>
+      <DesktopIntro 
+     //@ts-ignore 
+      blog_authors={blog_authors && blog_authors} bio={body}/>
       <Testimonial 
       title='What People Have To Say,'
       testimonial={testimonials[RandomIntFromInterval(0, testimonials.length - 1)].testimonial} 

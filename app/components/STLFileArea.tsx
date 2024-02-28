@@ -15,7 +15,7 @@ interface ModelRenderProps {
 
     useFrame(() => {
         //@ts-ignore
-      boxRef.current.rotation.y += 0.001;
+      boxRef.current.rotation.y += 0.01;
     });
   
 
@@ -27,7 +27,7 @@ interface ModelRenderProps {
             ref={boxRef}
         >
           <meshStandardMaterial transparent />
-          <Edges color={"#008000"} threshold={15}/>
+          <Edges color={"#008000"} threshold={5}/>
         </mesh>
       </group>
     );
@@ -43,8 +43,8 @@ export function STLFileArea({ value }: any) {
       <div className="App">
         <h3>{title}</h3>
         <Canvas
-          style={{ height: "400px" }}
-          camera={{ position: [450, 300, 0], fov: 30, zoom: 4 }}
+          style={{ height: "400px", border: "5px solid white" }}
+          camera={{ position: [350, 100, 0], fov: 10 }}
         >
           <Suspense fallback={"loading..."}>
             <ModelRender
