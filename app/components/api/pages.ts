@@ -24,15 +24,11 @@ export async function getPages(){
 
 export async function getFromSlug(slug: string){
 
-    const baseURl = generateURL(`/api/pages/?fields=_,id&slug=${slug}`, URL)
-
-    const id = await fetch(baseURl)
+    const id = await fetch(`${URL}/api/pages/?fields=_,id&slug=${slug}`)
     .then(data => data.json())
     .then(({items}: any) => items[0].id)
 
-    const pageURL = generateURL(`/api/pages/${id}/`, URL)
-
-    const pageData = await fetch(pageURL)
+    const pageData = await fetch(`${URL}/api/pages/${id}/`)
     .then(data => data.json())
 
     return pageData;
