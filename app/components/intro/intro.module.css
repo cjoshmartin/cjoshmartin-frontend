@@ -20,6 +20,8 @@
   width: auto;
   height: 35rem;
   border-radius: 1rem;
+  max-width: 380px;
+  object-fit: cover;
 }
 
 .clickableLink {
