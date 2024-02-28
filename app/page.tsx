@@ -35,27 +35,6 @@ interface HomePageData {
 }
 
 async function getHomePageData(): Promise<HomePageData> {
-
-  const url = generateURL("/api/pages");
-
-  /*
-  return fetch(url)
-    .then((response) => response.json())
-    .then((dataset) => {
-      const homePageData = dataset.find(
-        ({ meta }: any) => meta.type === PageTypes.HOME
-      );
-
-      const { blog_authors, body, testimonials } = homePageData;
-
-      return {
-        blog_authors: [blog_authors[0]],
-        body,
-        testimonials,
-      };
-    });
-    */
-
     return getPages()
     .then((dataset) => {
           const homePageData = dataset.find(

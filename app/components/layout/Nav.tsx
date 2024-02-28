@@ -59,14 +59,14 @@ export default function Nav (props: any) {
             title="Projects"
             isActive={pathName.includes("projects")}
           />
-          {/* {props.count[PageTypes.BLOG_POST] > 0 && (
+          {props.count[PageTypes.BLOG_POST] > 0 && (
             <NavLink
               key={"blog"}
               link={`/blog`}
               title={"Blog"}
               isActive={pathName.includes("blog")}
             />
-          )} */}
+          )}
         </motion.nav>
       </header>
     );
