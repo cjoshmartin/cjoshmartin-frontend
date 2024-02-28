@@ -121,7 +121,7 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
           </div>
         </div>
       </motion.div>
-      {!!all && (
+      {!!all && all.length > 1 && (
         <div className={styles.testimonialButtonContainer}>
           <motion.button
             className={styles.testimonialButton}
