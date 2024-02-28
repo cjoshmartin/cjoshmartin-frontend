@@ -1,4 +1,3 @@
-import generateURL from '../components/generateURL';
 import { ProjectType } from '../components/PortfolioPreview/ProjectType';
 import { PageTypes } from '../PageTypes';
 import ProjectListingItem from './__components/ProjectListingItem';
