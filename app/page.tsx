@@ -122,8 +122,8 @@ export default async function Home() {
       testimonial={testimonials[RandomIntFromInterval(0, testimonials.length - 1)].testimonial} 
       all={testimonials}
       />
-     <PortfolioPreview /> 
-     <PersonalPortfolioPreview />
+     {/* <PortfolioPreview /> 
+     <PersonalPortfolioPreview /> */}
      {/* <h2>Experence</h2>
      <h2>Brands I have worked with</h2>
      <h2>What do I Do?</h2> */}
