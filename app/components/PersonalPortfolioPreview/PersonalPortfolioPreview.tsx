@@ -4,11 +4,11 @@ import generateURL from '../generateURL';
 import styles from './PersonalPortfolioPreview.module.css'
 import { ProjectType } from '../PortfolioPreview/ProjectType';
 import ActionButton from '../PortfolioPreview/ActionButton';
+import { getPages } from '../api/pages';
 
 
 async function getResults(){
-  return fetch(generateURL("/api/pages"))
-    .then((response) => response.json())
+  return getPages()
     .then((dataset) => { 
       const homePageData = dataset.filter(
         ({ meta, project_type }: any) => meta.type === PageTypes.PROJECT && project_type === ProjectType.Personal

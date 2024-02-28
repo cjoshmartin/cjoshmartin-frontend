@@ -5,10 +5,10 @@ import { PageTypes } from '@/app/PageTypes'
 import { ProjectItem } from './ProjectItem'
 import { ProjectType } from './ProjectType'
 import ActionButton from './ActionButton'
+import { getPages } from '../api/pages'
 
 async function getResults(){
-  return fetch(generateURL("/api/pages"))
-    .then((response) => response.json())
+  return getPages()
     .then((dataset) => { 
       const homePageData = dataset.filter(
         ({ meta, project_type }: any) => meta.type === PageTypes.PROJECT && project_type === ProjectType.Client
