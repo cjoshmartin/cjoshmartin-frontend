@@ -23,23 +23,23 @@ export const metadata: Metadata = {
   A Chicago based (freelance) programmer who can create your next mobile app, web application or embedded project',
 }
 
-async function getNav(){
-    return fetch(generateURL('/api/pages/count'))
-    .then((respone) => respone.json())
-    .catch(e => ({count: 0}))
-}
+// async function getNav(){
+//     return fetch(generateURL('/api/pages/count'))
+//     .then((respone) => respone.json())
+//     .catch(e => ({count: 0}))
+// }
 export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-    const {count} = await getNav();
+    // const {count} = await getNav();
   return (
     <html lang="en">
       <body className={inter.className}>
         <div className={styles.bodyContent}>
           <div className={styles.innerBodyContent}>
-            <Nav count={count} />
+            <Nav count={0} />
             <LoaderContainer>
               <AnimationContainer>
                 {children}
