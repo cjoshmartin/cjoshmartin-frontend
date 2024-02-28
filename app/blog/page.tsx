@@ -1,15 +1,14 @@
 import { Metadata } from "next";
 import { PageTypes } from "../PageTypes";
-import generateURL from "../components/generateURL";
 import BlogListItem from "./_compoents/BlogListItem";
 import styles from './blog.module.css'
+import { getPages } from "../components/api/pages";
 
 async function getBlogPosts(){
     const getDate = ({meta}: any) => new Date(meta.first_published_at).getTime();
     const sortingFuncForDate = (a: any ,b: any) => getDate(b) - getDate(a);
 
-    return fetch(generateURL('/api/pages'))
-    .then((data) => data.json())
+    return getPages()
     .then((data) => data
     .filter(({meta}: any) =>  meta.type === PageTypes.BLOG_POST)
     .sort(sortingFuncForDate)

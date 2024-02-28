@@ -1,17 +1,14 @@
 import ShowImage from "@/app/blog/_compoents/ShowImage";
 import styles from './projectPage.module.css';
-import Link from 'next/link';
-import generateURL from '@/app/components/generateURL';
 import HtmlGenerator from '@/app/components/HtmlGenerator';
 import Testimonial from "@/app/components/Testimonial";
 import { GoBackLink } from "@/app/blog/[slug]/GoBackLink";
 import { Metadata, ResolvingMetadata } from "next";
+import { getFromSlug } from "@/app/components/api/pages";
 
 
 async function getPage(slug: string){
-    const url = generateURL(`/api/pages/get-page-from-slug?query=${slug}`)
-    return await fetch(url)
-    .then(data => data.json())
+    return await getFromSlug(slug);
 }
 
 type Props = {
@@ -40,7 +37,7 @@ export default async function Page({ params }: { params: { slug: string } }){
         <ShowImage
           width={content_image?.width ?? 770}
           height={content_image?.height ?? 360}
-          url={content_image.url}
+          url={content_image?.url}
           className={styles.headerImage}
         />
         <div className={styles.projectInfo}>

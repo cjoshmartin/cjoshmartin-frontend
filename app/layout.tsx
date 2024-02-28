@@ -11,6 +11,7 @@ import { config } from "@fortawesome/fontawesome-svg-core";
 import generateURL from './components/generateURL';
 import AnimationContainer from './components/layout/AnimationContainer';
 import LoaderContainer from './components/Loader/LoaderContainer';
+import { getPages } from './components/api/pages';
 config.autoAddCss = false;
 
 
@@ -23,17 +24,25 @@ export const metadata: Metadata = {
   A Chicago based (freelance) programmer who can create your next mobile app, web application or embedded project',
 }
 
+
 async function getNav(){
-    return fetch(generateURL('/api/pages/count'))
-    .then((respone) => respone.json())
-    .catch(e => ({count: 0}))
+  return (await getPages())
+  .reduce((acc: any, {meta} :any) => {
+      if(!acc[meta?.type]){
+          acc[meta?.type] = 1;
+      }
+      else {
+          acc[meta?.type] += 1;
+      }
+      return acc;
+    }, {})
 }
 export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-    const {count} = await getNav();
+    const count = await getNav();
   return (
     <html lang="en">
       <body className={inter.className}>

@@ -9,11 +9,10 @@ import HtmlGenerator from "@/app/components/HtmlGenerator"
 import Comments from "./Comments"
 import { GoBackLink } from "./GoBackLink"
 import { Metadata, ResolvingMetadata } from "next"
+import { getFromSlug } from "@/app/components/api/pages"
 
 async function getPage(slug: string){
-    const url = generateURL(`/api/pages/get-page-from-slug?query=${slug}`)
-    return await fetch(url)
-    .then(data => data.json())
+    return await getFromSlug(slug)
 }
 
 export async function generateMetadata(

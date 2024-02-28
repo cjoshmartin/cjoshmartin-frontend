@@ -1,11 +1,11 @@
 import styles from './page.module.css'
 import DesktopIntro from './components/intro/DesktopIntro'
-import generateURL from './components/generateURL'
 import { PageTypes } from './PageTypes'
 import Testimonial from './components/Testimonial'
 import PortfolioPreview from './components/PortfolioPreview/PortfolioPreview'
 import PersonalPortfolioPreview from './components/PersonalPortfolioPreview'
 import { RandomIntFromInterval } from './randomIntFromInterval'
+import { getPages } from './components/api/pages'
 
 interface AuthorImageData {
     url: string,
@@ -34,22 +34,20 @@ interface HomePageData {
 }
 
 async function getHomePageData(): Promise<HomePageData> {
-  const url = generateURL("/api/pages");
-  return fetch(url)
-    .then((response) => response.json())
+    return getPages()
     .then((dataset) => {
-      const homePageData = dataset.find(
-        ({ meta }: any) => meta.type === PageTypes.HOME
-      );
+          const homePageData = dataset.find(
+            ({ meta }: any) => meta.type === PageTypes.HOME
+          );
 
-      const { blog_authors, body, testimonials } = homePageData;
+          const { blog_authors, body, testimonials } = homePageData;
 
-      return {
-        blog_authors: [blog_authors[0]],
-        body,
-        testimonials,
-      };
-    });
+          return {
+            blog_authors: [blog_authors[0]],
+            body,
+            testimonials,
+          };
+        });
 }
 
 export default async function Home() {
@@ -57,7 +55,9 @@ export default async function Home() {
 
   return (
     <div className={styles.body}>
-      <DesktopIntro blog_authors={blog_authors && blog_authors} bio={body}/>
+      <DesktopIntro 
+     //@ts-ignore 
+      blog_authors={blog_authors && blog_authors} bio={body}/>
       <Testimonial 
       title='What People Have To Say,'
       testimonial={testimonials[RandomIntFromInterval(0, testimonials.length - 1)].testimonial} 

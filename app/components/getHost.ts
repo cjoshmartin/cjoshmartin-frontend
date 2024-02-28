@@ -7,7 +7,7 @@ export default function getHost() {
   const referer = headersList.get("referer")
   
   if (!referer) {
-    return 'http://cjoshmartin.com'
+    return `https://${process?.env?.VERCEL_URL ?? 'cjoshmartin.com'}` 
   }
 
   const request = new NextRequest(referer)
