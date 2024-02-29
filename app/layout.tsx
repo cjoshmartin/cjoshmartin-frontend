@@ -8,7 +8,6 @@ import styles from './layout.module.css'
 
 import "@fortawesome/fontawesome-svg-core/styles.css";
 import { config } from "@fortawesome/fontawesome-svg-core";
-import generateURL from './components/generateURL';
 import AnimationContainer from './components/layout/AnimationContainer';
 import LoaderContainer from './components/Loader/LoaderContainer';
 import { getPages } from './components/api/pages';

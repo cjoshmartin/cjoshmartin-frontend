@@ -1,0 +1,14 @@
+.container {
+    background-color: var(--primary-color);
+    color: var(--secondary-color);
+    width: 100%;
+    padding: 2rem;
+    font-weight: 600;
+}
+
+.container span {
+    font-weight: bolder;
+}
+.hubspotForm {
+    
+}
