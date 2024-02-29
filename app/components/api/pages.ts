@@ -4,7 +4,7 @@ import { PageTypes } from "@/app/PageTypes";
 export async function getPages(){
 
     const pages = await fetch(`${URL}/api/pages/?fields=_,id,type,title&format=json`, {
-      cache: 'no-cache'
+      // cache: 'no-cache'
     })
     .then(response => response.json())
     .then(data => data.items.filter(({meta}: any) => meta.type !== PageTypes.BLOG_INDEX));
