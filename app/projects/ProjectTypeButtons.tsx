@@ -34,6 +34,9 @@ export function ProjectTypeButtons({ searchParams, projectTypeCounts }: any) {
             pathname: "/projects",
             query: { ...searchParams, project_type: undefined },
           }}
+          className={
+            !searchParams?.project_type ? styles.activeLink : undefined
+          }
         >
           All (
           {projectTypeCounts[ProjectType.Client] +
@@ -55,6 +58,11 @@ export function ProjectTypeButtons({ searchParams, projectTypeCounts }: any) {
             pathname: "/projects",
             query: { ...searchParams, project_type: ProjectType.Client },
           }}
+          className={
+            searchParams?.project_type === ProjectType.Client
+              ? styles.activeLink
+              : undefined
+          }
         >
           Client ({projectTypeCounts[ProjectType.Client]}) Projects
         </Link>
@@ -73,6 +81,11 @@ export function ProjectTypeButtons({ searchParams, projectTypeCounts }: any) {
             pathname: "/projects",
             query: { ...searchParams, project_type: ProjectType.Personal },
           }}
+          className={
+            searchParams?.project_type === ProjectType.Personal
+              ? styles.activeLink
+              : undefined
+          }
         >
           Personal ({projectTypeCounts[ProjectType.Personal]}) Projects
         </Link>

@@ -44,22 +44,14 @@
     border: 1px solid;
 }
 
-.buttonGroup a:first-child {
+.buttonGroup a {
     background-color: black;
     color: white;
 }
-
-
-.buttonGroup a:nth-child(2) {
-    background-color: var(--primary-color);
-    color: var(--secondary-color);
+.activeLink {
+    background-color: var(--primary-color) !important;
+    color: var(--secondary-color) !important;
 }
-
-.buttonGroup a:nth-child(3) {
-    background-color: var(--third-color);
-    color: var(--secondary-color);
-}
-
 
 .mediaContainer{
     display: flex;

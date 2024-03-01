@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import styles from './layout.module.css';
 import { PageTypes } from '@/app/PageTypes';
 import { usePathname } from 'next/navigation';
@@ -15,10 +14,12 @@ interface NavLinkProps {
 }
 
 function NavLink({title, link, external=false, isActive}: NavLinkProps ){
-    generateClassList
     return (
       <motion.span 
       whileHover={{ scale: 1.1, backgroundColor: '#85ffa7', color:'black', padding:'0.5rem' }}
+      style={{
+        cursor: 'pointer',
+      }}
       >
         <a
           href={link}
@@ -29,6 +30,30 @@ function NavLink({title, link, external=false, isActive}: NavLinkProps ){
           ])}
         >
           {isActive ? title : `[${title}]`}
+        </a>
+      </motion.span>
+    );
+}
+
+function CTALink({title, link, external=false, isActive}: NavLinkProps ) {
+    return (
+      <motion.span 
+      whileHover={{ scale: 1.1, color:'black', padding:'0.5rem' }}
+      whileTap={{ scale: 0.9 }}
+      style={{
+        cursor: 'pointer',
+        padding: '0.5rem'
+      }}
+      >
+        <a
+          href={link}
+          target={external ? "_blank" : undefined}
+          className={generateClassList([
+            styles.ctaLink,
+            // isActive ? styles.activeLink : "",
+          ])}
+        >
+          {isActive ? title : `${title}`}
         </a>
       </motion.span>
     );
@@ -59,14 +84,17 @@ export default function Nav (props: any) {
             title="Projects"
             isActive={pathName.includes("projects")}
           />
-          {props.count[PageTypes.BLOG_POST] > 0 && (
             <NavLink
               key={"blog"}
               link={`/blog`}
               title={"Blog"}
               isActive={pathName.includes("blog")}
             />
-          )}
+          <CTALink
+            link="/start-a-project"
+            title="Start a project"
+            isActive={pathName.includes("projects")}
+          />
         </motion.nav>
       </header>
     );
