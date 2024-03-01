@@ -23,31 +23,17 @@ export const metadata: Metadata = {
   A Chicago based (freelance) programmer who can create your next mobile app, web application or embedded project',
 }
 
-
-async function getNav(){
-  return (await getPages())
-  .reduce((acc: any, {meta} :any) => {
-      if(!acc[meta?.type]){
-          acc[meta?.type] = 1;
-      }
-      else {
-          acc[meta?.type] += 1;
-      }
-      return acc;
-    }, {})
-}
 export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-    const count = await getNav();
   return (
     <html lang="en">
       <body className={inter.className}>
         <div className={styles.bodyContent}>
           <div className={styles.innerBodyContent}>
-            <Nav count={count} />
+            <Nav />
             <LoaderContainer>
               <AnimationContainer>
                 {children}

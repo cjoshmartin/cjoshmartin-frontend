@@ -6,7 +6,7 @@ import PortfolioPreview from './components/PortfolioPreview/PortfolioPreview'
 import PersonalPortfolioPreview from './components/PersonalPortfolioPreview'
 import { RandomIntFromInterval } from './randomIntFromInterval'
 import { getPages } from './components/api/pages'
-import HubSpotForm from './components/HubSpotForm/HubSpotForm'
+import CTASection from './components/CTASection/CTASection'
 
 interface AuthorImageData {
     url: string,
@@ -191,33 +191,7 @@ export default async function Home() {
       >
         <h2>[ Download Resume ]</h2>
       </a> */}
-     <div
-      style={{
-          backgroundColor: "var(--primary-color)",
-          color: "var(--secondary-color)",
-          width: "100%",
-          padding: "2rem",
-          display: 'flex',
-          alignItems: 'center',
-          flexDirection: 'column',
-          gap: '1rem',
-      }}
-     >
-      <h2>Read enough? Ready to start a project!</h2>
-        <a
-          style={{
-              textDecoration: 'none',
-              textTransform: 'capitalize',
-              backgroundColor: 'white',
-              color: 'black',
-              padding: '1rem',
-              fontSize: '1.2rem',
-              fontWeight: 700,
-              borderRadius: '5%'
-          }}
-          href="/start-a-project"
-        >Click here to get started</a>
-     </div>
+      <CTASection />
     </div>
   );
 }

@@ -39,6 +39,7 @@ function CTALink({title, link, external=false, isActive}: NavLinkProps ) {
     return (
       <motion.span 
       whileHover={{ scale: 1.1, color:'black', padding:'0.5rem' }}
+      whileTap={{ scale: 0.9 }}
       style={{
         cursor: 'pointer',
         padding: '0.5rem'
@@ -49,7 +50,7 @@ function CTALink({title, link, external=false, isActive}: NavLinkProps ) {
           target={external ? "_blank" : undefined}
           className={generateClassList([
             styles.ctaLink,
-            isActive ? styles.activeLink : "",
+            // isActive ? styles.activeLink : "",
           ])}
         >
           {isActive ? title : `${title}`}
@@ -83,14 +84,12 @@ export default function Nav (props: any) {
             title="Projects"
             isActive={pathName.includes("projects")}
           />
-          {props.count[PageTypes.BLOG_POST] > 0 && (
             <NavLink
               key={"blog"}
               link={`/blog`}
               title={"Blog"}
               isActive={pathName.includes("blog")}
             />
-          )}
           <CTALink
             link="/start-a-project"
             title="Start a project"

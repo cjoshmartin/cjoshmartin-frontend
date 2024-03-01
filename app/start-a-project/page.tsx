@@ -1,6 +1,8 @@
+'use client';
 import styles from './styles.module.css'
 
 import HubSpotForm from "../components/HubSpotForm/HubSpotForm";
+import TypeIt from 'typeit-react';
 
 export default function Page(){
 
@@ -10,22 +12,28 @@ export default function Page(){
           <h1> Start A Project</h1>
           <div
             style={{
-                padding: '0.5rem 1rem'
+              padding: "0.5rem 1rem",
             }}
           >
             <span>Josh Martin</span>
-            <br/>
+            <br />
             <span>Chicago, IL</span>
             <br />
             <span>contact@cjoshmartin.com</span>
           </div>
-          <p>
-            Lets gather a little info about your project so we can better help
-            you and get this process started!
-          </p>
-        <HubSpotForm />
+          <div
+            style={{
+              width: '500px',
+              padding: '1rem 2rem'
+            }}
+          >
+            <TypeIt>
+              Lets gather a little info about your project so we can better help
+              you and get this process started!
+            </TypeIt>
+          </div>
+          <HubSpotForm />
         </div>
-
       </div>
     );
 }
