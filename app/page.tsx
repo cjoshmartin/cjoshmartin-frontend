@@ -69,7 +69,7 @@ export default async function Home() {
         }
         all={testimonials}
       />
-      <div
+      {/* <div
         style={{
           backgroundColor: "var(--primary-color)",
           color: "var(--secondary-color)",
@@ -174,7 +174,7 @@ export default async function Home() {
             </div>
           </div>
         </div>
-      </div>
+      </div> */}
       <PortfolioPreview />
       <PersonalPortfolioPreview />
       {/* <h2>Experence</h2>
@@ -191,7 +191,6 @@ export default async function Home() {
       >
         <h2>[ Download Resume ]</h2>
       </a> */}
-     {/* <HubSpotForm /> */}
      <div
       style={{
           backgroundColor: "var(--primary-color)",
@@ -212,6 +211,7 @@ export default async function Home() {
               backgroundColor: 'white',
               color: 'black',
               padding: '1rem',
+              fontSize: '1.2rem',
               fontWeight: 700,
               borderRadius: '5%'
           }}

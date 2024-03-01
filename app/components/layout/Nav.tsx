@@ -41,6 +41,7 @@ function CTALink({title, link, external=false, isActive}: NavLinkProps ) {
       whileHover={{ scale: 1.1, color:'black', padding:'0.5rem' }}
       style={{
         cursor: 'pointer',
+        padding: '0.5rem'
       }}
       >
         <a

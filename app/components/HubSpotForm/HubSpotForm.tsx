@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect } from 'react';
+import {  useEffect } from 'react';
 import styles from './styles.module.css';
+import LoaderContainer from '../Loader/LoaderContainer';
 
 export default function HubSpotForm() {
     useEffect(() => {
@@ -23,10 +24,10 @@ export default function HubSpotForm() {
     }, []);
  
     return (
-        <div
-        className={styles.container}
-        >
-        <div id="hubspotForm" className={styles.hubspotForm}></div>
-        </div>
+      <div className={styles.container}>
+         <LoaderContainer >
+          <div id="hubspotForm" className={styles.hubspotForm}></div>
+         </LoaderContainer>
+      </div>
     );
  }
