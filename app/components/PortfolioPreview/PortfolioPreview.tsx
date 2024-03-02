@@ -8,13 +8,7 @@ import ActionButton from './ActionButton'
 import { getPages } from '../api/pages'
 
 async function getResults(){
-  return getPages()
-    .then((dataset) => { 
-      const homePageData = dataset.filter(
-        ({ meta, project_type }: any) => meta.type === PageTypes.PROJECT && project_type === ProjectType.Client
-      );
-      return homePageData
-    })
+  return getPages({type:PageTypes.PROJECT.toLowerCase(), project_type: ProjectType.Client})
 }
 
 export default async function PortfolioPreview(){

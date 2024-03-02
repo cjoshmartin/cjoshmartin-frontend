@@ -5,7 +5,7 @@ import Testimonial from './components/Testimonial'
 import PortfolioPreview from './components/PortfolioPreview/PortfolioPreview'
 import PersonalPortfolioPreview from './components/PersonalPortfolioPreview'
 import { RandomIntFromInterval } from './randomIntFromInterval'
-import { getPages } from './components/api/pages'
+import { getPages, getPreviewContent } from './components/api/pages'
 import CTASection from './components/CTASection/CTASection'
 
 interface AuthorImageData {
@@ -35,13 +35,10 @@ interface HomePageData {
 }
 
 async function getHomePageData(): Promise<HomePageData> {
-    return getPages()
-    .then((dataset) => {
-          const homePageData = dataset.find(
-            ({ meta }: any) => meta.type === PageTypes.HOME
-          );
-
-          const { blog_authors, body, testimonials } = homePageData;
+    return getPages({type: PageTypes.HOME})
+    .then((dataset ) => {
+          //@ts-ignore
+          const { blog_authors, body, testimonials } = dataset[0];
 
           return {
             blog_authors: [blog_authors[0]],
@@ -51,8 +48,32 @@ async function getHomePageData(): Promise<HomePageData> {
         });
 }
 
-export default async function Home() {
-  const {blog_authors, body, testimonials}: HomePageData  = await getHomePageData();
+async function getPreviewHomePageData(searchParams: object){
+  return getPreviewContent(searchParams)
+  .then(data =>{
+    const { blog_authors, body, testimonials } = data;
+    return {
+      blog_authors: [blog_authors[0]],
+      body,
+      testimonials,
+    };
+  })
+}
+
+export default async function Home({ searchParams }: {  
+  searchParams?: { [key: string]: string | string[] | undefined }
+}) 
+{
+  let content = undefined;
+
+  if(searchParams && Object.keys(searchParams).length > 0){
+    content = await getPreviewHomePageData(searchParams);
+  }
+  else {
+    content = await getHomePageData();
+  }
+
+  const {blog_authors, body, testimonials}: HomePageData  = content;
 
   return (
     <div className={styles.body}>

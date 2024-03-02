@@ -8,13 +8,7 @@ import { getPages } from '../api/pages';
 
 
 async function getResults(){
-  return getPages()
-    .then((dataset) => { 
-      const homePageData = dataset.filter(
-        ({ meta, project_type }: any) => meta.type === PageTypes.PROJECT && project_type === ProjectType.Personal
-      );
-      return homePageData
-    })
+  return getPages({type:PageTypes.PROJECT.toLowerCase(), project_type: ProjectType.Personal})
 }
 
 // Gifs have to be smaller then 10Mb is the requirement from the backend.

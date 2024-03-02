@@ -9,12 +9,7 @@ import { Metadata, ResolvingMetadata } from 'next';
 import { getPages } from '../components/api/pages';
 
 async function getResults(){
-  return getPages()
-    .then((dataset) => { 
-      return dataset.filter(
-        ({ meta }: any) => meta.type === PageTypes.PROJECT 
-      ) 
-    })
+  return getPages({type:PageTypes.PROJECT.toLowerCase()})
 }
 type Props = {
   params: { id: string }
