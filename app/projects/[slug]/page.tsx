@@ -4,10 +4,15 @@ import HtmlGenerator from '@/app/components/HtmlGenerator';
 import Testimonial from "@/app/components/Testimonial";
 import { GoBackLink } from "@/app/blog/[slug]/GoBackLink";
 import { Metadata, ResolvingMetadata } from "next";
-import { getFromSlug } from "@/app/components/api/pages";
+import { getFromSlug, getPreviewContent } from "@/app/components/api/pages";
 
 
-async function getPage(slug: string){
+async function getPage(slug: string, searchParams: any){
+  if(slug === 'preview'){
+    return await getPreviewContent(searchParams)
+  }
+
+
     return await getFromSlug(slug);
 }
 
@@ -21,44 +26,53 @@ export async function generateMetadata(
   parent: ResolvingMetadata
 ): Promise<Metadata> {
   
-    const {title} = await getPage(params.slug);
+    const {title} = await getPage(params.slug, searchParams);
 
   return {
     title: `${title} - Projects - Josh Martin\'s Website`,
   }
 }
 
-export default async function Page({ params }: { params: { slug: string } }){
-    const {title, body, content_image, client, medium, technologies, testimonials} = await getPage(params.slug);
+export default async function Page({
+  params,
+  searchParams,
+}: {
+  params: { slug: string };
+  searchParams?: { [key: string]: string | string[] | undefined }
+}) {
+  const {
+    title,
+    body,
+    content_image,
+    client,
+    medium,
+    technologies,
+    testimonials,
+  } = await getPage(params.slug, searchParams);
 
-    return (
-      <div className={styles.container}>
-        <GoBackLink href={'/projects'} />
-        <ShowImage
-          width={content_image?.width ?? 770}
-          height={content_image?.height ?? 360}
-          url={content_image?.url}
-          className={styles.headerImage}
-        />
-        <div className={styles.projectInfo}>
-          <h2>{title}</h2>
-          {client &&<h3 style={{ fontWeight: "400" }}>Client: {client}</h3>}
-          <h4>Medium: {medium?.join(', and ')}</h4>
-          <h5>Technologies: {technologies.join(", ")}</h5>
-        </div>
-        <div className={styles.testimonials}>
-        {
-          testimonials.map(({testimonial}: any, i: number)  => (
-            <Testimonial 
-              testimonial={testimonial}
-              key={i}
-            />
-          ))
-        }          
-        </div>
-        <div className={styles.contentArea}>
-            <HtmlGenerator body={body}/>
-        </div>
+  return (
+    <div className={styles.container}>
+      <GoBackLink href={"/projects"} />
+      <ShowImage
+        width={content_image?.width ?? 770}
+        height={content_image?.height ?? 360}
+        url={content_image?.url}
+        className={styles.headerImage}
+      />
+      <div className={styles.projectInfo}>
+        <h2>{title}</h2>
+        {client && <h3 style={{ fontWeight: "400" }}>Client: {client}</h3>}
+        <h4>Medium: {medium?.join(", and ")}</h4>
+        <h5>Technologies: {technologies.join(", ")}</h5>
       </div>
-    );
+      <div className={styles.testimonials}>
+        {testimonials.map(({ testimonial }: any, i: number) => (
+          <Testimonial testimonial={testimonial} key={i} />
+        ))}
+      </div>
+      <div className={styles.contentArea}>
+        <HtmlGenerator body={body} />
+      </div>
+    </div>
+  );
 }

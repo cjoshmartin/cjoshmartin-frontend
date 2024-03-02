@@ -31,7 +31,7 @@ export default async function Page({ searchParams }: {
                 base = '/blog/preview'
                 break;
             case PageTypes.PROJECT.toLowerCase():
-                base = '/project/preview'
+                base = '/projects/preview'
         }
         redirect(base + path);
     }
