@@ -35,13 +35,10 @@ interface HomePageData {
 }
 
 async function getHomePageData(): Promise<HomePageData> {
-    return getPages()
-    .then((dataset) => {
-          const homePageData = dataset.find(
-            ({ meta }: any) => meta.type === PageTypes.HOME
-          );
-
-          const { blog_authors, body, testimonials } = homePageData;
+    return getPages({type: PageTypes.HOME})
+    .then((dataset ) => {
+          //@ts-ignore
+          const { blog_authors, body, testimonials } = dataset[0];
 
           return {
             blog_authors: [blog_authors[0]],
@@ -199,8 +196,8 @@ export default async function Home({ searchParams }: {
           </div>
         </div>
       </div> */}
-      {/* <PortfolioPreview />
-      <PersonalPortfolioPreview /> */}
+      <PortfolioPreview />
+      <PersonalPortfolioPreview />
       {/* <h2>Experence</h2>
      <h2>Brands I have worked with</h2>
      <h2>What do I Do?</h2> */}
