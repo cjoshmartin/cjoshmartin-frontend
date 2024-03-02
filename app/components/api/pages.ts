@@ -37,7 +37,8 @@ export async function getFromSlug(slug: string){
 }
 
 export async function getPreviewContent({content_type, token}: any){
-    const apiEndpoint = "http://0.0.0.0:8000"
+    const apiEndpoint = process?.env?.API_URL ?? "http://0.0.0.0:8000"
+    console.log('The url is: ', apiEndpoint);
     const path = `/api/page_preview/1/?content_type=${encodeURIComponent(content_type)}&token=${encodeURIComponent(token)}&format=json`;
     const apiCall = apiEndpoint + path;
    return fetch(apiCall, {
