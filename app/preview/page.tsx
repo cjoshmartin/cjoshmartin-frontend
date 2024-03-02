@@ -14,7 +14,7 @@ export default async function Page({ searchParams }: {
     }) 
     {
     if (!searchParams || Object.keys(searchParams).length < 1){
-        redirect('/')
+        // redirect('/')
     }
 
     const {content_type, token} = searchParams;
