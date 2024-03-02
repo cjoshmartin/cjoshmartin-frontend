@@ -1,15 +1,9 @@
 import { redirect } from "next/navigation";
 import { PageTypes } from "../PageTypes";
 
-async function getPreviewContent({content_type, token }: any){
-    const apiEndpoint = "http://0.0.0.0:8000"
-    const path = `/api/page_preview/1/?content_type=${encodeURIComponent(content_type)}&token=${encodeURIComponent(token)}&format=json`;
-    const apiCall = apiEndpoint + path;
-   return fetch(apiCall)
-   .then(data => data.json())
-}
 
-export default async function Page({ searchParams }: {  
+export default async function Page({ params, searchParams }: {  
+        params?: any
         searchParams?: { [key: string]: string | string[] | undefined }
     }) 
     {
@@ -40,12 +34,5 @@ export default async function Page({ searchParams }: {
     }
 
 
-    const {title, body, date, id} = await getPreviewContent(searchParams);
-    return (
-        <div>
-            <h2>{title}</h2>
-            <h3>content_type: {content_type}</h3>
-            <h3>token: {token}</h3>
-        </div>
-    );
+    return (<div/>);
 }
