@@ -3,7 +3,7 @@
 import { DiscussionEmbed } from "disqus-react";
 
 export default function Comments({slug, id, title}: any){
-    return <div />;
+    // return <div />;
 
     return (
           <DiscussionEmbed
