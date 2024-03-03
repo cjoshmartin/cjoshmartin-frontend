@@ -20,76 +20,76 @@ import { motion } from "framer-motion";
 export function ProjectTypeButtons({ searchParams, projectTypeCounts }: any) {
   return (
     <div className={styles.buttonGroup}>
-      <motion.span
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0, transition: { delay: 0.2 } }}
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.9 }}
-        style={{
-          padding: "1rem 0",
+      <Link
+        href={{
+          pathname: "/projects",
+          query: { ...searchParams, project_type: undefined },
         }}
+        className={!searchParams?.project_type ? styles.activeLink : undefined}
       >
-        <Link
-          href={{
-            pathname: "/projects",
-            query: { ...searchParams, project_type: undefined },
+        <motion.span
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0, transition: { delay: 0.2 } }}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.9 }}
+          style={{
+            padding: "1rem 0",
           }}
-          className={
-            !searchParams?.project_type ? styles.activeLink : undefined
-          }
         >
           All (
           {projectTypeCounts[ProjectType.Client] +
             projectTypeCounts[ProjectType.Personal]}
           ) Projects
-        </Link>
-      </motion.span>
-      <motion.span
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0, transition: { delay: 0.2 } }}
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.9 }}
-        style={{
-          padding: "1rem 0",
+        </motion.span>
+      </Link>
+
+      <Link
+        href={{
+          pathname: "/projects",
+          query: { ...searchParams, project_type: ProjectType.Client },
         }}
+        className={
+          searchParams?.project_type === ProjectType.Client
+            ? styles.activeLink
+            : undefined
+        }
       >
-        <Link
-          href={{
-            pathname: "/projects",
-            query: { ...searchParams, project_type: ProjectType.Client },
+        <motion.span
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0, transition: { delay: 0.2 } }}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.9 }}
+          style={{
+            padding: "1rem 0",
           }}
-          className={
-            searchParams?.project_type === ProjectType.Client
-              ? styles.activeLink
-              : undefined
-          }
         >
           Client ({projectTypeCounts[ProjectType.Client]}) Projects
-        </Link>
-      </motion.span>
-      <motion.span
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0, transition: { delay: 0.2 } }}
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.9 }}
-        style={{
-          padding: "1rem 0",
+        </motion.span>
+      </Link>
+
+      <Link
+        href={{
+          pathname: "/projects",
+          query: { ...searchParams, project_type: ProjectType.Personal },
         }}
+        className={
+          searchParams?.project_type === ProjectType.Personal
+            ? styles.activeLink
+            : undefined
+        }
       >
-        <Link
-          href={{
-            pathname: "/projects",
-            query: { ...searchParams, project_type: ProjectType.Personal },
+        <motion.span
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0, transition: { delay: 0.2 } }}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.9 }}
+          style={{
+            padding: "1rem 0",
           }}
-          className={
-            searchParams?.project_type === ProjectType.Personal
-              ? styles.activeLink
-              : undefined
-          }
         >
           Personal ({projectTypeCounts[ProjectType.Personal]}) Projects
-        </Link>
-      </motion.span>
+        </motion.span>
+      </Link>
     </div>
   );
 }

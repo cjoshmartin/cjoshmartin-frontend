@@ -42,12 +42,10 @@
     border-radius: 1rem;
     font-weight: 700;
     border: 1px solid;
-}
-
-.buttonGroup a {
     background-color: black;
     color: white;
 }
+
 .activeLink {
     background-color: var(--primary-color) !important;
     color: var(--secondary-color) !important;
