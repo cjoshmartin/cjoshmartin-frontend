@@ -50,20 +50,18 @@ export async function generateMetadata(
     }
     const fullTitle = `Home - ${seo.sitename}`;
 
-    let description = content.intro;
-    if (meta.seo_title && meta.seo_title.length > 0) {
-      description = meta.seo_title
-    }
     const image = content?.blog_authors[0].author?.image?.file || seo.defaultImg
 
   return {
-    description,
+    description: 'This website showcase the work of Josh Martin.\
+    A Chicago based (freelance) programmer who can create your next mobile app, web application or embedded project',
     title: fullTitle,
     // metadataBase: new URL('http://badideas.cards'),
     openGraph: {
       title,
       siteName: seo.sitename,
-      description: description,
+      description: 'This website showcase the work of Josh Martin.\
+      A Chicago based (freelance) programmer who can create your next mobile app, web application or embedded project',
       images: image,
     },
   };
