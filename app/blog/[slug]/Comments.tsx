@@ -7,10 +7,10 @@ export default function Comments({slug, id, title}: any){
 
     return (
           <DiscussionEmbed
-            shortname={slug}
+            shortname={"cjoshmartin"}
             config={{
               url: `https://cjoshmartin.com/blog/${slug}`,
-              identifier: `blog-${id}`,
+              identifier: id,
               title: title,
             }}
           />
