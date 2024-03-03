@@ -38,12 +38,14 @@
 }
 
 .buttonGroup a {
-    padding: 1rem;
+    padding: 0.5rem;
     border-radius: 1rem;
     font-weight: 700;
     border: 1px solid;
     background-color: black;
     color: white;
+    display: flex;
+    align-items: center;
 }
 
 .activeLink {
