@@ -23,7 +23,7 @@ export default function Page(){
           </div>
           <div
             style={{
-              width: '500px',
+              maxWidth: '500px',
               padding: '1rem 2rem'
             }}
           >
