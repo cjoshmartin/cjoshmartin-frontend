@@ -7,6 +7,8 @@ import PersonalPortfolioPreview from './components/PersonalPortfolioPreview'
 import { RandomIntFromInterval } from './randomIntFromInterval'
 import { getPages, getPreviewContent } from './components/api/pages'
 import CTASection from './components/CTASection/CTASection'
+import { Metadata, ResolvingMetadata } from 'next'
+import seo from '@/app/components/SEO'
 
 interface AuthorImageData {
     url: string,
@@ -32,6 +34,39 @@ interface HomePageData {
   blog_authors: AuthorEntryData[],
   body: string,
   testimonials: any[]
+}
+
+export async function generateMetadata(
+  { params, searchParams }: any,
+  parent: ResolvingMetadata
+): Promise<Metadata> {
+  
+    const content: any = (await getPages({type: PageTypes.HOME}))[0];
+    
+    const {meta} = content;
+    let title =  content.title;
+    if (meta?.seo_title && meta?.seo_title.length > 0){
+      title = meta?.seo_title;
+    }
+    const fullTitle = `Home - ${seo.sitename}`;
+
+    let description = content.intro;
+    if (meta.seo_title && meta.seo_title.length > 0) {
+      description = meta.seo_title
+    }
+    const image = content?.blog_authors[0].author?.image?.file || seo.defaultImg
+
+  return {
+    description,
+    title: fullTitle,
+    // metadataBase: new URL('http://badideas.cards'),
+    openGraph: {
+      title,
+      siteName: seo.sitename,
+      description: description,
+      images: image,
+    },
+  };
 }
 
 async function getHomePageData(): Promise<HomePageData> {

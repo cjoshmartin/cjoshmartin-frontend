@@ -1,6 +1,4 @@
-
-
-import generateURL from "@/app/components/generateURL"
+import seo from '@/app/components/SEO'
 import ShowImage from '@/app/blog/_compoents/ShowImage'
 
 import styles from './blogpost.module.css'
@@ -25,11 +23,32 @@ export async function generateMetadata(
   parent: ResolvingMetadata
 ): Promise<Metadata> {
   
-    const {title} = await getPage(params.slug, searchParams);
+    const content = await getPage(params.slug, searchParams);
+    const {meta} = content
+    let title =  content.title;
+    if (meta?.seo_title && meta?.seo_title.length > 0){
+      title = meta?.seo_title;
+    }
+    const fullTitle = `${title} - Blog - ${seo.sitename}`;
+
+    let description = content.intro;
+    if (meta.seo_title && meta.seo_title.length > 0) {
+      description = meta.seo_title
+    }
 
   return {
-    title: `${title} - Blog - Josh Martin\'s Website`,
-  }
+    description,
+    title: fullTitle,
+    openGraph: {
+      title,
+      siteName: seo.sitename,
+      description: description,
+      images:
+        content.content_image?.url ||
+        content.preview_image?.url ||
+        seo.defaultImg,
+    },
+  };
 }
 
 export default async function Page({
