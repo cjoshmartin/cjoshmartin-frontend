@@ -1,2 +1,2 @@
-const URL = "http://159.203.93.178";
+const URL = "https://backend.cjoshmartin.com";
 export default URL;
