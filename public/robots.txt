@@ -1,0 +1,12 @@
+# Block all crawlers for /accounts
+User-agent: *
+Disallow: /admin
+
+User-agent: *
+Disallow: /ascii
+
+# Allow all crawlers
+User-agent: *
+Allow: /
+
+Sitemap: https://cjoshmartin.com/sitemap.xml
