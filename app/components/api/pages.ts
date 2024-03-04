@@ -12,7 +12,7 @@ export async function getPages(params?: object){
 
     const pages = await fetch(url, {
       // cache: 'no-cache'
-      next: { revalidate: 3600 }
+      next: { revalidate: 86390 }
     }
     )
     .then(response => response.json())
@@ -35,7 +35,7 @@ export async function getPages(params?: object){
 export async function getFromSlug(slug: string){
 
     const id = await fetch(`${URL}/api/pages/?fields=_,id&slug=${slug}`,{
-      next: { revalidate: 3600 }
+      next: { revalidate: 86390 }
     })
     .then(data => data.json())
     .then(({items}: any) => items[0].id)
