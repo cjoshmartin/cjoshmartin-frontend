@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { GoogleAnalytics } from '@next/third-parties/google'
 import { IBM_Plex_Mono } from 'next/font/google'
 import './globals.css'
 import Nav from './components/layout/Nav';
@@ -10,7 +11,6 @@ import "@fortawesome/fontawesome-svg-core/styles.css";
 import { config } from "@fortawesome/fontawesome-svg-core";
 import AnimationContainer from './components/layout/AnimationContainer';
 import LoaderContainer from './components/Loader/LoaderContainer';
-import { getPages } from './components/api/pages';
 config.autoAddCss = false;
 
 
@@ -43,6 +43,7 @@ export default async function RootLayout({
           </div>
         </div>
       </body>
+      <GoogleAnalytics gaId="G-P8XH0GSQTV" />
     </html>
   );
 }

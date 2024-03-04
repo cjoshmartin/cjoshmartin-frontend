@@ -76,6 +76,12 @@ export default async function Page({
         <div className={styles.content}>
           <HtmlGenerator body={body} />
         </div>
+        <hr 
+          style={{
+            marginTop: '2rem',
+            marginBottom: '1rem'
+          }}
+        />
         <AuthorInfo {...author}/>
         <Comments slug={params.slug} id={id} title={title} />
       </div>
