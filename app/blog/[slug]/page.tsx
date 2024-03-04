@@ -8,14 +8,19 @@ import Comments from "./Comments"
 import { GoBackLink } from "./GoBackLink"
 import { Metadata, ResolvingMetadata } from "next"
 import { getFromSlug, getPreviewContent } from "@/app/components/api/pages"
+import { AuthorInfo } from './AuthorInfo/AuthorInfo'
 
 async function getPage(slug: string, searchParams: any){
   if(slug === 'preview'){
     return await getPreviewContent(searchParams)
   }
+    const content =  await getFromSlug(slug);
+    const {blog_authors} = content;
 
-
-    return await getFromSlug(slug);
+    return {
+      ...content, 
+      author: blog_authors[0].author
+    };
 }
 
 export async function generateMetadata(
@@ -32,7 +37,7 @@ export async function generateMetadata(
     const fullTitle = `${title} - Blog - ${seo.sitename}`;
 
     let description = content.intro;
-    if (meta.seo_title && meta.seo_title.length > 0) {
+    if (meta?.seo_title && meta.seo_title.length > 0) {
       description = meta.seo_title
     }
 
@@ -60,7 +65,7 @@ export default async function Page({
   };
   searchParams?: { [key: string]: string | string[] | undefined };
 }) {
-  const { title, body, date, id } = await getPage(params.slug, searchParams);
+  const { title, body, date, id , author } = await getPage(params.slug, searchParams);
   return (
     <div className={styles.container}>
       <GoBackLink href="/blog" />
@@ -71,7 +76,13 @@ export default async function Page({
         <div className={styles.content}>
           <HtmlGenerator body={body} />
         </div>
-
+        <hr 
+          style={{
+            marginTop: '2rem',
+            marginBottom: '1rem'
+          }}
+        />
+        <AuthorInfo {...author}/>
         <Comments slug={params.slug} id={id} title={title} />
       </div>
     </div>

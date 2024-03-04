@@ -1,0 +1,22 @@
+.container {
+    background-color: var(--primary-color);
+    color: black;
+
+    display: flex;
+    flex-direction: row;
+    gap: 1rem;
+    padding: 2rem;
+}
+
+.authorImage {
+    width: 300px;
+    height: 300px;
+    object-fit: cover;
+    object-position: 50% 50%;
+    border-radius: 1rem;
+}
+
+.jobInfo {
+    display: flex;
+    flex-direction: column;
+}
