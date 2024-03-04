@@ -12,7 +12,9 @@ export async function getPages(params?: object){
 
     const pages = await fetch(url, {
       // cache: 'no-cache'
-    })
+      next: { revalidate: 3600 }
+    }
+    )
     .then(response => response.json())
     .then(data => data.items.filter(({meta}: any) => meta.type !== PageTypes.BLOG_INDEX));
 
@@ -32,7 +34,9 @@ export async function getPages(params?: object){
 
 export async function getFromSlug(slug: string){
 
-    const id = await fetch(`${URL}/api/pages/?fields=_,id&slug=${slug}`)
+    const id = await fetch(`${URL}/api/pages/?fields=_,id&slug=${slug}`,{
+      next: { revalidate: 3600 }
+    })
     .then(data => data.json())
     .then(({items}: any) => items[0].id)
 
