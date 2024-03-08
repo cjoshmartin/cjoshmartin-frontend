@@ -64,6 +64,9 @@ export async function generateMetadata(
       A Chicago based (freelance) programmer who can create your next mobile app, web application or embedded project',
       images: image,
     },
+    alternates: {
+      canonical: "https://cjoshmartin.com",
+    },
   };
 }
 

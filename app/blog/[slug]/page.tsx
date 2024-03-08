@@ -53,6 +53,9 @@ export async function generateMetadata(
         content.preview_image?.url ||
         seo.defaultImg,
     },
+    alternates: {
+      canonical: "https://cjoshmartin.com",
+    },
   };
 }
 

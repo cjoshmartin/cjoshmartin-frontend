@@ -21,6 +21,9 @@ export const metadata: Metadata = {
   title: 'Home - Josh Martin\'s Website',
   description: 'This website showcase the work of Josh Martin.\
   A Chicago based (freelance) programmer who can create your next mobile app, web application or embedded project',
+  alternates: {
+    canonical: "https://cjoshmartin.com",
+  },
 }
 
 export default async function RootLayout({
