@@ -43,9 +43,10 @@ function AreaPicker({type, value}: any){
             return <CodeArea value={value}/>
 
         case TypeOfContent.STL_FILE:
-            return <STLFileArea value={value} />
+            // return <STLFileArea value={value} />
         default:
-            return <h1><b>SOMETHING BROKEN!!!</b></h1>;
+            return null
+            // return <h1><b>SOMETHING BROKEN!!!</b></h1>;
     }
 }
 
