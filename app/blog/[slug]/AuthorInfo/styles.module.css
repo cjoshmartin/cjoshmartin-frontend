@@ -15,8 +15,23 @@
     object-position: 50% 50%;
     border-radius: 1rem;
 }
+.container p {
+    padding: 1rem 0;
+}
 
 .jobInfo {
     display: flex;
     flex-direction: column;
+}
+
+
+@media only screen and (max-width: 900px){
+    .container{ 
+        display: block;
+        margin: 1rem;
+    }
+    .authorImage {
+        display: none;
+    }
+
 }

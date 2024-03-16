@@ -34,7 +34,9 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <div className={styles.bodyContent}>
+        <div 
+        className={styles.bodyContent}
+        >
           <div className={styles.innerBodyContent}>
             <Nav />
             <LoaderContainer>
