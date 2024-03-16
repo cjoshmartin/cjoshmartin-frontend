@@ -43,6 +43,7 @@ export async function generateMetadata(
   return {
     description,
     title: fullTitle,
+    authors: [{name: "Josh Martin"}],
     openGraph: {
       title,
       siteName: seo.sitename,

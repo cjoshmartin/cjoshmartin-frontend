@@ -41,7 +41,6 @@ export function STLFileArea({ value }: any) {
 
     return (
       <div className="App">
-        <h3>{title}</h3>
         <Canvas
           style={{ height: "400px", border: "5px solid white" }}
           camera={{ position: [350, 100, 0], fov: 10 }}
@@ -61,6 +60,7 @@ export function STLFileArea({ value }: any) {
           <ambientLight intensity={1.5} />
           {/* <axesHelper args={[20]} /> */}
         </Canvas>
+        <p style={{marginTop: '0.5rem'}}><i>(click and drag to see around the model)</i></p>
       </div>
     );
 }

@@ -3,7 +3,9 @@
 enum TypeOfContent {
     RICHTEXT = "full_richtext",
     CODE = "code",
-    STL_FILE = "stl_picker"
+    STL_FILE = "stl_picker",
+    VIDEO = "media",
+
 
 }
 
@@ -34,6 +36,13 @@ import { ReactNode } from 'react';
 import { STLFileArea } from './STLFileArea';
 
 
+function VideoArea(value: any){
+    const {url} = value.value;
+
+    console.log(url)
+    return <video src={url} autoPlay loop playsInline controls muted/>
+}
+
 function AreaPicker({type, value}: any){
     switch (type) {
         case TypeOfContent.RICHTEXT:
@@ -43,7 +52,9 @@ function AreaPicker({type, value}: any){
             return <CodeArea value={value}/>
 
         case TypeOfContent.STL_FILE:
-            // return <STLFileArea value={value} />
+            return <STLFileArea value={value} />
+        case TypeOfContent.VIDEO:
+            return <VideoArea value={value}/>
         default:
             return null
             // return <h1><b>SOMETHING BROKEN!!!</b></h1>;
