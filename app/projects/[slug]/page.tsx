@@ -6,6 +6,8 @@ import { GoBackLink } from "@/app/blog/[slug]/GoBackLink";
 import { Metadata, ResolvingMetadata } from "next";
 import { getFromSlug, getPreviewContent } from "@/app/components/api/pages";
 import seo from '@/app/components/SEO'
+import { AuthorInfo } from "@/app/blog/[slug]/AuthorInfo/AuthorInfo";
+import Comments from "@/app/blog/[slug]/Comments";
 
 
 async function getPage(slug: string, searchParams: any){
@@ -71,6 +73,8 @@ export default async function Page({
     medium,
     technologies,
     testimonials,
+    author,
+    id
   } = await getPage(params.slug, searchParams);
 
   return (
@@ -96,6 +100,8 @@ export default async function Page({
       <div className={styles.contentArea}>
         <HtmlGenerator body={body} />
       </div>
+      {/* <AuthorInfo {...author} /> */}
+      <Comments slug={params.slug} id={id} title={title} />
     </div>
   );
 }
