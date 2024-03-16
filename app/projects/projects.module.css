@@ -125,6 +125,6 @@
 
 @media only screen and (max-width: 900px){
     .projectImage {
-        width: 100%;
+        max-width: 100%;
     }
 }
