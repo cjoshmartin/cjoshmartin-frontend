@@ -37,9 +37,14 @@ https://www.joshwcomeau.com/css/custom-css-reset/
   /*
     5. Improve media defaults
   */
-  img, picture, video, canvas, svg {
+  img, picture, canvas, svg {
     display: block;
     max-width: 100%;
+  }
+  video {
+      display: block;
+      max-width: 100%;
+      max-height: 550px;
   }
   /*
     6. Remove built-in form typography styles
