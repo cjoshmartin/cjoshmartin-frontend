@@ -11,7 +11,7 @@
 
 .image {
     width: 208px;
-    height: 157px;
+    height: 200px;
     font-size: 8px;
     letter-spacing: -2px;
     text-wrap: nowrap;
@@ -63,7 +63,7 @@
     .image {
         padding-top: inherit;
         margin: inherit;
-        height: 177px;
+        height: 200px;
     }
     .contentContainer {
         margin: inherit;
