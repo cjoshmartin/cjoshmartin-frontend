@@ -29,7 +29,8 @@ export async function getPages(params?: object){
       results.push(result);
     }
 
-    return results;
+    //@ts-ignore
+    return results.sort((a: object, b: object) => (new Date(b.date)) - (new Date(a.date)));
 }
 
 export async function getFromSlug(slug: string){
