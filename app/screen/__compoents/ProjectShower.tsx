@@ -70,7 +70,7 @@ export default function ProjectShower(props: ProjectShowerProps) {
     }, [currentProject?.title, props.projects ])
 
     useEffect(() =>{
-      const increaseAmount = setTime /150;
+      const increaseAmount = (setTime /50) + 100;
       const timeoutId = setTimeout(() =>{
         const nextProgress = progress + increaseAmount
         if (nextProgress < (setTime + 1)){
