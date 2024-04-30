@@ -45,26 +45,43 @@ interface ProjectShowerProps {
 }
 
 export default function ProjectShower(props: ProjectShowerProps) {
-    const [currentProject, setCurrentProject] = useState<Project | undefined>(props.projects[2]);
     const [currentIndex, setCurrentIndex] = useState<number>(0);
+    const [currentProject, setCurrentProject] = useState<Project | undefined>(props.projects[3]);
+    const [progress, setProgress] = useState<number>(0);
     
     const setTime = 15000;
+
     useEffect(() => { 
-      let alotedTime = setTime;
-       setTimeout(() => {
+       const timeoutId = setTimeout(() => {
             console.log("Changing State: ", currentProject?.title)
-            setCurrentProject(props.projects[currentIndex])
-            const nextIndex = (currentIndex + 1) % props.projects.length;
+            let nextIndex = Math.floor(Math.random() * props.projects.length);
+            while (nextIndex == currentIndex){
+              console.log("same index")
+              nextIndex = Math.floor(Math.random() * props.projects.length)
+            }
             setCurrentIndex(nextIndex);
-            alotedTime = 15000;
+            setCurrentProject(props.projects[currentIndex])
+            setProgress(0);
         },setTime)
+    return () => {
+      clearTimeout(timeoutId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentProject?.title, props.projects ])
 
-        setInterval(function() {
-          alotedTime -= 50;
-          console.log('Time left: '+(alotedTime)+'s');
-      }, 50);
+    useEffect(() =>{
+      const increaseAmount = setTime /150;
+      const timeoutId = setTimeout(() =>{
+        const nextProgress = progress + increaseAmount
+        if (nextProgress < (setTime + 1)){
+          setProgress(nextProgress);
+        }
+      }, increaseAmount)
 
-    }, [currentIndex, currentProject?.title, props.projects ])
+      return () => {
+        clearTimeout(timeoutId)
+      }
+    }, [progress])
 
     if (!currentProject){
         return (
@@ -104,7 +121,11 @@ export default function ProjectShower(props: ProjectShowerProps) {
           height: '20px',
           border: '1px soild black'
         }}>
-          <motion.div style={{ width: '50%', backgroundColor: 'var(--primary-color)', height: '20px' }} />
+          <motion.div 
+          initial={{opacity: 0, y: 40, width: 0}}
+          animate={{opacity: 1, y: 0, width: `${(progress/setTime) * 100}%`
+          }}
+          style={{backgroundColor: 'var(--primary-color)', height: '20px' }} />
         </motion.div>
       </motion.div>
     );
