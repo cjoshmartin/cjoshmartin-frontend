@@ -1,4 +1,3 @@
-import ShowImage from "@/app/blog/_compoents/ShowImage";
 import styles from './projectPage.module.css';
 import HtmlGenerator from '@/app/components/HtmlGenerator';
 import Testimonial from "@/app/components/Testimonial";
@@ -8,6 +7,7 @@ import { getFromSlug, getPreviewContent } from "@/app/components/api/pages";
 import seo from '@/app/components/SEO'
 import { AuthorInfo } from "@/app/blog/[slug]/AuthorInfo/AuthorInfo";
 import Comments from "@/app/blog/[slug]/Comments";
+import HeaderGenerator from "@/app/components/HeaderGenerator";
 
 
 async function getPage(slug: string, searchParams: any){
@@ -68,6 +68,7 @@ export default async function Page({
   const {
     title,
     body,
+    content_visuals,
     content_image,
     client,
     medium,
@@ -80,11 +81,10 @@ export default async function Page({
   return (
     <div className={styles.container}>
       <GoBackLink href={"/projects"} />
-      <ShowImage
-        width={content_image?.width ?? 770}
-        height={content_image?.height ?? 360}
-        url={content_image?.url}
+      <HeaderGenerator
         className={styles.headerImage}
+        content_visuals={content_visuals}
+        content_image={content_image}
       />
       <div className={styles.projectInfo}>
         <h2>{title}</h2>
