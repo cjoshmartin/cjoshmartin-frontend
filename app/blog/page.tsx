@@ -17,6 +17,8 @@ async function getBlogPosts(){
 
 }
 
+
+
 export const metadata: Metadata = {
   title: 'Blog - Josh Martin\'s Website',
 }
@@ -27,13 +29,14 @@ export default async function Blog(){
     return (
       <div className={styles.container}>
         <h1>Blog</h1>
-        {blogPosts.map(({ id, meta, date, title, intro }: any) => (
+        {blogPosts.map(({ id, meta, date, title, intro, content_visuals}: any) => (
           <BlogListItem
             key={id}
             title={title}
             slug={meta.slug}
             publishDate={date}
             intro={intro}
+            content_visuals={content_visuals}
           />
         ))}
       </div>
