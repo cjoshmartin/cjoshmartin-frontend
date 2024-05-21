@@ -42,6 +42,9 @@ export async function generateMetadata(
       description = meta.seo_title
     }
 
+
+    const {content_visuals} = content;
+    const  {type, value} = content_visuals.length > 0 ? content_visuals[0] : {type: "", value: undefined};
   return {
     description,
     title: fullTitle,
@@ -50,6 +53,7 @@ export async function generateMetadata(
       siteName: seo.sitename,
       description: description,
       images:
+        type == "image" ? value?.url : undefined ||
         content.content_image?.url ||
         content.preview_image?.url ||
         seo.defaultImg,
