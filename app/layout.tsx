@@ -11,6 +11,7 @@ import "@fortawesome/fontawesome-svg-core/styles.css";
 import { config } from "@fortawesome/fontawesome-svg-core";
 import AnimationContainer from './components/layout/AnimationContainer';
 import LoaderContainer from './components/Loader/LoaderContainer';
+import GoogleAdsense from './components/GoogleAdsense';
 config.autoAddCss = false;
 
 
@@ -48,6 +49,7 @@ export default async function RootLayout({
           </div>
         </div>
       </body>
+      <GoogleAdsense pId="8241145315698443"/>
       <GoogleAnalytics gaId="G-P8XH0GSQTV" />
     </html>
   );
