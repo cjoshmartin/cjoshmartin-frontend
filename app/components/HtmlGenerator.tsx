@@ -25,7 +25,6 @@ function CodeArea({value}: any){
         language={value.language}
         style={gruvboxDark}
         showLineNumbers={true}
-        wrapLongLines={true}
       >
         {value.text}
       </SyntaxHighlighter>
