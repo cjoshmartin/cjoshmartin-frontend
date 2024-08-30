@@ -122,7 +122,7 @@ export default async function Home({ searchParams }: {
         title="What People Have To Say,"
         testimonial={
           testimonials[RandomIntFromInterval(0, testimonials.length - 1)]
-            .testimonial
+            ?.testimonial
         }
         all={testimonials}
       />

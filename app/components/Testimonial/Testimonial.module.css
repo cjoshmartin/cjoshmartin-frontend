@@ -21,6 +21,7 @@
     border-color: black;
     border-style: solid;
     background-color: black;
+    overflow: hidden;
 }
 
 .contentContainer {

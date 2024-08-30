@@ -57,6 +57,10 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
   //   console.log(test.body)
   // }, [test])
 
+  if(!test){
+    return test
+  }
+
   return (
     <div
       style={{
@@ -93,7 +97,7 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
           />
         </div>
         <div className={styles.contentContainer}>
-          {stripHtml(test.body).result}
+          {test?.body && stripHtml(test.body)?.result}
           <div
             className={styles.infoContainer}
             style={{
@@ -101,7 +105,7 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
             }}
           >
             <h3>
-              <a href={test.link} target="blank">
+              <a href={test?.link} target="blank">
                 {test.first_name} {test.last_name}
               </a>
             </h3>

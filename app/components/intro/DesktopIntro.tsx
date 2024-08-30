@@ -67,7 +67,7 @@ function ClickableLink(props: ClickableLinkProps) {
 export default function DesktopIntro(props: DesktopIntroProps){
   let author: AuthorData | undefined = undefined;
   if (props?.blog_authors && props?.blog_authors.length > 0) {
-    author = props?.blog_authors[0].author;
+    author = props?.blog_authors[0]?.author;
   }
 
   return (
