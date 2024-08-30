@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { ProjectType } from '../../components/PortfolioPreview/ProjectType';
 import { generateClassList } from './generateClassList';
 import { useEffect, useState } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faArrowUpRightFromSquare } from '@fortawesome/free-solid-svg-icons';
 
 interface ProjectListingItemProps {
     data: any
@@ -29,7 +31,11 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
           : "",
       ])}
     >
-      <div>
+      <div 
+        style={{
+          position: 'relative',
+        }}
+      >
         <ShowImage
           width={content_image?.width ?? 480}
           height={content_image?.height ?? 320}
@@ -38,7 +44,7 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
           className={styles.projectImage}
         />
         {isNoContent && (
-          <p className={styles.noContent}>No content write up (yet)</p>
+          <p className={styles.noContent}>No write up (yet)</p>
         )}
       </div>
       <div>
@@ -56,6 +62,10 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
             target={isNoContent ? "_blank" : undefined}
           >
             {isNoContent ? "Visit Project Website" : "Read More..."}
+            {` `}
+            {isNoContent &&
+              <FontAwesomeIcon icon={faArrowUpRightFromSquare} />
+            }
           </Link>
         </div>
       </div>

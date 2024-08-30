@@ -4,6 +4,8 @@ import { motion } from 'framer-motion';
 import styles from './PortfolioPreview.module.css';
 import ShowImage from '@/app/blog/_compoents/ShowImage';
 import { useEffect, useState } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faArrowUpRightFromSquare } from '@fortawesome/free-solid-svg-icons';
 
 export interface ProjectItemProps {
   previewImage?: string
@@ -46,7 +48,11 @@ export function ProjectItem(props: ProjectItemProps) {
       whileHover={{ scale: 1.1 }}
       className={styles.projectContainer}
     >
-      <div>
+      <div
+      style={{
+        position: 'relative'
+      }} 
+      >
         <ShowImage
           url={props.previewImage}
           className={styles.profileImage}
@@ -55,7 +61,9 @@ export function ProjectItem(props: ProjectItemProps) {
           height={150}
         />
         {isNoContent && (
-          <p className={styles.noContent}>No content write up (yet)</p>
+          <p className={styles.noContent}>View project website
+          <FontAwesomeIcon icon={faArrowUpRightFromSquare} />
+          </p>
         )}
       </div>
 
