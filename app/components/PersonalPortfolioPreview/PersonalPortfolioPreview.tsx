@@ -37,6 +37,8 @@ export default async function PortfolioPreview(){
               media={project.medium}
               technologies={project.technologies}
               slug={project.meta.slug}
+              website={project.website}
+              body={project.body}
             />
           ))}
         </div>
