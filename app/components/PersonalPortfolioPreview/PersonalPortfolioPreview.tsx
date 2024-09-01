@@ -28,7 +28,9 @@ export default async function PortfolioPreview(){
         </div>
         <br />
         <div className={styles.profileContainer}>
-          {projects.map((project: any, i: number) => (
+          {projects
+          .slice(0, 3)
+          .map((project: any, i: number) => (
             <ProjectItem
               key={project.title}
               previewImage={project?.preview_image?.url}
