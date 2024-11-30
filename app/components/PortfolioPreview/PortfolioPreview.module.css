@@ -40,8 +40,9 @@
     color: white;
     display: flex;
     flex-direction: row;
-    align-content: center;
     justify-content: center;
     font-weight: bolder;
+    align-items: baseline;
+    gap: 5px;
 }
 
