@@ -17,6 +17,10 @@ async function getResults(){
 export default async function PortfolioPreview(){
     const projects = await getResults();
 
+    if(projects.length < 1){
+      return null;
+    }
+
     return (
       <div className={styles.container}>
         <div>
