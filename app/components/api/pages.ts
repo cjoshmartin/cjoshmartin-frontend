@@ -49,10 +49,11 @@ export async function getFromSlug(slug: string){
 }
 
 export async function getPreviewContent({content_type, token}: any){
-    const apiEndpoint = process?.env?.API_URL ?? "https://backend.cjoshmartin.com"
-    console.log('The url is: ', apiEndpoint);
-    const path = `/api/page_preview/1/?content_type=${encodeURIComponent(content_type)}&token=${encodeURIComponent(token)}&format=json`;
+    const apiEndpoint = process?.env?.API_PAGES_URL ?? "https://backend.cjoshmartin.com"
+    console.log('The base url is: ', apiEndpoint);
+    const path = `/api/page_preview/1/?content_type=${encodeURIComponent(content_type)}&token=${encodeURIComponent(token)}&format=json&draft=true`;
     const apiCall = apiEndpoint + path;
+    console.log('API full URL: ', apiCall)
    return fetch(apiCall, {
     cache: 'no-cache'
    })

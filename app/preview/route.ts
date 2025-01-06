@@ -1,20 +1,16 @@
 import { redirect } from "next/navigation";
 import { PageTypes } from "../PageTypes";
 
+import { type NextRequest } from 'next/server'
 
-export default async function Page({ params, searchParams }: {  
-        params?: any
-        searchParams?: { [key: string]: string | string[] | undefined }
-    }) 
-    {
-    if (!searchParams || Object.keys(searchParams).length < 1){
-        // redirect('/')
-        return (
-            <h1>No Content</h1>
-        )
-    }
 
-    const {content_type, token} = searchParams;
+export async function GET(request: NextRequest) {
+    const searchParams = request?.nextUrl?.searchParams
+    const content_type = searchParams.get('content_type')
+    const token = searchParams.get('token')
+        // @ts-ignore
+    console.log("YOYOYO content_Type:", content_type, " YOYO, token:", token)
+
     if (content_type && token){
         //@ts-ignore
         const path = `?content_type=${encodeURIComponent(content_type)}&token=${encodeURIComponent(token)}&format=json`;
@@ -30,9 +26,7 @@ export default async function Page({ params, searchParams }: {
             case PageTypes.PROJECT.toLowerCase():
                 base = '/projects/preview'
         }
-        redirect(base + path);
+      return redirect(base + path);
     }
-
-
-    return (<div/>);
+    return new Response();
 }

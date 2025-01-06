@@ -74,6 +74,7 @@ export default async function Page({
   searchParams?: { [key: string]: string | string[] | undefined };
 }) {
   const { title, body, date, id , author, content_visuals, content_image } = await getPage(params.slug, searchParams);
+
   return (
     <div className={styles.container}>
       <GoBackLink href="/blog" />
@@ -94,8 +95,10 @@ export default async function Page({
             marginBottom: "1rem",
           }}
         />
-        <AuthorInfo {...author} />
-        <Comments slug={params.slug} id={id} title={title} />
+        <AuthorInfo {...author} slug={params.slug} />
+        {/* {params.slug !== 'preview'&&
+          <Comments slug={params.slug} id={id} title={title} />
+        } */}
       </div>
     </div>
   );

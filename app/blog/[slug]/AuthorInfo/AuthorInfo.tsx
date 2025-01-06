@@ -1,7 +1,7 @@
 import ShowImage from '@/app/blog/_compoents/ShowImage';
 import styles from './styles.module.css'
 
-export function AuthorInfo({ bio, email, first_name, last_name, job_title, location, image }: any) {
+export function AuthorInfo({ bio, email, first_name, last_name, job_title, location, image, slug }: any) {
   return (
     <div
       className={styles.container}
@@ -13,8 +13,10 @@ export function AuthorInfo({ bio, email, first_name, last_name, job_title, locat
         <h2>{first_name} {last_name}</h2>
         <h3>{job_title}</h3>
         <h4>{email}</h4>
-        {/* <h4>{location}</h4> */}
-        <div dangerouslySetInnerHTML={{__html: bio}} />
+        <h4>{location}</h4>
+        {slug !== 'preview' &&
+          <div dangerouslySetInnerHTML={{__html: bio}} />
+        }
       </div>
     </div>
   );
