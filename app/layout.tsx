@@ -49,8 +49,8 @@ export default async function RootLayout({
           </div>
         </div>
       </body>
-      <GoogleAdsense pId="8241145315698443"/>
-      <GoogleAnalytics gaId="G-P8XH0GSQTV" />
+      {/* <GoogleAdsense pId="8241145315698443"/> */}
+      {/* <GoogleAnalytics gaId="G-P8XH0GSQTV" /> */}
     </html>
   );
 }

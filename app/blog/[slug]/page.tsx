@@ -96,9 +96,9 @@ export default async function Page({
           }}
         />
         <AuthorInfo {...author} slug={params.slug} />
-        {/* {params.slug !== 'preview'&&
+        {params.slug !== 'preview'&&
           <Comments slug={params.slug} id={id} title={title} />
-        } */}
+        }
       </div>
     </div>
   );
