@@ -121,7 +121,7 @@ export default async function Home({ searchParams }: {
       <Testimonial
         title="What People Have To Say,"
         testimonial={
-          testimonials[RandomIntFromInterval(0, testimonials.length - 1)]
+          testimonials[0]
             ?.testimonial
         }
         all={testimonials}

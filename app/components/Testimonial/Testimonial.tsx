@@ -39,6 +39,7 @@ interface TestimonialProps {
 
 export default function Testimonial({ testimonial, title, all, shouldHideImage }: TestimonialProps) {
   const [test , setTest] = useState<TestimonialObject>(testimonial);
+  const [testIndex, setTestIndex] = useState<number>(1);
   // const [copyText, setCopyText] = useState<any | null>(null);
 
   // useEffect(() => {
@@ -129,9 +130,11 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
           <motion.button
             className={styles.testimonialButton}
             // @ts-ignore
-            onClick={() =>
-              setTest(all[RandomIntFromInterval(0, all.length - 1)].testimonial)
-            }
+            onClick={() => {
+              const newI = (testIndex + 1) % all.length;
+              setTestIndex(newI)
+              setTest(all[newI].testimonial)
+            }}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.9 }}
           >
