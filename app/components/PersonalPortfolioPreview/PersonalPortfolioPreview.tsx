@@ -33,6 +33,7 @@ export default async function PortfolioPreview(){
         <br />
         <div className={styles.profileContainer}>
           {projects
+          .filter((project: any) => !project.is_unlisted)
           .slice(0, 3)
           .map((project: any, i: number) => (
             <ProjectItem

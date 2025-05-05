@@ -37,7 +37,8 @@ export async function generateMetadata(
 }
 
 export default async function Page({searchParams}: any) {
-    const homePageData = await getResults();
+    const homePageData = (await getResults())
+    .filter((project: any) => !project.is_unlisted);
 
       const projectTypeCounts = homePageData.reduce((acc: any, {project_type}: any) => {
         if(!acc[project_type]){
