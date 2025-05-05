@@ -1,0 +1,15 @@
+.container {
+  background-color: red;
+  color: white;
+  padding: 1rem;
+  position: sticky;
+  z-index: 4;
+  top: 0;
+  left: 0;
+  width: 100%;
+  font-size: 1.0rem;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}

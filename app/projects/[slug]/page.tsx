@@ -8,7 +8,7 @@ import seo from '@/app/components/SEO'
 import { AuthorInfo } from "@/app/blog/[slug]/AuthorInfo/AuthorInfo";
 import Comments from "@/app/blog/[slug]/Comments";
 import HeaderGenerator from "@/app/components/HeaderGenerator";
-
+import UnlistedBanner from '@/app/components/UnlistedBanner/UnlistedBanner';
 
 async function getPage(slug: string, searchParams: any){
   if(slug === 'preview'){
@@ -75,11 +75,13 @@ export default async function Page({
     technologies,
     testimonials,
     author,
-    id
+    id,
+    is_unlisted
   } = await getPage(params.slug, searchParams);
 
   return (
     <div className={styles.container}>
+      {(is_unlisted || params.slug === 'preview') && <UnlistedBanner />}
       <GoBackLink href={"/projects"} />
       <HeaderGenerator
         className={styles.headerImage}
