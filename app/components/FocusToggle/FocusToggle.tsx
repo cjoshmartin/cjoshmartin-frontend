@@ -1,13 +1,8 @@
-import { useState } from "react";
 import styles from "./FocusToggle.module.css";
-
-enum FocusModes {
-    Developer = "Developer",
-    Maker = "Maker",
-}
+import { FocusModes, useFocusState } from "../Context/FocusStateContext";
 
 export function FocusToggle() {
-    const [focusMode, setFocusMode] = useState<FocusModes>(FocusModes.Developer);
+    const { focusMode, setFocusMode } = useFocusState();
     return (
       <div className={styles.focusToggle}>
         <p>Josh as a {focusMode}</p>
@@ -15,13 +10,15 @@ export function FocusToggle() {
           <input
             type="checkbox"
             checked={focusMode === FocusModes.Maker}
-            onChange={() =>
-              setFocusMode(
-                focusMode === FocusModes.Maker
-                  ? FocusModes.Developer
-                  : FocusModes.Maker
-              )
-            }
+            onChange={() => {
+              if (setFocusMode) {
+                setFocusMode(
+                  focusMode === FocusModes.Maker
+                    ? FocusModes.Developer
+                    : FocusModes.Maker
+                )
+              }
+            }}
           />
           <span className={styles.slider} />
         </label>

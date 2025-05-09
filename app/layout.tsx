@@ -13,6 +13,7 @@ import "@fortawesome/fontawesome-svg-core/styles.css";
 import { config } from "@fortawesome/fontawesome-svg-core";
 import AnimationContainer from './components/layout/AnimationContainer';
 import LoaderContainer from './components/Loader/LoaderContainer';
+import { FocusStateProvider } from './components/Context/FocusStateContext';
 config.autoAddCss = false;
 
 
@@ -42,17 +43,19 @@ export default async function RootLayout({
           customDomain="https://plausible.technicalchicago.com"
         >
           <PostHogProvider>
-            <div className={styles.bodyContent}>
-              <div className={styles.innerBodyContent}>
-                <Nav />
+            <FocusStateProvider>
+              <div className={styles.bodyContent}>
+                <div className={styles.innerBodyContent}>
+                  <Nav />
                 <LoaderContainer>
                   <AnimationContainer>
                     {children}
                     <Footer />
                   </AnimationContainer>
                 </LoaderContainer>
+                </div>
               </div>
-            </div>
+            </FocusStateProvider>
           </PostHogProvider>
         </PlausibleProvider>
         <GoogleAnalytics gaId="G-P8XH0GSQTV" />
