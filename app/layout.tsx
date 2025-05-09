@@ -1,9 +1,9 @@
 import type { Metadata } from 'next'
-import { GoogleAnalytics } from '@next/third-parties/google'
 import { IBM_Plex_Mono } from 'next/font/google'
 import './globals.css'
 import Nav from './components/layout/Nav';
 import Footer from './components/layout/Footer';
+import { PostHogProvider } from './components/PostHogProvider';
 
 import styles from './layout.module.css'
 
@@ -11,7 +11,6 @@ import "@fortawesome/fontawesome-svg-core/styles.css";
 import { config } from "@fortawesome/fontawesome-svg-core";
 import AnimationContainer from './components/layout/AnimationContainer';
 import LoaderContainer from './components/Loader/LoaderContainer';
-import GoogleAdsense from './components/GoogleAdsense';
 config.autoAddCss = false;
 
 
@@ -35,22 +34,22 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <div 
-        className={styles.bodyContent}
-        >
-          <div className={styles.innerBodyContent}>
-            <Nav />
-            <LoaderContainer>
-              <AnimationContainer>
-                {children}
-                <Footer />
-              </AnimationContainer>
-            </LoaderContainer>
+        <PostHogProvider>
+          <div 
+            className={styles.bodyContent}
+          >
+            <div className={styles.innerBodyContent}>
+              <Nav />
+              <LoaderContainer>
+                <AnimationContainer>
+                  {children}
+                  <Footer />
+                </AnimationContainer>
+              </LoaderContainer>
+            </div>
           </div>
-        </div>
+        </PostHogProvider>
       </body>
-      {/* <GoogleAdsense pId="8241145315698443"/> */}
-      {/* <GoogleAnalytics gaId="G-P8XH0GSQTV" /> */}
     </html>
   );
 }
