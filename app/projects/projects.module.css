@@ -91,7 +91,8 @@
 
 .projectContainer {
     background-color: var(--primary-color);
-    color: var(--secondary-color);
+    color: var(--secondary-color) !important;
+    text-decoration: none; 
     padding: 2rem;
 
     display: flex;
@@ -138,7 +139,9 @@
     color: white;
     display: flex;
     flex-direction: row;
+    align-items: center;
     align-content: center;
     justify-content: center;
+    gap: 0.5rem;
     font-weight: bolder;
 }

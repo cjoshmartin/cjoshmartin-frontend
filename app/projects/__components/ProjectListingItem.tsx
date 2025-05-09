@@ -7,6 +7,7 @@ import { generateClassList } from './generateClassList';
 import { useEffect, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowUpRightFromSquare } from '@fortawesome/free-solid-svg-icons';
+import { motion } from 'framer-motion';
 
 interface ProjectListingItemProps {
     data: any
@@ -23,7 +24,10 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
       setIsNoContent((website ?? [])?.length > 0 && (body ?? [])?.length < 1 );
     }, [website, body]);
   return (
-    <div
+    <motion.a
+      whileHover={{ scale: 1.01 }}
+      href={isNoContent ? website : `/projects/${meta.slug}`}
+      target={isNoContent ? "_blank" : undefined}
       className={generateClassList([
         styles.projectContainer,
         project_type === ProjectType.Personal
@@ -44,7 +48,18 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
           className={styles.projectImage}
         />
         {isNoContent && (
-          <p className={styles.noContent}>No write up (yet)</p>
+          <p className={styles.noContent}>
+            View Project Website
+            {` `}
+            <FontAwesomeIcon icon={faArrowUpRightFromSquare} />
+          </p>
+        )}
+
+        {!isNoContent && (
+          <p className={styles.noContent}>
+            Read More...
+            {` `}
+          </p>
         )}
       </div>
       <div>
@@ -56,19 +71,8 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
         </div>
         <div>
           <p>{intro}</p>
-          <Link
-            href={isNoContent ? website : `/projects/${meta.slug}`}
-            style={{ color: "black", paddingTop: "2rem" }}
-            target={isNoContent ? "_blank" : undefined}
-          >
-            {isNoContent ? "Visit Project Website" : "Read More..."}
-            {` `}
-            {isNoContent &&
-              <FontAwesomeIcon icon={faArrowUpRightFromSquare} />
-            }
-          </Link>
         </div>
       </div>
-    </div>
+    </motion.a>
   );
 }
