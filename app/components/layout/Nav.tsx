@@ -4,7 +4,7 @@ import styles from './layout.module.css';
 import { usePathname } from 'next/navigation';
 import { generateClassList } from '@/app/projects/__components/generateClassList';
 import { motion } from 'framer-motion';
-
+import { FocusToggle } from '../FocusToggle/FocusToggle';
 interface NavLinkProps {
     title: string,
     link: string,
@@ -89,11 +89,12 @@ export default function Nav (props: any) {
               title={"Blog"}
               isActive={pathName.includes("blog")}
             />
-          <CTALink
+          {/* <CTALink
             link="/start-a-project"
             title="Start a project"
             isActive={pathName.includes("projects")}
-          />
+          /> */}
+          <FocusToggle />
         </motion.nav>
       </header>
     );
