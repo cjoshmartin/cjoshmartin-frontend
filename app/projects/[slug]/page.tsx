@@ -46,6 +46,9 @@ export async function generateMetadata(
     description,
     title: fullTitle,
     authors: [{name: "Josh Martin"}],
+    alternates: {
+      canonical: `https://cjoshmartin.com/projects/${params.slug}`,
+    },
     openGraph: {
       title,
       siteName: seo.sitename,

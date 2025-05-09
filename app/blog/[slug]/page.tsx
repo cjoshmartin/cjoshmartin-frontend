@@ -61,7 +61,7 @@ export async function generateMetadata(
         seo.defaultImg,
     },
     alternates: {
-      canonical: "https://cjoshmartin.com",
+      canonical: `https://cjoshmartin.com/blog/${params.slug}`,
     },
   };
 }
