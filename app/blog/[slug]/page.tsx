@@ -48,6 +48,11 @@ export async function generateMetadata(
   return {
     description,
     title: fullTitle,
+    authors: [{name: "Josh Martin"}],
+    publisher: "cjoshmartin.com",
+    alternates: {
+      canonical: `https://cjoshmartin.com/blog/${params.slug}`,
+    },
     openGraph: {
       title,
       siteName: seo.sitename,
@@ -59,9 +64,6 @@ export async function generateMetadata(
         content.content_image?.url ||
         content.preview_image?.url ||
         seo.defaultImg,
-    },
-    alternates: {
-      canonical: `https://cjoshmartin.com/blog/${params.slug}`,
     },
   };
 }

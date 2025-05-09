@@ -46,6 +46,7 @@ export async function generateMetadata(
     description,
     title: fullTitle,
     authors: [{name: "Josh Martin"}],
+    publisher: "cjoshmartin.com",
     alternates: {
       canonical: `https://cjoshmartin.com/projects/${params.slug}`,
     },
