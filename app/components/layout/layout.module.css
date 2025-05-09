@@ -1,6 +1,11 @@
 .header{
     font-size: 1rem;
     padding: 2rem;
+    padding-bottom: 1rem;
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    background-color: black;
 }
 
 .nav{

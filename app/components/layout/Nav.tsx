@@ -1,7 +1,6 @@
 'use client';
 
 import styles from './layout.module.css';
-import { PageTypes } from '@/app/PageTypes';
 import { usePathname } from 'next/navigation';
 import { generateClassList } from '@/app/projects/__components/generateClassList';
 import { motion } from 'framer-motion';

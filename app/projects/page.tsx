@@ -7,7 +7,7 @@ import ClearFilters from './ClearFilters';
 import { ProjectTypeButtons } from './ProjectTypeButtons';
 import { Metadata, ResolvingMetadata } from 'next';
 import { getPages } from '../components/api/pages';
-
+import UnlistedBanner from '../components/UnlistedBanner/UnlistedBanner';
 async function getResults(){
   return getPages({type:PageTypes.PROJECT.toLowerCase()})
 }
@@ -52,7 +52,7 @@ export default async function Page({searchParams}: any) {
       }, {})
 
 
-      const filteredData = homePageData
+      const filteredData = homePageData 
             .reduce((acc: any, project: any) => {
               const { medium, technologies, project_type } = project;
               if (!searchParams || Object.keys(searchParams).length < 1) {
