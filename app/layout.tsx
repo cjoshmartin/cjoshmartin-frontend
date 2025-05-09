@@ -4,6 +4,8 @@ import './globals.css'
 import Nav from './components/layout/Nav';
 import Footer from './components/layout/Footer';
 import { PostHogProvider } from './components/PostHogProvider';
+import { GoogleAnalytics } from '@next/third-parties/google'
+import PlausibleProvider from 'next-plausible'
 
 import styles from './layout.module.css'
 
@@ -34,21 +36,26 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <PostHogProvider>
-          <div 
-            className={styles.bodyContent}
-          >
-            <div className={styles.innerBodyContent}>
-              <Nav />
-              <LoaderContainer>
-                <AnimationContainer>
-                  {children}
-                  <Footer />
-                </AnimationContainer>
-              </LoaderContainer>
+        <PlausibleProvider
+          domain="cjoshmartin.com"
+          selfHosted={true}
+          customDomain="https://plausible.technicalchicago.com"
+        >
+          <PostHogProvider>
+            <div className={styles.bodyContent}>
+              <div className={styles.innerBodyContent}>
+                <Nav />
+                <LoaderContainer>
+                  <AnimationContainer>
+                    {children}
+                    <Footer />
+                  </AnimationContainer>
+                </LoaderContainer>
+              </div>
             </div>
-          </div>
-        </PostHogProvider>
+          </PostHogProvider>
+        </PlausibleProvider>
+        <GoogleAnalytics gaId="G-P8XH0GSQTV" />
       </body>
     </html>
   );
