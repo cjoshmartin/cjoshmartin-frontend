@@ -52,6 +52,8 @@ export async function generateMetadata(
       title,
       siteName: seo.sitename,
       description: description,
+      type: "article",
+      publishedTime: content.date,
       images:
         type == "image" ? value?.url : undefined ||
         content.content_image?.url ||
@@ -73,7 +75,8 @@ export default async function Page({
   };
   searchParams?: { [key: string]: string | string[] | undefined };
 }) {
-  const { title, body, date, id , author, content_visuals, content_image } = await getPage(params.slug, searchParams);
+  const { title, body, date, id, author, content_visuals, content_image } =
+    await getPage(params.slug, searchParams);
 
   return (
     <div className={styles.container}>

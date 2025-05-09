@@ -50,6 +50,8 @@ export async function generateMetadata(
       title,
       siteName: seo.sitename,
       description: description,
+      type: "article",
+      publishedTime: content.date,
       images:
         content.content_image?.url ||
         content.preview_image?.url ||
