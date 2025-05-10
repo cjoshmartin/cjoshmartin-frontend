@@ -1,10 +1,5 @@
 import styles from "./FocusToggle.module.css";
-import { FocusModes, useFocusState } from "../Context/FocusStateContext";
-
-const focusModeLabels = {
-    [FocusModes.Developer]: "Developer",
-    [FocusModes.Maker]: "Maker",
-}
+import { focusModeLabels, FocusModes, useFocusState } from "../Context/FocusStateContext";
 
 export function FocusToggle() {
     const { focusMode, setFocusMode } = useFocusState();

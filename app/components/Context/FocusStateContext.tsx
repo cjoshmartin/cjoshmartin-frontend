@@ -6,6 +6,12 @@ export enum FocusModes {
     Maker = "MAK",
 }
 
+
+export const focusModeLabels = {
+    [FocusModes.Developer]: "Developer",
+    [FocusModes.Maker]: "Maker",
+}
+
 interface FocusStateContextState {
     focusMode?: FocusModes;
     setFocusMode?: (focusMode: FocusModes) => void;
