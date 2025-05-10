@@ -2,8 +2,8 @@
 import { createContext, useContext, useState, useEffect } from "react";    
 
 export enum FocusModes {
-    Developer = "Developer",
-    Maker = "Maker",
+    Developer = "DEV",
+    Maker = "MAK",
 }
 
 interface FocusStateContextState {
