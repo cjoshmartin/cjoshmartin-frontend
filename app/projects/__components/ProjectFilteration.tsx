@@ -5,7 +5,7 @@ import styles from '../projects.module.css'
 import ClearFilters from '../ClearFilters';
 import { ProjectType } from '../../components/PortfolioPreview/ProjectType';
 import { ProjectTypeButtons } from '../ProjectTypeButtons';
-import { useFocusState } from '../../components/Context/FocusStateContext';
+import { FocusModes, useFocusState } from '../../components/Context/FocusStateContext';
 
 export function ProjectFilteration({homePageData, searchParams}: {homePageData: any, searchParams: any}) {
 
@@ -77,36 +77,13 @@ export function ProjectFilteration({homePageData, searchParams}: {homePageData: 
 
     const {medium, technologies} = counts;
 
-    const ProjectLookUpText = {
-      [ProjectType.Personal]: 'Personal',
-      [ProjectType.Client]: 'Client',
-    }
-
-
-      const projectTypeCounts = focedData.reduce((acc: any, {project_type}: any) => {
-        if(!acc[project_type]){
-          acc[project_type] = 1;
-        }
-        else {
-          acc[project_type] += 1;
-        }
-
-        return acc;
-      }, {})
-
     return (
       <div className={styles.container}>
         <div className={styles.filterContainer}>
           <h1>
-            (
-            {searchParams?.project_type
-              ? // @ts-ignore
-                ProjectLookUpText[searchParams?.project_type]
-              : "All"}
-            ) Projects
+            {focusMode === FocusModes.Developer ? "Portfolio" : "Projects"}
           </h1>
           <ClearFilters searchParams={searchParams}/>
-          <ProjectTypeButtons searchParams={searchParams} projectTypeCounts={projectTypeCounts}/>
           <Tags title="Medium" tags={medium} searchParams={searchParams} />
           <Tags
             title="Technologies"

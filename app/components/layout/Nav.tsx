@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { generateClassList } from '@/app/projects/__components/generateClassList';
 import { motion } from 'framer-motion';
 import { FocusToggle } from '../FocusToggle/FocusToggle';
+import { ProjectNavLink } from './ProjectNavLink';
 interface NavLinkProps {
     title: string,
     link: string,
@@ -12,7 +13,7 @@ interface NavLinkProps {
     isActive?: boolean
 }
 
-function NavLink({title, link, external=false, isActive}: NavLinkProps ){
+export function NavLink({title, link, external=false, isActive}: NavLinkProps ){
     return (
       <motion.span 
       whileHover={{ scale: 1.1, backgroundColor: '#85ffa7', color:'black', padding:'0.5rem' }}
@@ -78,22 +79,13 @@ export default function Nav (props: any) {
                 .filter(({meta}: any) => meta.type == "flex.FlexPage")
                 .map((page :any)  => <NavLink key={page.id} link={`/flex/${page.meta.slug}`} title={page.title} />)
             }  */}
-          <NavLink
-            link="/projects"
-            title="Projects"
-            isActive={pathName.includes("projects")}
-          />
+            <ProjectNavLink />
             <NavLink
               key={"blog"}
               link={`/blog`}
               title={"Blog"}
               isActive={pathName.includes("blog")}
             />
-          {/* <CTALink
-            link="/start-a-project"
-            title="Start a project"
-            isActive={pathName.includes("projects")}
-          /> */}
           <FocusToggle />
         </motion.nav>
       </header>
