@@ -45,7 +45,7 @@ export function ProjectItem(props: ProjectItemProps) {
     );
   return (
     <ParentCompoent
-      whileHover={{ scale: 1.1 }}
+      whileHover={{ scale: 1.01 }}
       className={styles.projectContainer}
     >
       <div
