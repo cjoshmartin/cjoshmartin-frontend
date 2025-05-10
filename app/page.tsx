@@ -9,7 +9,7 @@ import { getPages, getPreviewContent } from './components/api/pages'
 import CTASection from './components/CTASection/CTASection'
 import { Metadata, ResolvingMetadata } from 'next'
 import seo from '@/app/components/SEO'
-
+import { Services } from './components/Services/Services'
 interface AuthorImageData {
     url: string,
     title: string,
@@ -120,122 +120,24 @@ export default async function Home({ searchParams }: {
       />
       <Testimonial
         title="What People Have To Say,"
-        testimonial={
-          testimonials[0]
-            ?.testimonial
-        }
+        testimonial={testimonials[0]?.testimonial}
         all={testimonials}
       />
-      {/* <div
+
+      <h2
         style={{
-          backgroundColor: "var(--primary-color)",
+          backgroundColor: "var(--third-color)",
           color: "var(--secondary-color)",
+          padding: "1rem",
           width: "100%",
-          padding: "2rem",
         }}
       >
-        <h2>Services</h2>
-        <div
-          style={{
-            display: "flex",
-            padding: "1rem",
-            flexDirection: "column",
-          }}
-        >
-          <div>
-            <h3>Mobile Developement</h3>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "row",
-                alignItems: "center",
-              }}
-            >
-              <img
-                src="https://unsplash.com/photos/bMTl6uFMONg/download?ixid=M3wxMjA3fDB8MXxzZWFyY2h8Mnx8bW9iaWxlJTIwYXBwfGVufDB8fHx8MTcwOTIzNzUyNnww&force=true&w=640"
-                style={{
-                  width: "350px",
-                  padding: "1rem",
-                }}
-                alt="tacos"
-              />
-              <p>
-                Lorem ipsum dolor sit amet, consectetur adipiscing elit. In
-                commodo erat eleifend risus tempor, a gravida metus maximus.
-                Praesent gravida diam vitae nisi aliquam, non scelerisque eros
-                ullamcorper. Mauris vel porttitor ante, vel facilisis risus.
-                Vestibulum eu magna sit amet felis bibendum dapibus eget et
-                magna. Maecenas maximus lobortis lacus in fermentum. Nullam at
-                ante tempor odio vulputate malesuada eget vitae elit. Mauris
-                tempor consectetur nibh, quis dictum sapien fringilla eget.
-              </p>
-            </div>
-          </div>
-          <div>
-            <h3>Web Developement</h3>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "row-reverse",
-                alignItems: "center",
-              }}
-            >
-              <img
-                src="https://unsplash.com/photos/hGV2TfOh0ns/download?ixid=M3wxMjA3fDB8MXxzZWFyY2h8OHx8d2Vic2l0ZXxlbnwwfHx8fDE3MDkyMjQyNzR8MA&force=true&w=640"
-                style={{
-                  width: "350px",
-                  padding: "1rem",
-                }}
-              />
-              <div>
-                <p>
-                  Lorem ipsum dolor sit amet, consectetur adipiscing elit. In
-                  commodo erat eleifend risus tempor, a gravida metus maximus.
-                  Praesent gravida diam vitae nisi aliquam, non scelerisque eros
-                  ullamcorper. Mauris vel porttitor ante, vel facilisis risus.
-                  Vestibulum eu magna sit amet felis bibendum dapibus eget et
-                  magna. Maecenas maximus lobortis lacus in fermentum. Nullam at
-                  ante tempor odio vulputate malesuada eget vitae elit. Mauris
-                  tempor consectetur nibh, quis dictum sapien fringilla eget.
-                </p>
-                <button>Looking at web projects</button>
-              </div>
-            </div>
-          </div>
-          <div>
-            <h3>IoT/Firmware Developement</h3>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "row",
-                alignItems: "center",
-              }}
-            >
-              <img
-                src="https://unsplash.com/photos/cDK_VY_A9x8/download?ixid=M3wxMjA3fDB8MXxzZWFyY2h8MTZ8fGlvdHxlbnwwfHx8fDE3MDkyMzg0MDh8MA&force=true&w=640"
-                style={{
-                  width: "350px",
-                  padding: "1rem",
-                }}
-              />
-              <p>
-                Lorem ipsum dolor sit amet, consectetur adipiscing elit. In
-                commodo erat eleifend risus tempor, a gravida metus maximus.
-                Praesent gravida diam vitae nisi aliquam, non scelerisque eros
-                ullamcorper. Mauris vel porttitor ante, vel facilisis risus.
-                Vestibulum eu magna sit amet felis bibendum dapibus eget et
-                magna. Maecenas maximus lobortis lacus in fermentum. Nullam at
-                ante tempor odio vulputate malesuada eget vitae elit. Mauris
-                tempor consectetur nibh, quis dictum sapien fringilla eget.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div> */}
+        Brands I have worked with
+      </h2>
+      <Services />
       <PortfolioPreview />
       <PersonalPortfolioPreview />
       {/* <h2>Experence</h2>
-     <h2>Brands I have worked with</h2>
      <h2>What do I Do?</h2> */}
       {/* <h2>
         <a href="https://storage.googleapis.com/images-for-cms/documents/Josh_Martin_-_Resume.pdf">

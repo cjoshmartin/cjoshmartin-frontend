@@ -12,11 +12,8 @@ export function PersonalPortfolioPreviewResult({projects}: {projects: any[]}){
       return null;
     }
 
-    const showProjects = focusMode === FocusModes.Maker;
-
     return (
       <AnimatePresence>
-        {showProjects && (
           <motion.div className={styles.container}>
             <div>
           <h2 style={{ paddingLeft: "1rem" }}> Recent (Personal) Projects</h2>
@@ -28,7 +25,10 @@ export function PersonalPortfolioPreviewResult({projects}: {projects: any[]}){
         <br />
         <div className={styles.profileContainer}>
           {projects
-          .filter((project: any) => !project.is_unlisted)
+            .filter(
+              (project: any) =>
+                !project.is_unlisted && project.project_audience === focusMode
+            )
           .slice(0, 3)
           .map((project: any, i: number) => (
             <ProjectItem
@@ -51,7 +51,6 @@ export function PersonalPortfolioPreviewResult({projects}: {projects: any[]}){
             See More (Personal) Projects
         </ActionButton>
       </motion.div>
-      )}
     </AnimatePresence>
     );
 }
