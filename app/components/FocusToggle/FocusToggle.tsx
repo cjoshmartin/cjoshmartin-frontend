@@ -1,11 +1,16 @@
 import styles from "./FocusToggle.module.css";
 import { FocusModes, useFocusState } from "../Context/FocusStateContext";
 
+const focusModeLabels = {
+    [FocusModes.Developer]: "Developer",
+    [FocusModes.Maker]: "Maker",
+}
+
 export function FocusToggle() {
     const { focusMode, setFocusMode } = useFocusState();
     return (
       <div className={styles.focusToggle}>
-        <p>Josh as a {focusMode}</p>
+        <p>Josh as a {focusModeLabels[focusMode ?? FocusModes.Developer]}</p>
         <label className={styles.switch}>
           <input
             type="checkbox"
