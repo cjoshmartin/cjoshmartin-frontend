@@ -1,8 +1,13 @@
+'use client'
+
 import styles from "./FocusToggle.module.css";
-import { focusModeLabels, FocusModes, useFocusState } from "../Context/FocusStateContext";
+import { focusModeLabels, useFocusState } from "../Context/FocusStateContext";
+import { FocusModes } from "../Context/FocusMode";
 
 export function FocusToggle() {
-    const { focusMode, setFocusMode } = useFocusState();
+    const { focusMode, commitFocusChange } = useFocusState();
+
+
     return (
       <div className={styles.focusToggle}>
         <p>Josh as a {focusModeLabels[focusMode ?? FocusModes.Developer]}</p>
@@ -11,12 +16,11 @@ export function FocusToggle() {
             type="checkbox"
             checked={focusMode === FocusModes.Maker}
             onChange={() => {
-              if (setFocusMode) {
-                setFocusMode(
-                  focusMode === FocusModes.Maker
+              if (commitFocusChange) {
+                const newFocusMode = focusMode === FocusModes.Maker
                     ? FocusModes.Developer
                     : FocusModes.Maker
-                )
+                commitFocusChange(newFocusMode)
               }
             }}
           />

@@ -2,7 +2,12 @@ import URL from '@/app/components/defaulturl';
 import { PageTypes } from "@/app/PageTypes";
 
 export async function getPages(params?: object){
-    let url =`${URL}/api/pages/?fields=_,id,type,title&format=json` 
+    let url =`${URL}/api/pages/?format=json&fields=_,id,type,title` 
+
+    if(params?.project_audience){
+      url += ',project_audience'
+    }
+    
     if (params && Object.keys(params)) {
         Object.keys(params).forEach((key)=> {
           //@ts-ignore

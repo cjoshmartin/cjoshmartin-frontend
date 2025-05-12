@@ -1,7 +1,8 @@
 'use client'
 
 import styles from './Services.module.css'
-import { useFocusState, FocusModes } from '../Context/FocusStateContext'
+import { useFocusState } from '../Context/FocusStateContext'
+import { FocusModes } from '../Context/FocusMode'
 
 
 export function Services() {

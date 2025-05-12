@@ -1,20 +1,15 @@
-'use client'
 import { ProjectItem } from "../PortfolioPreview/ProjectItem";
 import styles from './PersonalPortfolioPreview.module.css'
 import ActionButton from '../PortfolioPreview/ActionButton';
-import { FocusModes, useFocusState } from "../Context/FocusStateContext";
-import { AnimatePresence, motion } from "framer-motion";
 
 export function PersonalPortfolioPreviewResult({projects}: {projects: any[]}){
-    const { focusMode } = useFocusState();
 
     if(projects.length < 1){
       return null;
     }
 
     return (
-      <AnimatePresence>
-          <motion.div className={styles.container}>
+          <div className={styles.container}>
             <div>
           <h2 style={{ paddingLeft: "1rem" }}> Recent (Personal) Projects</h2>
           {/* <p>
@@ -27,7 +22,7 @@ export function PersonalPortfolioPreviewResult({projects}: {projects: any[]}){
           {projects
             .filter(
               (project: any) =>
-                !project.is_unlisted && project.project_audience === focusMode
+                !project.is_unlisted 
             )
           .slice(0, 3)
           .map((project: any, i: number) => (
@@ -50,7 +45,6 @@ export function PersonalPortfolioPreviewResult({projects}: {projects: any[]}){
         >
             See More (Personal) Projects
         </ActionButton>
-      </motion.div>
-    </AnimatePresence>
+      </div>
     );
 }

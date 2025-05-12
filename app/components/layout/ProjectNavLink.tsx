@@ -2,7 +2,8 @@
 
 import { usePathname } from 'next/navigation';
 import { NavLink } from './Nav';
-import { useFocusState, FocusModes } from '../Context/FocusStateContext';
+import { useFocusState } from '../Context/FocusStateContext';
+import { FocusModes } from '../Context/FocusMode';
 export function ProjectNavLink() {
     const pathname = usePathname();
     const { focusMode  } = useFocusState();

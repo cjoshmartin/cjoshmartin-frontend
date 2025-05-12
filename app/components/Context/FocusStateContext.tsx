@@ -1,10 +1,7 @@
 'use client'
 import { createContext, useContext, useState, useEffect } from "react";    
-
-export enum FocusModes {
-    Developer = "DEV",
-    Maker = "MAK",
-}
+import { useRouter, useSearchParams } from 'next/navigation'
+import { FocusModes } from "./FocusMode";
 
 
 export const focusModeLabels = {
@@ -14,31 +11,41 @@ export const focusModeLabels = {
 
 interface FocusStateContextState {
     focusMode?: FocusModes;
-    setFocusMode?: (focusMode: FocusModes) => void;
+    commitFocusChange?: (focusMode: FocusModes) => void;
+
 }
 
 const FocusStateContext = createContext<FocusStateContextState>({});
 
 export const FocusStateProvider = ({ children }: { children: React.ReactNode }) => {
-    const [focusMode, setFocusMode] = useState<FocusModes>(
-      (localStorage.getItem("cjoshmartin_focusMode") as FocusModes) ??
+    const searchParams = useSearchParams();
+    const router = useRouter();
+
+    const projectAudience = searchParams.get('project_audience') as FocusModes;
+
+    const localStorageFocusMode = global?.window
+      ? (localStorage?.getItem("cjoshmartin_focusMode") as FocusModes) ??
         FocusModes.Developer
-    );
+      : FocusModes.Developer;
+    const [focusMode, setFocusMode] = useState<FocusModes>(localStorageFocusMode);
 
     useEffect(() => {
-        const focusMode = localStorage.getItem('cjoshmartin_focusMode');
-        if (focusMode) {
-            setFocusMode(focusMode as FocusModes);
+        const focusMode = localStorage?.getItem('cjoshmartin_focusMode');
+        if (projectAudience) {
+            setFocusMode(projectAudience as FocusModes);
+        } else if (focusMode) {
+            router.push(`?project_audience=${focusMode}`);
         } 
-    }, []);
+    }, [projectAudience]);
 
-    useEffect(() => {
-        if (focusMode) {
-            localStorage.setItem('cjoshmartin_focusMode', focusMode);
-        }
-    }, [focusMode]);
+    const commitFocusChange = (focusMode: FocusModes) => {
+        setFocusMode(focusMode);
+        localStorage.setItem('cjoshmartin_focusMode', focusMode);
+        window.location.assign(`?project_audience=${focusMode}`);
 
-    return <FocusStateContext.Provider value={{ focusMode, setFocusMode }}>{children}</FocusStateContext.Provider>;
+    }
+
+    return <FocusStateContext.Provider value={{ focusMode, commitFocusChange }}>{children}</FocusStateContext.Provider>;
 };
 
 

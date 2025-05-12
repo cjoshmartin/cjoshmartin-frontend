@@ -10,6 +10,8 @@ import CTASection from './components/CTASection/CTASection'
 import { Metadata, ResolvingMetadata } from 'next'
 import seo from '@/app/components/SEO'
 import { Services } from './components/Services/Services'
+import { Meetup } from './__compoents/Meetup'
+import { Esty } from './__compoents/Esty'
 interface AuthorImageData {
     url: string,
     title: string,
@@ -102,8 +104,19 @@ export default async function Home({ searchParams }: {
 {
   let content = undefined;
 
-  if(searchParams && Object.keys(searchParams).length > 0){
-    content = await getPreviewHomePageData(searchParams);
+
+  console.log('searchParams', searchParams);
+
+  const params = Object.fromEntries(
+    Object.entries(searchParams ?? {}).filter(
+      ([key]) => key !== "project_audience"
+    )
+  );
+
+
+
+  if(params && Object.keys(params).length > 0){
+    content = await getPreviewHomePageData(params);
   }
   else {
     content = await getHomePageData();
@@ -124,7 +137,7 @@ export default async function Home({ searchParams }: {
         all={testimonials}
       />
 
-      <h2
+      {/* <h2
         style={{
           backgroundColor: "var(--third-color)",
           color: "var(--secondary-color)",
@@ -133,10 +146,13 @@ export default async function Home({ searchParams }: {
         }}
       >
         Brands I have worked with
-      </h2>
+      </h2> */}
       <Services />
-      <PortfolioPreview />
-      <PersonalPortfolioPreview />
+      <PortfolioPreview project_audience={searchParams?.project_audience as string}/>
+      <PersonalPortfolioPreview project_audience={searchParams?.project_audience as string} />
+      <Meetup />
+      <Esty />
+
       {/* <h2>Experence</h2>
      <h2>What do I Do?</h2> */}
       {/* <h2>

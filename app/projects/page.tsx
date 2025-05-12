@@ -3,9 +3,8 @@ import { PageTypes } from '../PageTypes';
 import { Metadata, ResolvingMetadata } from 'next';
 import { getPages } from '../components/api/pages';
 import { ProjectFilteration } from './__components/ProjectFilteration';
-
-async function getResults(){
-  return getPages({type:PageTypes.PROJECT.toLowerCase()})
+async function getResults(searchParams: any){
+  return getPages({type:PageTypes.PROJECT.toLowerCase(), project_audience: searchParams?.project_audience})
 }
 type Props = {
   params: { id: string }
@@ -33,7 +32,7 @@ export async function generateMetadata(
 }
 
 export default async function Page({searchParams}: any) {
-    const homePageData = (await getResults())
+    const homePageData = (await getResults(searchParams))
     .filter((project: any) => !project.is_unlisted);
 
 

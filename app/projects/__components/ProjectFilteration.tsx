@@ -1,22 +1,24 @@
-'use client'
 import ProjectListingItem from './ProjectListingItem';
 import Tags from './Tags';
 import styles from '../projects.module.css'
 import ClearFilters from '../ClearFilters';
 import { ProjectType } from '../../components/PortfolioPreview/ProjectType';
 import { ProjectTypeButtons } from '../ProjectTypeButtons';
-import { FocusModes, useFocusState } from '../../components/Context/FocusStateContext';
+import { FocusModes } from '@/app/components/Context/FocusMode';
 
 export function ProjectFilteration({homePageData, searchParams}: {homePageData: any, searchParams: any}) {
 
-    const { focusMode } = useFocusState();
+  const focusType = searchParams?.project_audience ?? FocusModes.Developer;
+  const params = Object.fromEntries(
+    Object.entries(searchParams ?? {}).filter(
+      ([key]) => key !== "project_audience"
+    )
+  );
 
-    const focedData = homePageData.filter((project: any) => project.project_audience === focusMode);    
-
-    const filteredData = focedData 
+    const filteredData = homePageData 
             .reduce((acc: any, project: any) => {
               const { medium, technologies, project_type } = project;
-              if (!searchParams || Object.keys(searchParams).length < 1) {
+              if (!params || Object.keys(params).length < 1) {
                 acc.push(project);
                 return acc;
               }
@@ -24,21 +26,21 @@ export function ProjectFilteration({homePageData, searchParams}: {homePageData: 
               let shouldPush = false;
 
               if (
-                !!searchParams?.project_type &&
-                project_type === searchParams?.project_type
+                !!params?.project_type &&
+                project_type === params?.project_type
               ) {
                 shouldPush = true;
               }
 
               if (
-                !!searchParams?.medium &&
-                medium.includes(searchParams?.medium)
+                !!params?.medium &&
+                medium.includes(params?.medium)
               ) {
                 shouldPush = true;
               }
               if (
-                !!searchParams?.technologies &&
-                technologies.includes(searchParams?.technologies)
+                !!params?.technologies &&
+                technologies.includes(params?.technologies)
               ) {
                 shouldPush = true;
               }
@@ -81,14 +83,14 @@ export function ProjectFilteration({homePageData, searchParams}: {homePageData: 
       <div className={styles.container}>
         <div className={styles.filterContainer}>
           <h1>
-            {focusMode === FocusModes.Developer ? "Portfolio" : "Projects"}
+            {focusType === FocusModes.Developer ? "Portfolio" : "Projects"}
           </h1>
-          <ClearFilters searchParams={searchParams}/>
-          <Tags title="Medium" tags={medium} searchParams={searchParams} />
+          <ClearFilters searchParams={params}/>
+          <Tags title="Medium" tags={medium} searchParams={params} />
           <Tags
             title="Technologies"
             tags={technologies}
-            searchParams={searchParams}
+            searchParams={params}
           />
         </div>
         <div className={styles.listItems}>
