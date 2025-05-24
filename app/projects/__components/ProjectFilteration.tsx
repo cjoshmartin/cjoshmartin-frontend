@@ -2,8 +2,6 @@ import ProjectListingItem from './ProjectListingItem';
 import Tags from './Tags';
 import styles from '../projects.module.css'
 import ClearFilters from '../ClearFilters';
-import { ProjectType } from '../../components/PortfolioPreview/ProjectType';
-import { ProjectTypeButtons } from '../ProjectTypeButtons';
 import { FocusModes } from '@/app/components/Context/FocusMode';
 
 export function ProjectFilteration({homePageData, searchParams}: {homePageData: any, searchParams: any}) {
