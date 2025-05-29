@@ -84,7 +84,7 @@ export default function DesktopIntro(props: DesktopIntroProps){
            shouldHideImageOnFail={true}
         />
         <div className={styles.introText}>
-            <h1>Who I Am?</h1>
+            <h1>Who Am I?</h1>
           <h2>
             {author?.first_name} {author?.last_name}
           </h2>

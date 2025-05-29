@@ -7,6 +7,7 @@
         /* border: solid white 1px; */
         background-color: var(--third-color);
         color: var(--secondary-color);
+        min-height: 250px;
 }
 
 .image {
