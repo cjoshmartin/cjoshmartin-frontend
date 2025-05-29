@@ -35,7 +35,9 @@ interface AuthorEntryData {
 interface HomePageData {
   blog_authors: AuthorEntryData[],
   body: string,
-  testimonials: any[]
+  testimonials: any[],
+  // known but lazy teehee
+  home_service: unknown[]
 }
 
 export async function generateMetadata(
@@ -76,12 +78,13 @@ async function getHomePageData(): Promise<HomePageData> {
     return getPages({type: PageTypes.HOME})
     .then((dataset ) => {
           //@ts-ignore
-          const { blog_authors, body, testimonials } = dataset[0];
+          const { blog_authors, body, testimonials, home_service } = dataset[0];
 
           return {
             blog_authors: [blog_authors[0]],
             body,
             testimonials,
+            home_service
           };
         });
 }
@@ -89,11 +92,12 @@ async function getHomePageData(): Promise<HomePageData> {
 async function getPreviewHomePageData(searchParams: object){
   return getPreviewContent(searchParams)
   .then(data =>{
-    const { blog_authors, body, testimonials } = data;
+    const { blog_authors, body, testimonials, home_service } = data;
     return {
       blog_authors: [blog_authors[0]],
       body,
       testimonials,
+      home_service
     };
   })
 }
@@ -122,7 +126,7 @@ export default async function Home({ searchParams }: {
     content = await getHomePageData();
   }
 
-  const {blog_authors, body, testimonials}: HomePageData  = content;
+  const {blog_authors, body, testimonials, home_service}: HomePageData  = content;
 
   return (
     <div className={styles.body}>
@@ -147,7 +151,7 @@ export default async function Home({ searchParams }: {
       >
         Brands I have worked with
       </h2> */}
-      <Services />
+      <Services services={home_service}  project_audience={searchParams?.project_audience as string}/>
       <PortfolioPreview project_audience={searchParams?.project_audience as string}/>
       <PersonalPortfolioPreview project_audience={searchParams?.project_audience as string} />
       <Meetup />

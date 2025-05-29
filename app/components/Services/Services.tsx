@@ -1,20 +1,82 @@
-'use client'
+/* eslint-disable @next/next/no-img-element */
 
-import styles from './Services.module.css'
-import { useFocusState } from '../Context/FocusStateContext'
-import { FocusModes } from '../Context/FocusMode'
+import { FocusModes } from "../Context/FocusMode";
 
+interface ImageObj {
+  id: number;
+  title: string;
+  file: string;
+  width: number;
+  height: number;
+  created_at: string;
+  focal_point_x: number | null,
+  focal_point_y: number | null,
+  focal_point_width: number | null,
+  focal_point_height: number | null,
+  file_size: number,
+  file_hash: string,
+  collection: number,
+  uploaded_by_user: number
+}
+interface ServiceObj {
+  service: {
+    title: string,
+    description?: string,
+    link?: string,
+    image: ImageObj
+    audience: FocusModes
+  }
+}
 
-export function Services() {
+interface ServiceProps {
+  service: ServiceObj
+  index: number
+}
 
-    const { focusMode } = useFocusState();
+function Service({service, index }: ServiceProps) {
 
-    if(focusMode !== FocusModes.Developer){
-        return null;
-    }
+  const {title, description, image, link} = service.service
 
+  return (
+    <div>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: index % 2 === 0 ? "row" : "row-reverse",
+          padding: "1rem",
+          gap: "1rem",
+        }}
+      >
+        <img
+          src={image.file}
+          style={{
+            width: "350px",
+            // padding: "1rem",
+          }}
+          alt={image.title}
+        />
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "1rem",
+          }}
+        >
+          <h3>{title}</h3>
+          <p dangerouslySetInnerHTML={{ __html: description || "" }} />
+          <a href={link} style={{
+            color: "var(--secondary-color)",
+            textDecoration: "underline",
+          }}>HEY JOSH YOU NEED TO THINK ABOUT HOW ARE YOU GOING TO SHOW THIS</a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function Services({services, project_audience}: {services: ServiceObj[], project_audience: FocusModes}) {
     return (
-       <div
+      <div
         style={{
           backgroundColor: "var(--primary-color)",
           color: "var(--secondary-color)",
@@ -30,95 +92,18 @@ export function Services() {
             flexDirection: "column",
           }}
         >
-          <div>
-            <h3>Mobile Developement</h3>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "row",
-                alignItems: "center",
-              }}
-            >
-              <img
-                src="https://unsplash.com/photos/bMTl6uFMONg/download?ixid=M3wxMjA3fDB8MXxzZWFyY2h8Mnx8bW9iaWxlJTIwYXBwfGVufDB8fHx8MTcwOTIzNzUyNnww&force=true&w=640"
-                style={{
-                  width: "350px",
-                  padding: "1rem",
-                }}
-                alt="tacos"
+          {services
+            ?.filter((service) =>
+              service.service.audience.toLowerCase().includes(project_audience.toLowerCase())
+            )
+            .map((service, index) => (
+              <Service
+                key={service.service.title}
+                service={service}
+                index={index}
               />
-              <p>
-                Lorem ipsum dolor sit amet, consectetur adipiscing elit. In
-                commodo erat eleifend risus tempor, a gravida metus maximus.
-                Praesent gravida diam vitae nisi aliquam, non scelerisque eros
-                ullamcorper. Mauris vel porttitor ante, vel facilisis risus.
-                Vestibulum eu magna sit amet felis bibendum dapibus eget et
-                magna. Maecenas maximus lobortis lacus in fermentum. Nullam at
-                ante tempor odio vulputate malesuada eget vitae elit. Mauris
-                tempor consectetur nibh, quis dictum sapien fringilla eget.
-              </p>
-            </div>
-          </div>
-          <div>
-            <h3>Web Developement</h3>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "row-reverse",
-                alignItems: "center",
-              }}
-            >
-              <img
-                src="https://unsplash.com/photos/hGV2TfOh0ns/download?ixid=M3wxMjA3fDB8MXxzZWFyY2h8OHx8d2Vic2l0ZXxlbnwwfHx8fDE3MDkyMjQyNzR8MA&force=true&w=640"
-                style={{
-                  width: "350px",
-                  padding: "1rem",
-                }}
-              />
-              <div>
-                <p>
-                  Lorem ipsum dolor sit amet, consectetur adipiscing elit. In
-                  commodo erat eleifend risus tempor, a gravida metus maximus.
-                  Praesent gravida diam vitae nisi aliquam, non scelerisque eros
-                  ullamcorper. Mauris vel porttitor ante, vel facilisis risus.
-                  Vestibulum eu magna sit amet felis bibendum dapibus eget et
-                  magna. Maecenas maximus lobortis lacus in fermentum. Nullam at
-                  ante tempor odio vulputate malesuada eget vitae elit. Mauris
-                  tempor consectetur nibh, quis dictum sapien fringilla eget.
-                </p>
-                <button>Looking at web projects</button>
-              </div>
-            </div>
-          </div>
-          <div>
-            <h3>IoT/Firmware Developement</h3>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "row",
-                alignItems: "center",
-              }}
-            >
-              <img
-                src="https://unsplash.com/photos/cDK_VY_A9x8/download?ixid=M3wxMjA3fDB8MXxzZWFyY2h8MTZ8fGlvdHxlbnwwfHx8fDE3MDkyMzg0MDh8MA&force=true&w=640"
-                style={{
-                  width: "350px",
-                  padding: "1rem",
-                }}
-              />
-              <p>
-                Lorem ipsum dolor sit amet, consectetur adipiscing elit. In
-                commodo erat eleifend risus tempor, a gravida metus maximus.
-                Praesent gravida diam vitae nisi aliquam, non scelerisque eros
-                ullamcorper. Mauris vel porttitor ante, vel facilisis risus.
-                Vestibulum eu magna sit amet felis bibendum dapibus eget et
-                magna. Maecenas maximus lobortis lacus in fermentum. Nullam at
-                ante tempor odio vulputate malesuada eget vitae elit. Mauris
-                tempor consectetur nibh, quis dictum sapien fringilla eget.
-              </p>
-            </div>
-          </div>
+            ))}
         </div>
-      </div> 
-    )
+      </div>
+    );
 }
