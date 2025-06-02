@@ -4,7 +4,7 @@ import { getPages } from '../api/pages';
 import { PersonalPortfolioPreviewResult } from './PersonalPortfolioPreviewResult';
 
 async function getResults(project_audience?: string){
-  return getPages({type:PageTypes.PROJECT.toLowerCase(), project_type: ProjectType.Personal, project_audience})
+  return getPages({type:PageTypes.PROJECT, project_type: ProjectType.Personal, project_audience})
 }
 
 // Gifs have to be smaller then 10Mb is the requirement from the backend.

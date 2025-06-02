@@ -112,7 +112,7 @@ export function Services({services, project_audience}: {services: ServiceObj[], 
         >
           {services
             ?.filter((service) =>
-              service.service.audience.toLowerCase().includes(project_audience.toLowerCase())
+              service.service.audience.includes(project_audience)
             )
             .map((service, index) => (
               <Service
