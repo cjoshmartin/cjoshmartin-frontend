@@ -1,8 +1,13 @@
 import URL from '@/app/components/defaulturl';
 import { PageTypes } from "@/app/PageTypes";
 
-export async function getPages(params?: object){
-    let url =`${URL}/api/pages/?fields=_,id,type,title&format=json` 
+export async function getPages(params?: {project_audience?: string, type?: string, project_type?: string}){
+    let url =`${URL}/api/pages/?format=json&fields=_,id,type,title` 
+
+    if(params?.project_audience){
+      url += ',project_audience'
+    }
+    
     if (params && Object.keys(params)) {
         Object.keys(params).forEach((key)=> {
           //@ts-ignore
@@ -36,6 +41,7 @@ export async function getPages(params?: object){
 export async function getFromSlug(slug: string){
 
     const id = await fetch(`${URL}/api/pages/?fields=_,id&slug=${slug}`,{
+      // cache: 'no-cache'
       next: { revalidate: 3600 }
     })
     .then(data => data.json())
