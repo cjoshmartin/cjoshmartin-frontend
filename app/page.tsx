@@ -9,9 +9,10 @@ import { getPages, getPreviewContent } from './components/api/pages'
 import CTASection from './components/CTASection/CTASection'
 import { Metadata, ResolvingMetadata } from 'next'
 import seo from '@/app/components/SEO'
-import { Services } from './components/Services/Services'
+import { ServiceObj, Services } from './components/Services/Services'
 import { Meetup } from './__compoents/Meetup'
 import { Esty } from './__compoents/Esty'
+import { FocusModes } from './components/Context/FocusMode'
 interface AuthorImageData {
     url: string,
     title: string,
@@ -151,7 +152,7 @@ export default async function Home({ searchParams }: {
       >
         Brands I have worked with
       </h2> */}
-      <Services services={home_service}  project_audience={searchParams?.project_audience as string}/>
+      <Services services={home_service as ServiceObj[]}  project_audience={searchParams?.project_audience as FocusModes}/>
       <PortfolioPreview project_audience={searchParams?.project_audience as string}/>
       <PersonalPortfolioPreview project_audience={searchParams?.project_audience as string} />
       <Meetup />

@@ -19,7 +19,7 @@ interface ImageObj {
   collection: number,
   uploaded_by_user: number
 }
-interface ServiceObj {
+export interface ServiceObj {
   service: {
     title: string,
     description?: string,
