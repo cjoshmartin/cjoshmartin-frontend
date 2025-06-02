@@ -155,8 +155,8 @@ export default async function Home({ searchParams }: {
       <Services services={home_service as ServiceObj[]}  project_audience={searchParams?.project_audience as FocusModes}/>
       <PortfolioPreview project_audience={searchParams?.project_audience as string}/>
       <PersonalPortfolioPreview project_audience={searchParams?.project_audience as string} />
-      <Meetup />
-      <Esty />
+      {/* <Meetup /> */}
+      {/* <Esty /> */}
 
       {/* <h2>Experence</h2>
      <h2>What do I Do?</h2> */}
