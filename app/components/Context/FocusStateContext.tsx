@@ -36,7 +36,7 @@ export const FocusStateProvider = ({ children }: { children: React.ReactNode }) 
         } else if (focusMode) {
             router.push(`?project_audience=${focusMode}`);
         } 
-    }, [projectAudience]);
+    }, [projectAudience, router]);
 
     const commitFocusChange = (focusMode: FocusModes) => {
         setFocusMode(focusMode);

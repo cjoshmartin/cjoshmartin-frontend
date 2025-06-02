@@ -1,6 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { FocusModes } from "../Context/FocusMode";
+import styles from "./service.module.css";
 
 interface ImageObj {
   id: number;
@@ -23,6 +24,7 @@ interface ServiceObj {
     title: string,
     description?: string,
     link?: string,
+    link_text?: string,
     image: ImageObj
     audience: FocusModes
   }
@@ -33,44 +35,60 @@ interface ServiceProps {
   index: number
 }
 
-function Service({service, index }: ServiceProps) {
+function ServiceLink({link, link_text, children}: {link?: string, link_text?: string, children: React.ReactNode}) {
 
-  const {title, description, image, link} = service.service
+  if(!link) {
+
+    return <div>{children}</div>;
+  }
 
   return (
-    <div>
+    <a href={link} style={{
+      color: "var(--secondary-color)",
+      textDecoration: "none",
+    }}>
+      {children}
+    </a>
+  )
+}
+
+function Service({service, index }: ServiceProps) {
+
+  const {title, description, image, link, link_text} = service.service
+
+
+  return (
+    <ServiceLink link={link} link_text={link_text}>
       <div
+        className={styles.container}
         style={{
-          display: "flex",
           flexDirection: index % 2 === 0 ? "row" : "row-reverse",
-          padding: "1rem",
-          gap: "1rem",
         }}
       >
         <img
           src={image.file}
           style={{
             width: "350px",
-            // padding: "1rem",
           }}
           alt={image.title}
         />
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "1rem",
-          }}
-        >
-          <h3>{title}</h3>
+        <div className={styles.textContainer} >
+          <h3>
+            {title}
+          </h3>
           <p dangerouslySetInnerHTML={{ __html: description || "" }} />
-          <a href={link} style={{
-            color: "var(--secondary-color)",
-            textDecoration: "underline",
-          }}>HEY JOSH YOU NEED TO THINK ABOUT HOW ARE YOU GOING TO SHOW THIS</a>
+          {link && link.length > 0 && (
+            <a
+              style={{
+                color: "var(--secondary-color)",
+                textDecoration: "underline",
+              }}
+              dangerouslySetInnerHTML={{ __html: link_text ?? "" }}
+            />
+          )}
         </div>
       </div>
-    </div>
+    </ServiceLink>
   );
 }
 

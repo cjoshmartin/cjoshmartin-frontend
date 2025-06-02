@@ -76,11 +76,17 @@ export function ProjectItem(props: ProjectItemProps) {
         }}
       >
         <h3>{props.projectName}</h3>
-        <small>{props.client}</small>
-        <small>Medium: {props.media.join(", and ")}</small>
+        {props.client && (
+          <small>{props.client}</small>
+        )}
+        {props.media.length > 0 && (
+          <small>Medium: {props.media.join(", and ")}</small>
+        )}
+          {props.technologies.length > 0 && (
         <small>
-          <i>Technologies: {props.technologies.join(", ")}</i>
-        </small>
+            <i>Technologies: {props.technologies.join(", ")}</i>
+          </small>
+        )}
       </div>
     </ParentCompoent>
   );

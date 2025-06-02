@@ -1,7 +1,8 @@
 import URL from '@/app/components/defaulturl';
 import { PageTypes } from "@/app/PageTypes";
+import { FocusModes } from '../Context/FocusMode';
 
-export async function getPages(params?: object){
+export async function getPages(params?: {project_audience?: FocusModes}){
     let url =`${URL}/api/pages/?format=json&fields=_,id,type,title` 
 
     if(params?.project_audience){
@@ -16,8 +17,8 @@ export async function getPages(params?: object){
     }
 
     const pages = await fetch(url, {
-      // cache: 'no-cache'
-      next: { revalidate: 3600 }
+      cache: 'no-cache'
+      // next: { revalidate: 3600 }
     }
     )
     .then(response => response.json())
@@ -41,7 +42,8 @@ export async function getPages(params?: object){
 export async function getFromSlug(slug: string){
 
     const id = await fetch(`${URL}/api/pages/?fields=_,id&slug=${slug}`,{
-      next: { revalidate: 3600 }
+      cache: 'no-cache'
+      // next: { revalidate: 3600 }
     })
     .then(data => data.json())
     .then(({items}: any) => items[0].id)
