@@ -1,5 +1,5 @@
 'use client'
-import { createContext, useContext, useState, useEffect } from "react";    
+import { createContext, useContext, useState, useEffect, useMemo } from "react";    
 import { useRouter, useSearchParams } from 'next/navigation'
 import { FocusModes } from "./FocusMode";
 
@@ -21,22 +21,37 @@ export const FocusStateProvider = ({ children }: { children: React.ReactNode }) 
     const searchParams = useSearchParams();
     const router = useRouter();
 
-    const projectAudience = searchParams.get('project_audience') as FocusModes;
+    // Get the project audience from the search params
+    const projectAudience = useMemo(() => searchParams.get('project_audience') as FocusModes, [searchParams]);
 
-    const localStorageFocusMode = global?.window
-      ? (localStorage?.getItem("cjoshmartin_focusMode") as FocusModes) ??
-        FocusModes.Developer
-      : FocusModes.Developer;
+    // Get the focus mode from the local storage
+    const localStorageFocusMode = useMemo(
+      () =>
+        global?.window
+          ? (localStorage?.getItem("cjoshmartin_focusMode") as FocusModes) ??
+            FocusModes.Developer
+          : FocusModes.Developer,
+      []
+    );
+
+    // Set the focus mode to the local storage focus mode
     const [focusMode, setFocusMode] = useState<FocusModes>(localStorageFocusMode);
 
     useEffect(() => {
-        const focusMode = localStorage?.getItem('cjoshmartin_focusMode');
-        if (projectAudience) {
+        // check if focus mode has been set in local storage
+        const focusModeStorage = localStorage?.getItem('cjoshmartin_focusMode');
+        // if search params has a project audience, set the focus mode to the project audience
+        if (projectAudience ) {
             setFocusMode(projectAudience as FocusModes);
-        } else if (focusMode) {
-            router.push(`?project_audience=${focusMode}`);
+            localStorage.setItem('cjoshmartin_focusMode', projectAudience);
+            // if the focus mode is set in the local storage, replace the search params with the focus mode
+        } else  if (focusModeStorage) {
+            router.replace(`?project_audience=${focusModeStorage}`);
+        } else if (!focusModeStorage && !projectAudience) {
+            localStorage.setItem('cjoshmartin_focusMode', FocusModes.Developer);
+            router.replace(`?project_audience=${FocusModes.Developer}`);
         } 
-    }, [projectAudience, router]);
+    }, [projectAudience,  router]);
 
     const commitFocusChange = (focusMode: FocusModes) => {
         setFocusMode(focusMode);
