@@ -1,0 +1,27 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": [
+          "HJXLN2SCZS.com.cjoshmartin.deeplinking"
+        ],
+        "components": [
+          {
+            "/": "*",
+            "comment": "Matches all routes"
+          }
+        ]
+      }
+    ]
+  },
+  "activitycontinuation": {
+    "apps": [
+      "HJXLN2SCZS.com.cjoshmartin.deeplinking"
+    ]
+  },
+  "webcredentials": {
+    "apps": [
+      "HJXLN2SCZS.com.cjoshmartin.deeplinking"
+    ]
+  }
+}
