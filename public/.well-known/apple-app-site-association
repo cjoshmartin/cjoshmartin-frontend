@@ -5,6 +5,10 @@
         "appIDs": [
           "HJXLN2SCZS.com.cjoshmartin.deeplinking"
         ],
+        "paths": [
+          "/settings/*",
+          "/deep-linking/*"
+        ],
         "components": [
           {
             "/": "*",
