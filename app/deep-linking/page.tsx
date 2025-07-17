@@ -7,6 +7,7 @@ export async function generateMetadata() {
     description: "Deep Linking",
     itunes: {
       appId: "6748627407",
+      appArgument: "https://cjoshmartin.com/blog/deep-linking"
     },
   };
 }
