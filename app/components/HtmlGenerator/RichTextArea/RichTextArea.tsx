@@ -38,15 +38,20 @@ function addIdsToHeaders(htmlContent: string): string {
             // Add a clickable anchor link to each header for copying its ID to clipboard
             anchor.style.cursor = 'pointer';
             anchor.style.textDecoration = 'none';
-            anchor.style.marginLeft = '0.5em';
             anchor.style.color = 'inherit';
-            anchor.classList.add('anchor-link');
-            
+            anchor.classList.add('anchor-link'); 
             // Move all child nodes of the header into the anchor
             while (header.firstChild) {
                 anchor.appendChild(header.firstChild);
             }
             header.appendChild(anchor);
+
+
+            // have a pound symbol after the header text as a symbol that you can click to copy the header id to clipboard
+            const anchorText = document.createElement('span');
+            anchorText.textContent = ' #';
+            anchorText.classList.add('anchor-pound');
+            anchor.appendChild(anchorText);
         }
     });
 
