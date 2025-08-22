@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowUpRightFromSquare } from '@fortawesome/free-solid-svg-icons';
 import { motion } from 'framer-motion';
+import { CalculateReadTime } from '@/app/components/CalculateReadTime/CalculateReadTime';
 
 interface ProjectListingItemProps {
     data: any
@@ -65,6 +66,7 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
       <div>
         <div className={styles.projectInfo}>
           <h2>{title}</h2>
+          {!isNoContent && <CalculateReadTime body={body} />}
           {client && <h3 style={{ fontWeight: "400" }}>Client: {client}</h3>}
           <h4>Medium: {medium?.join(", and ")}</h4>
           <h5>Technologies: {technologies.join(", ")}</h5>

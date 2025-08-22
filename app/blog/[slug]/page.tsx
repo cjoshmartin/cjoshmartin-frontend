@@ -10,6 +10,8 @@ import { Metadata, ResolvingMetadata } from "next"
 import { getFromSlug, getPreviewContent } from "@/app/components/api/pages"
 import { AuthorInfo } from './AuthorInfo/AuthorInfo'
 import HeaderGenerator from '@/app/components/HeaderGenerator'
+import { useMemo } from 'react'
+import { CalculateReadTime } from '@/app/components/CalculateReadTime/CalculateReadTime'
 
 async function getPage(slug: string, searchParams: any){
   if(slug === 'preview'){
@@ -91,7 +93,10 @@ export default async function Page({
       />
       <div className={styles.contentArea}>
         <h2>{title}</h2>
-        <small>{moment(date).format("MMMM DD, YYYY")}</small>
+        <div className={styles.readTime}>
+          <small>{moment(date).format("MMMM DD, YYYY")}</small>
+          <CalculateReadTime body={body} />
+        </div>
         <div className={styles.content}>
           <HtmlGenerator body={body} />
         </div>

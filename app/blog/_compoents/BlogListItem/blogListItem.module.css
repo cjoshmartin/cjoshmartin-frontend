@@ -46,3 +46,9 @@
     text-decoration: underline;
     width: fit-content;
 }
+
+.readTime {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}

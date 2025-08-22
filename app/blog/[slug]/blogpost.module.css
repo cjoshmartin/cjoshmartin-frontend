@@ -16,6 +16,23 @@
     padding: 2rem;
 }
 
+.readTime {
+    display: flex;
+    flex-direction: row;
+    /* gap: 1rem; */
+}
+
+.readTime small::after {
+    content: "*";
+    color: #666;
+    margin-left: 0.5rem;
+    margin-right: 0.5rem;
+}
+
+.readTime small:last-child::after {
+    content: "";
+}
+
 .contentArea {
     display: flex;
     flex-direction: column;

@@ -29,7 +29,7 @@ export default async function Blog(){
     return (
       <div className={styles.container}>
         <h1>Blog</h1>
-        {blogPosts.map(({ id, meta, date, title, intro, content_visuals}: any) => (
+        {blogPosts.map(({ id, meta, date, title, intro, content_visuals, body}: any) => (
           <BlogListItem
             key={id}
             title={title}
@@ -37,6 +37,7 @@ export default async function Blog(){
             publishDate={date}
             intro={intro}
             content_visuals={content_visuals}
+            body={body}
           />
         ))}
       </div>
