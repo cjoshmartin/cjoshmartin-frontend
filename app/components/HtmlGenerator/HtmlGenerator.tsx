@@ -9,12 +9,6 @@ enum TypeOfContent {
 
 }
 
-function RichTextArea({value, className}: any){
-    return (
-      <div className={className} dangerouslySetInnerHTML={{ __html: value }} />
-    );
-}
-
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { gruvboxDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
@@ -32,7 +26,8 @@ function CodeArea({value}: any){
 }
 
 import { ReactNode } from 'react';
-import { STLFileArea } from './STLFileArea';
+import { STLFileArea } from '../STLFileArea';
+import { RichTextArea } from './RichTextArea/RichTextArea';
 
 
 function VideoArea(value: any){

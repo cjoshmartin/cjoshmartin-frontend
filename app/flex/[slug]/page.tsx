@@ -1,4 +1,4 @@
-import HtmlGenerator from "@/app/components/HtmlGenerator";
+import HtmlGenerator from "@/app/components/HtmlGenerator/HtmlGenerator";
 import generateURL from "@/app/components/generateURL"
 import styles from './flexPage.module.css'
 

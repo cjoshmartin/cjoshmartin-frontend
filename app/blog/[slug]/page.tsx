@@ -3,7 +3,7 @@ import ShowImage from '@/app/blog/_compoents/ShowImage'
 
 import styles from './blogpost.module.css'
 import moment from "moment"
-import HtmlGenerator from "@/app/components/HtmlGenerator"
+import HtmlGenerator from "@/app/components/HtmlGenerator/HtmlGenerator"
 import Comments from "./Comments"
 import { GoBackLink } from "./GoBackLink"
 import { Metadata, ResolvingMetadata } from "next"
