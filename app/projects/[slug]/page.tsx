@@ -1,5 +1,5 @@
 import styles from './projectPage.module.css';
-import HtmlGenerator from '@/app/components/HtmlGenerator';
+import HtmlGenerator from '@/app/components/HtmlGenerator/HtmlGenerator';
 import Testimonial from "@/app/components/Testimonial";
 import { GoBackLink } from "@/app/blog/[slug]/GoBackLink";
 import { Metadata, ResolvingMetadata } from "next";
