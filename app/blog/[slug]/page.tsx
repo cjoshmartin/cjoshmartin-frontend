@@ -81,7 +81,7 @@ export default async function Page({
   };
   searchParams?: { [key: string]: string | string[] | undefined };
 }) {
-  const { title, body, date, id, author, content_visuals, content_image } =
+  const { title, body, date, id, author, content_visuals, content_image, technologies } =
     await getPage(params.slug, searchParams);
 
   return (
@@ -114,7 +114,7 @@ export default async function Page({
             marginBottom: "1rem",
           }}
         />
-        <RecommendatedPost slug={params.slug}/>
+        <RecommendatedPost slug={params.slug} tags={technologies}/>
         {params.slug !== 'preview'&&
           <Comments slug={params.slug} id={id} title={title} />
         }

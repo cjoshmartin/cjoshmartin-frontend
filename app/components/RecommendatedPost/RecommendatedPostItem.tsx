@@ -1,5 +1,6 @@
 import ShowImage from "@/app/blog/_compoents/ShowImage/ShowImage";
 import styles from "./RecommendatedPostItem.module.css";
+import { CalculateReadTime } from "../CalculateReadTime/CalculateReadTime";
 
 export function RecommendatedPostItem({post}: {post: any}) {
   return (
@@ -12,6 +13,7 @@ export function RecommendatedPostItem({post}: {post: any}) {
       />
       <div className={styles.content}>
         <h3>{post.title}</h3>
+        <CalculateReadTime body={post.body} />
         <p>{post.intro.trim()}</p>
       </div>
     </a>
