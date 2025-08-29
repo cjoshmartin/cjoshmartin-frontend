@@ -107,8 +107,14 @@ export default async function Page({
             marginBottom: "1rem",
           }}
         />
-        <RecommendatedPost />
         <AuthorInfo {...author} slug={params.slug} />
+        <hr
+          style={{
+            marginTop: "2rem",
+            marginBottom: "1rem",
+          }}
+        />
+        <RecommendatedPost />
         {params.slug !== 'preview'&&
           <Comments slug={params.slug} id={id} title={title} />
         }

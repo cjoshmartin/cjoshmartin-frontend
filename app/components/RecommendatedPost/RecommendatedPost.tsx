@@ -30,7 +30,7 @@ export default async function RecommendatedPost() {
           <RecommendatedPostItem key={post.id} post={post} />
         ))}
       </RecommendatedPostContainer>
-      <hr />
+      {/* <hr /> */}
     </div>
   );
 }
