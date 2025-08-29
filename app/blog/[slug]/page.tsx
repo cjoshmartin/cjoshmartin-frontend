@@ -114,7 +114,7 @@ export default async function Page({
             marginBottom: "1rem",
           }}
         />
-        <RecommendatedPost />
+        <RecommendatedPost slug={params.slug}/>
         {params.slug !== 'preview'&&
           <Comments slug={params.slug} id={id} title={title} />
         }

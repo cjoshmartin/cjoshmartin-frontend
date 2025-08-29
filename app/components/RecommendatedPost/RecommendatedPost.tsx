@@ -17,10 +17,8 @@ async function getBlogPosts(){
 
 }
 
-export default async function RecommendatedPost() {
+export default async function RecommendatedPost({slug}: {slug: string}) {
   const blogPosts = await getBlogPosts();
-  //TODO: TEMPORARY
-  const slug = "creating-zip-files-with-javascript";
 
   return (
     <div className={styles.container}>
@@ -30,7 +28,6 @@ export default async function RecommendatedPost() {
           <RecommendatedPostItem key={post.id} post={post} />
         ))}
       </RecommendatedPostContainer>
-      {/* <hr /> */}
     </div>
   );
 }
