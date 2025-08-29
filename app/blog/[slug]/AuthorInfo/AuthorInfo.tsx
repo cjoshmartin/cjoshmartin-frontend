@@ -1,4 +1,4 @@
-import ShowImage from '@/app/blog/_compoents/ShowImage';
+import ShowImage from '@/app/blog/_compoents/ShowImage/ShowImage';
 import styles from './styles.module.css'
 
 export function AuthorInfo({ bio, email, first_name, last_name, job_title, location, image, slug }: any) {

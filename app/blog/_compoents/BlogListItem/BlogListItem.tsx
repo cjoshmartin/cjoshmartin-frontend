@@ -2,7 +2,7 @@
 import styles from './blogListItem.module.css'
 import Link from 'next/link';
 import moment from 'moment';
-import ShowImage from '../ShowImage';
+import ShowImage from '../ShowImage/ShowImage';
 import { CalculateReadTime } from '@/app/components/CalculateReadTime/CalculateReadTime';
 
 export default function BlogListItem(props: any){

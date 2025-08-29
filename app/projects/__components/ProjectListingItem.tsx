@@ -1,6 +1,6 @@
 'use client'
 import styles from '../projects.module.css';
-import ShowImage from "../../blog/_compoents/ShowImage";
+import ShowImage from "../../blog/_compoents/ShowImage/ShowImage";
 import Link from 'next/link';
 import { ProjectType } from '../../components/PortfolioPreview/ProjectType';
 import { generateClassList } from './generateClassList';
