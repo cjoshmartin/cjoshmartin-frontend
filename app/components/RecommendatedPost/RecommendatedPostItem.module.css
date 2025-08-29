@@ -10,6 +10,12 @@
   text-decoration: none;
 }
 
+/* Need everything serverside so the SEO gods can see my blog post and rank them based on the backlines... keeps ever page unquie as well */
+.container:hover {
+  transform: scale(1.01);
+  transition: transform 0.3s ease-in-out;
+}
+
 .image {
   width: 100%;
   height: 50%;
@@ -48,9 +54,8 @@
 @media only screen and (max-width: 900px){
   .container {
     flex-direction: row;
-    margin: 0 4rem;
     height: 150px;
-    width: 80%;
+    width: auto;
   }
 
   .image { 
@@ -60,6 +65,14 @@
 
   .content {
     flex: 2;
+    gap: 0.5rem;
+  }
+
+  .content p {
+    line-clamp: 2;
+    box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
 }
