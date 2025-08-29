@@ -1,0 +1,17 @@
+.container {
+  display: flex;
+  flex-direction: row;
+  gap: 1rem;
+
+  /* width: 100%; */
+  height: fit-content;
+
+}
+
+@media only screen and (max-width: 900px){
+  .container {
+    flex-direction: column;
+    height: auto;
+    width: 100%;
+  }
+}

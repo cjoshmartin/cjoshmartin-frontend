@@ -3,7 +3,7 @@
 import Image from 'next/image'
 import styles from './intro.module.css'
 import { motion } from 'framer-motion'
-import ShowImage from '@/app/blog/_compoents/ShowImage'
+import ShowImage from '@/app/blog/_compoents/ShowImage/ShowImage'
 
 interface AuthorImageData {
     file: string,

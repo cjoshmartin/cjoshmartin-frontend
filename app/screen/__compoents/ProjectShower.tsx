@@ -5,7 +5,7 @@ import { ProjectType } from "@/app/components/PortfolioPreview/ProjectType";
 import { useEffect, useState } from "react"
 import styles from './ProjectShower.module.css'
 import Testimonial from "@/app/components/Testimonial";
-import ShowImage from "@/app/blog/_compoents/ShowImage";
+import ShowImage from "@/app/blog/_compoents/ShowImage/ShowImage";
 
 import { motion } from "framer-motion";
 import { FromAPI } from "@/app/components/Testimonial/Testimonial";

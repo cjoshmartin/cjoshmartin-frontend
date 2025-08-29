@@ -1,4 +1,4 @@
-import ShowImage from "../blog/_compoents/ShowImage";
+import ShowImage from "../blog/_compoents/ShowImage/ShowImage";
 
 enum HeaderTypes {
     YOUTUBE = "youtube_video",

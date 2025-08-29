@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion';
 import styles from './PortfolioPreview.module.css';
-import ShowImage from '@/app/blog/_compoents/ShowImage';
+import ShowImage from '@/app/blog/_compoents/ShowImage/ShowImage';
 import { useEffect, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowUpRightFromSquare } from '@fortawesome/free-solid-svg-icons';

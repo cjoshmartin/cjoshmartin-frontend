@@ -1,5 +1,5 @@
 import seo from '@/app/components/SEO'
-import ShowImage from '@/app/blog/_compoents/ShowImage'
+import ShowImage from '@/app/blog/_compoents/ShowImage/ShowImage'
 
 import styles from './blogpost.module.css'
 import moment from "moment"
@@ -12,6 +12,7 @@ import { AuthorInfo } from './AuthorInfo/AuthorInfo'
 import HeaderGenerator from '@/app/components/HeaderGenerator'
 import { useMemo } from 'react'
 import { CalculateReadTime } from '@/app/components/CalculateReadTime/CalculateReadTime'
+import RecommendatedPost from '@/app/components/RecommendatedPost/RecommendatedPost'
 
 async function getPage(slug: string, searchParams: any){
   if(slug === 'preview'){
@@ -80,7 +81,7 @@ export default async function Page({
   };
   searchParams?: { [key: string]: string | string[] | undefined };
 }) {
-  const { title, body, date, id, author, content_visuals, content_image } =
+  const { title, body, date, id, author, content_visuals, content_image, technologies } =
     await getPage(params.slug, searchParams);
 
   return (
@@ -107,6 +108,13 @@ export default async function Page({
           }}
         />
         <AuthorInfo {...author} slug={params.slug} />
+        <hr
+          style={{
+            marginTop: "2rem",
+            marginBottom: "1rem",
+          }}
+        />
+        <RecommendatedPost slug={params.slug} tags={technologies}/>
         {params.slug !== 'preview'&&
           <Comments slug={params.slug} id={id} title={title} />
         }
