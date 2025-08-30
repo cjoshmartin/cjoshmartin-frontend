@@ -56,7 +56,9 @@ function AreaPicker({type, value}: any){
 }
 
 export default function HtmlGenerator({body}: any){
-    const elements: ReactNode[] = body?.map(({type, value, id}: any) => <AreaPicker  key={id} type={type} value={value}/>)
+    const elements: ReactNode[] = body?.map(({ type, value, id }: any) => (
+      <AreaPicker key={id} type={type} value={value} />
+    ));
     return elements;
     
 }
