@@ -1,6 +1,8 @@
 
 import { redirect } from "next/navigation";
+import RickRoll from "./rick_roll";
 
 export default function Page(){
-    redirect('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
+    redirect('/');
+    return <RickRoll />;
 }
