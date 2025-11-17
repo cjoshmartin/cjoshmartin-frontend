@@ -1,7 +1,6 @@
 .intro {
   display: flex;
   flex-direction: row-reverse;
-  background-color: var(--primary-color);
   color: var(--secondary-color);
   padding: 2rem;
   gap: 2rem;

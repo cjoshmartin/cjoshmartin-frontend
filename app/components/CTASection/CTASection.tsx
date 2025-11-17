@@ -15,7 +15,7 @@ export default function CTASection() {
           style={{
               textDecoration: 'none',
               textTransform: 'capitalize',
-              backgroundColor: 'white',
+              backgroundColor: 'var(--primary-color)',
               color: 'black',
               padding: '1rem',
               fontSize: '1.2rem',

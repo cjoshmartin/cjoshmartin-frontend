@@ -96,7 +96,6 @@ export function Services({services, project_audience}: {services: ServiceObj[], 
     return (
       <div
         style={{
-          backgroundColor: "var(--primary-color)",
           color: "var(--secondary-color)",
           width: "100%",
           padding: "2rem",

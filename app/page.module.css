@@ -13,3 +13,11 @@
   align-items: center;
   gap: 1rem;
 }
+
+.body > :nth-child(even) {
+  background-color: var(--third-color);
+}
+
+.body > :nth-child(odd) {
+  background-color: var(--primary-color);
+}

@@ -65,7 +65,6 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
   return (
     <div
       style={{
-        backgroundColor: "white",
         color: "black",
         padding: "1rem",
         width: "100%",
