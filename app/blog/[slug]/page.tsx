@@ -1,5 +1,6 @@
+import { JSDOM } from 'jsdom';
+
 import seo from '@/app/components/SEO'
-import ShowImage from '@/app/blog/_compoents/ShowImage/ShowImage'
 
 import styles from './blogpost.module.css'
 import moment from "moment"
@@ -72,6 +73,56 @@ export async function generateMetadata(
   };
 }
 
+
+function OutlineGenerator({body}: {body: any}){
+  const content = useMemo(() => {
+    return body.filter(({type, value, id}: any) => {
+      // const headers = value.match(/<h[1-6]>.*<\/h[1-6]>/g);
+      return(type === "full_richtext")
+    })  
+    .reduce((acc: any, {value}: any) => {
+      const {window} = new JSDOM(value);
+      const {document} = window;
+      const headers = document.querySelectorAll('h1, h2, h3, h4, h5, h6');
+      //get value of each header and get header size h1, h2, h3, h4, h5, h6
+      const headersWithSize = Array.from(headers).map(
+        (header: any, index: number) => {
+          const title = header.textContent;
+          const sanitizedText = title
+            .toLowerCase()
+            .replace(/[^a-z0-9\s-]/g, "") // Remove special characters
+            .replace(/\s+/g, "-") // Replace spaces with hyphens
+            .trim();
+
+          const id = sanitizedText || `header-${index + 1}`;
+
+          return {
+            title: title,
+            id: id,
+            size: parseInt(header.tagName.toLowerCase().split("h")[1]),
+          };
+        }
+      );
+      return acc.concat(headersWithSize)
+    }, [])
+  
+  }, [body])
+
+  return (
+    <div>
+      <ul>
+        {content.map(({id, title, size}: any) => (
+          <li key={id} style={{ marginLeft: `${(size - 1) * 20}px` }}>
+            <a href={`#${id}`}>{title}</a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+
+
 export default async function Page({
   params,
   searchParams,
@@ -98,6 +149,10 @@ export default async function Page({
           <small>{moment(date).format("MMMM DD, YYYY")}</small>
           <CalculateReadTime body={body} />
         </div>
+
+      {/* generate clickaable links that jump to headers in this blog post */}
+      <OutlineGenerator  body={body}/>
+
         <div className={styles.content}>
           <HtmlGenerator body={body} />
         </div>
