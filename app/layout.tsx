@@ -3,7 +3,6 @@ import { IBM_Plex_Mono } from 'next/font/google'
 import './globals.css'
 import Nav from './components/layout/Nav';
 import Footer from './components/layout/Footer';
-import { PostHogProvider } from './components/PostHogProvider';
 import { GoogleAnalytics } from '@next/third-parties/google'
 import PlausibleProvider from 'next-plausible'
 
@@ -17,7 +16,11 @@ import { FocusStateProvider } from './components/Context/FocusStateContext';
 config.autoAddCss = false;
 
 
-const inter = IBM_Plex_Mono({ subsets: ['latin'], weight: ["100","200","300",'400',"500","600","700"] })
+const inter = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["100", "200", "300", "400", "500", "600", "700"],
+  display: 'swap',
+});
 
 
 export const metadata: Metadata = {
@@ -42,7 +45,6 @@ export default async function RootLayout({
           selfHosted={true}
           customDomain="https://plausible.technicalchicago.com"
         >
-          <PostHogProvider>
             <FocusStateProvider>
               <div className={styles.bodyContent}>
                 <div className={styles.innerBodyContent}>
@@ -56,7 +58,6 @@ export default async function RootLayout({
                 </div>
               </div>
             </FocusStateProvider>
-          </PostHogProvider>
         </PlausibleProvider>
         <GoogleAnalytics gaId="G-P8XH0GSQTV" />
       </body>
