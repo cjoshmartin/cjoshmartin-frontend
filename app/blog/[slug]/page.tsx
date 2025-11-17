@@ -109,8 +109,10 @@ function OutlineGenerator({body}: {body: any}){
   }, [body])
 
   return (
-    <div>
-      <ul>
+    <div
+    className={styles.outlineContainer}
+    >
+      <ul className={styles.outlineList}>
         {content.map(({id, title, size}: any) => (
           <li key={id} style={{ marginLeft: `${(size - 1) * 20}px` }}>
             <a href={`#${id}`}>{title}</a>
@@ -136,43 +138,45 @@ export default async function Page({
     await getPage(params.slug, searchParams);
 
   return (
-    <div className={styles.container}>
-      <GoBackLink href="/blog" />
-      <HeaderGenerator
-        className={styles.headerImage}
-        content_visuals={content_visuals}
-        content_image={content_image}
-      />
-      <div className={styles.contentArea}>
-        <h2>{title}</h2>
-        <div className={styles.readTime}>
-          <small>{moment(date).format("MMMM DD, YYYY")}</small>
-          <CalculateReadTime body={body} />
-        </div>
-
+    <div 
+    className={styles.outerContainer}
+    >
       {/* generate clickaable links that jump to headers in this blog post */}
-      <OutlineGenerator  body={body}/>
-
-        <div className={styles.content}>
-          <HtmlGenerator body={body} />
+      <OutlineGenerator body={body} />
+      <div className={styles.container}>
+        <GoBackLink href="/blog" />
+        <HeaderGenerator
+          className={styles.headerImage}
+          content_visuals={content_visuals}
+          content_image={content_image}
+        />
+        <div className={styles.contentArea}>
+          <h2>{title}</h2>
+          <div className={styles.readTime}>
+            <small>{moment(date).format("MMMM DD, YYYY")}</small>
+            <CalculateReadTime body={body} />
+          </div>
+          <div className={styles.content}>
+            <HtmlGenerator body={body} />
+          </div>
+          <hr
+            style={{
+              marginTop: "2rem",
+              marginBottom: "1rem",
+            }}
+          />
+          <AuthorInfo {...author} slug={params.slug} />
+          <hr
+            style={{
+              marginTop: "2rem",
+              marginBottom: "1rem",
+            }}
+          />
+          <RecommendatedPost slug={params.slug} tags={technologies} />
+          {params.slug !== "preview" && (
+            <Comments slug={params.slug} id={id} title={title} />
+          )}
         </div>
-        <hr
-          style={{
-            marginTop: "2rem",
-            marginBottom: "1rem",
-          }}
-        />
-        <AuthorInfo {...author} slug={params.slug} />
-        <hr
-          style={{
-            marginTop: "2rem",
-            marginBottom: "1rem",
-          }}
-        />
-        <RecommendatedPost slug={params.slug} tags={technologies}/>
-        {params.slug !== 'preview'&&
-          <Comments slug={params.slug} id={id} title={title} />
-        }
       </div>
     </div>
   );
