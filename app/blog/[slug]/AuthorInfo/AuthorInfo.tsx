@@ -15,7 +15,7 @@ export function AuthorInfo({ bio, email, first_name, last_name, job_title, locat
             href={`mailto:${email}`}
             target="_blank"
             rel="noopener noreferrer"
-            style={{ color: "white" }}
+            style={{ color: "black" }}
           >
             {email}
           </a>
