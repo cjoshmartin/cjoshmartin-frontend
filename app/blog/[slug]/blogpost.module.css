@@ -1,8 +1,33 @@
+.outerContainer {
+    display: flex;
+    flex-direction: row-reverse;
+    gap: 0.5rem;
+}
+
+.outlineContainer {
+    /* background-color: var(--primary-color); */
+    margin-top: 2.5rem;
+    width: 300px;
+}
+
+.outlineList {
+    width: 300px;
+    padding: 0;
+    margin: 0;
+    position: sticky;
+    top: 100px;
+}
+
+.outlineList a {
+    color: white;
+}
+
 .container {
     display: flex;
     flex-direction: column;
     gap: 1rem;
     /* padding: 1rem; */
+    max-width: calc(900px - 300px);
 }
 .container h2 {
     text-transform: capitalize;
@@ -50,4 +75,17 @@
     width: 100%;
     height: auto;
     aspect-ratio: 16 / 9;
+}
+
+@media (max-width: 900px) {
+    .outerContainer {
+        flex-direction: column;
+    }
+    .outlineContainer {
+        width: 100%;
+        display: none;
+    }
+    .container {
+        max-width: 100%;
+    }
 }

@@ -1,7 +1,7 @@
 import styles from './projectPage.module.css';
 import HtmlGenerator from '@/app/components/HtmlGenerator/HtmlGenerator';
 import Testimonial from "@/app/components/Testimonial";
-import { GoBackLink } from "@/app/blog/[slug]/GoBackLink";
+import { GoBackLink } from "@/app/blog/[slug]/GoBackLink/GoBackLink";
 import { Metadata, ResolvingMetadata } from "next";
 import { getFromSlug, getPreviewContent } from "@/app/components/api/pages";
 import seo from '@/app/components/SEO'
