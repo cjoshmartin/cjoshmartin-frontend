@@ -76,3 +76,16 @@
     height: auto;
     aspect-ratio: 16 / 9;
 }
+
+@media (max-width: 900px) {
+    .outerContainer {
+        flex-direction: column;
+    }
+    .outlineContainer {
+        width: 100%;
+        display: none;
+    }
+    .container {
+        max-width: 100%;
+    }
+}

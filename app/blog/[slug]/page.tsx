@@ -6,7 +6,7 @@ import styles from './blogpost.module.css'
 import moment from "moment"
 import HtmlGenerator from "@/app/components/HtmlGenerator/HtmlGenerator"
 import Comments from "./Comments"
-import { GoBackLink } from "./GoBackLink"
+import { GoBackLink } from "./GoBackLink/GoBackLink"
 import { Metadata, ResolvingMetadata } from "next"
 import { getFromSlug, getPreviewContent } from "@/app/components/api/pages"
 import { AuthorInfo } from './AuthorInfo/AuthorInfo'
@@ -107,6 +107,13 @@ function OutlineGenerator({body}: {body: any}){
     }, [])
   
   }, [body])
+
+
+  if(content.length < 1){
+    return null;
+
+  }
+
 
   return (
     <div

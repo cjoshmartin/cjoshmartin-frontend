@@ -1,22 +1,13 @@
 'use client'
 
 import { motion } from "framer-motion";
+import styles from './GoBackLink.module.css'
 
 export function GoBackLink({ href }: any) {
 
   return (
-    <div
-      style={{
-        position: 'sticky',
-        top: '0',
-        zIndex: 4,
-        display: 'flex',
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingTop: '2rem',
-        paddingLeft: '2rem',
-        // height: '90px',
-      }}
+    <div 
+    className={styles.container} 
     >
     <motion.a
       href={href}
