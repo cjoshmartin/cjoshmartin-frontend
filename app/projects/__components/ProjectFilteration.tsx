@@ -13,7 +13,7 @@ export function ProjectFilteration({homePageData, searchParams}: {homePageData: 
     )
   );
 
-    const filteredData = homePageData 
+    const filteredData = homePageData
             .reduce((acc: any, project: any) => {
               const { medium, technologies, project_type } = project;
               if (!params || Object.keys(params).length < 1) {
@@ -21,35 +21,24 @@ export function ProjectFilteration({homePageData, searchParams}: {homePageData: 
                 return acc;
               }
 
-              let shouldPush = false;
+              const matchesProjectType =
+                !params?.project_type || project_type === params?.project_type;
 
-              if (
-                !!params?.project_type &&
-                project_type === params?.project_type
-              ) {
-                shouldPush = true;
-              }
+              const matchesMedium =
+                !params?.medium ||
+                medium.some((m: string) => m.trim() === params?.medium);
 
-              if (
-                !!params?.medium &&
-                medium.includes(params?.medium)
-              ) {
-                shouldPush = true;
-              }
-              if (
-                !!params?.technologies &&
-                technologies.includes(params?.technologies)
-              ) {
-                shouldPush = true;
-              }
+              const matchesTechnologies =
+                !params?.technologies ||
+                technologies.some((t: string) => t.trim() === params?.technologies);
 
-              if (shouldPush) {
+              if (matchesProjectType && matchesMedium && matchesTechnologies) {
                 acc.push(project);
               }
 
               return acc;
             }, [])
-      
+
       const counts = filteredData.reduce((acc: any, {medium, technologies} : any) => {
 
         medium.forEach((m: string) =>{
