@@ -1,0 +1,35 @@
+.testimonialProgressContainer {
+    width: 100%;
+    display: block;
+}
+
+.testimonialProgressTrack {
+    width: 100%;
+    height: 1rem;
+    background-color: rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+}
+
+.testimonialProgressFill {
+    height: 100%;
+    width: 0%;
+    background-color: #2ecc71;
+    animation-name: testimonialProgressFill;
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
+}
+
+@keyframes testimonialProgressFill {
+    from { width: 0%; }
+    to { width: 100%; }
+}
+
+@media only screen and (max-width: 900px){
+
+.testimonialProgressContainer {
+    display: flex;
+    flex-direction: row;
+    padding-top: 1rem;
+    justify-content: center;
+}
+}

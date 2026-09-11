@@ -4,12 +4,10 @@ import TypeIt from "typeit-react";
 import { stripHtml } from "string-strip-html";
 
 import styles from './Testimonial.module.css'
-import { faRotateRight } from "@fortawesome/free-solid-svg-icons";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useEffect, useState } from "react";
 import { RandomIntFromInterval } from "@/app/randomIntFromInterval";
 import { motion } from "framer-motion";
-
+import TestimonialProgress from "@/app/components/TestimonialProgress";
 
 interface TestimonialImage {
   title: string;
@@ -40,7 +38,6 @@ interface TestimonialProps {
 
 export default function Testimonial({ testimonial, title, all, shouldHideImage }: TestimonialProps) {
   const [test , setTest] = useState<TestimonialObject>(testimonial);
-  const [testIndex, setTestIndex] = useState<number>(1);
   const [isRevealed, setIsRevealed] = useState<boolean>(false);
 
   if(!test){
@@ -49,6 +46,9 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
   }
 
   return (
+    <div style={{
+      width: "100%"
+    }}>
     <div
       style={{
         color: "black",
@@ -124,25 +124,14 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
           </div>
         </div>
       </motion.div>
-      {!!all && all.length > 1 && (
-        <div className={styles.testimonialButtonContainer}>
-          <motion.button
-            className={styles.testimonialButton}
-            // @ts-ignore
-            onClick={() => {
-              const newI = (testIndex + 1) % all.length;
-              setTestIndex(newI)
-              setTest(all[newI].testimonial)
-              setIsRevealed(false)
-            }}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.9 }}
-          >
-            <FontAwesomeIcon icon={faRotateRight} />
-            Get a different testimonial
-          </motion.button>
-        </div>
-      )}
+    </div>
+    <TestimonialProgress
+      all={all}
+      onAdvance={(newTestimonial) => {
+        setTest(newTestimonial);
+        setIsRevealed(false);
+      }}
+    />
     </div>
   );
 }
