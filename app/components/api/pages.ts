@@ -24,15 +24,13 @@ export async function getPages(params?: {project_audience?: string, type?: strin
     .then(data => data.items.filter(({meta}: any) => meta.type !== PageTypes.BLOG_INDEX));
 
 
-    const results: any[] = []
-    for (let i = 0; i < pages.length; i++){
-      const page = pages[i];
-      const {id} = page;
-      const result = await fetch(`${URL}/api/pages/${id}`).then((data) =>
-        data.json()
-      );
-      results.push(result);
-    }
+    const results = await Promise.all(
+      pages.map(({id}: any) =>
+        fetch(`${URL}/api/pages/${id}`, {
+          next: { revalidate: 3600 }
+        }).then((data) => data.json())
+      )
+    );
 
     //@ts-ignore
     return results.sort((a: object, b: object) => (new Date(b.date)) - (new Date(a.date)));
@@ -47,7 +45,9 @@ export async function getFromSlug(slug: string){
     .then(data => data.json())
     .then(({items}: any) => items[0].id)
 
-    const pageData = await fetch(`${URL}/api/pages/${id}/`)
+    const pageData = await fetch(`${URL}/api/pages/${id}/`, {
+      next: { revalidate: 3600 }
+    })
     .then(data => data.json())
 
     return pageData;
