@@ -42,10 +42,14 @@ interface HomePageData {
 }
 
 export async function generateMetadata(
-  { params, searchParams }: any,
+  props: {
+    params: Promise<{ [key: string]: string | string[] | undefined }>
+    searchParams: Promise<{ [key: string]: string | string[] | undefined }>
+  },
   parent: ResolvingMetadata
 ): Promise<Metadata> {
-  
+
+
     const content: any = (await getPages({type: PageTypes.HOME}))[0];
     
     const {meta} = content;

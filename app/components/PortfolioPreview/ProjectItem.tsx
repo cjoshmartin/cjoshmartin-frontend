@@ -5,6 +5,7 @@ import styles from './PortfolioPreview.module.css';
 import ShowImage from '@/app/blog/_compoents/ShowImage/ShowImage';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowUpRightFromSquare } from '@fortawesome/free-solid-svg-icons';
+import { isNoContent } from './isNoContent';
 
 export interface ProjectItemProps {
   previewImage?: string
@@ -20,7 +21,7 @@ export interface ProjectItemProps {
 
 export function ProjectItem(props: ProjectItemProps) {
     const {slug, website, body} = props
-    const isNoContent = (website ?? [])?.length > 0 && (body ?? [])?.length < 1;
+    const noContent = isNoContent(website, body);
 
   const content = (
     <>
@@ -36,7 +37,7 @@ export function ProjectItem(props: ProjectItemProps) {
           width={150}
           height={150}
         />
-        {isNoContent && (
+        {noContent && (
           <p className={styles.noContent}>View project website
           <FontAwesomeIcon icon={faArrowUpRightFromSquare} />
           </p>
@@ -72,8 +73,8 @@ export function ProjectItem(props: ProjectItemProps) {
       <motion.a
         whileHover={{ scale: 1.01 }}
         className={styles.projectContainer}
-        href={isNoContent ? website : `/projects/${slug}`}
-        target={isNoContent ? "_blank" : undefined}
+        href={noContent ? website : `/projects/${slug}`}
+        target={noContent ? "_blank" : undefined}
       >
         {content}
       </motion.a>

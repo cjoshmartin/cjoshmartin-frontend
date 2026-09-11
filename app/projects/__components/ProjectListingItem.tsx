@@ -8,6 +8,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowUpRightFromSquare } from '@fortawesome/free-solid-svg-icons';
 import { motion } from 'framer-motion';
 import { CalculateReadTime } from '@/app/components/CalculateReadTime/CalculateReadTime';
+import { isNoContent } from '../../components/PortfolioPreview/isNoContent';
 
 interface ProjectListingItemProps {
     data: any
@@ -18,12 +19,12 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
     project_type, title, content_image, client, medium, technologies, intro, meta, website,body
   } = data;
 
-    const isNoContent = (website ?? [])?.length > 0 && (body ?? [])?.length < 1;
+    const noContent = isNoContent(website, body);
   return (
     <motion.a
       whileHover={{ scale: 1.01 }}
-      href={isNoContent ? website : `/projects/${meta.slug}`}
-      target={isNoContent ? "_blank" : undefined}
+      href={noContent ? website : `/projects/${meta.slug}`}
+      target={noContent ? "_blank" : undefined}
       className={generateClassList([
         styles.projectContainer,
         project_type === ProjectType.Personal
@@ -43,7 +44,7 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
           alt={title}
           className={styles.projectImage}
         />
-        {isNoContent && (
+        {noContent && (
           <p className={styles.noContent}>
             View Project Website
             {` `}
@@ -51,7 +52,7 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
           </p>
         )}
 
-        {!isNoContent && (
+        {!noContent && (
           <p className={styles.noContent}>
             Read More...
             {` `}
@@ -61,7 +62,7 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
       <div>
         <div className={styles.projectInfo}>
           <h2>{title}</h2>
-          {!isNoContent && <CalculateReadTime body={body} />}
+          {!noContent && <CalculateReadTime body={body} />}
           {client && <h3 style={{ fontWeight: "400" }}>Client: {client}</h3>}
           <h4>Medium: {medium?.join(", and ")}</h4>
           <h5>Technologies: {technologies.join(", ")}</h5>
