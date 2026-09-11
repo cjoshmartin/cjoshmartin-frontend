@@ -2,26 +2,38 @@ import URL from '@/app/components/defaulturl';
 import { PageTypes } from "@/app/PageTypes";
 
 export async function getPages(params?: {project_audience?: string, type?: string, project_type?: string}){
-    let url =`${URL}/api/pages/?format=json&fields=_,id,type,title` 
+    let baseUrl =`${URL}/api/pages/?format=json&fields=_,id,type,title`
 
     if(params?.project_audience){
-      url += ',project_audience'
+      baseUrl += ',project_audience'
     }
-    
+
     if (params && Object.keys(params)) {
         Object.keys(params).forEach((key)=> {
           //@ts-ignore
-          url += `&${key}=${params[key]}`
+          baseUrl += `&${key}=${params[key]}`
         })
     }
 
-    const pages = await fetch(url, {
-      // cache: 'no-cache'
-      next: { revalidate: 3600 }
+    // Wagtail's API caps `limit` at 20 per request, so we have to page
+    // through `offset` using `meta.total_count` until we've fetched everything.
+    const limit = 20;
+    let offset = 0;
+    let totalCount = Infinity;
+    const items: any[] = [];
+
+    while (offset < totalCount) {
+      const data = await fetch(`${baseUrl}&limit=${limit}&offset=${offset}`, {
+        // cache: 'no-cache'
+        next: { revalidate: 3600 }
+      }).then(response => response.json());
+
+      items.push(...data.items);
+      totalCount = data.meta.total_count;
+      offset += limit;
     }
-    )
-    .then(response => response.json())
-    .then(data => data.items.filter(({meta}: any) => meta.type !== PageTypes.BLOG_INDEX));
+
+    const pages = items.filter(({meta}: any) => meta.type !== PageTypes.BLOG_INDEX);
 
 
     const results = await Promise.all(
