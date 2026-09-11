@@ -38,7 +38,7 @@
     min-height: 110px;
     width: 630px;
 }
-.testimonialText p:first{
+.testimonialText p:first-child{
     display: none;
 }
 
