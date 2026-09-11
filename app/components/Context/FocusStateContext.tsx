@@ -71,11 +71,13 @@ function FocusModeUrlSync({ setFocusMode }: { setFocusMode: (focusMode: FocusMod
             const params = new URLSearchParams(searchParams.toString());
             params.set('project_audience', focusModeStorage);
             router.replace(`?${params.toString()}`);
+            router.refresh();
         } else if (!focusModeStorage && !projectAudience) {
             localStorage.setItem('cjoshmartin_focusMode', FocusModes.Developer);
             const params = new URLSearchParams(searchParams.toString());
             params.set('project_audience', FocusModes.Developer);
             router.replace(`?${params.toString()}`);
+            router.refresh();
         }
     }, [projectAudience, router, searchParams, setFocusMode]);
 
