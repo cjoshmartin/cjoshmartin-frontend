@@ -11,7 +11,7 @@ interface ModelRenderProps {
 
   function ModelRender({ url }: ModelRenderProps) {
     const geom = useLoader(STLLoader, url);
-    const boxRef = useRef();
+    const boxRef = useRef(null);
 
     useFrame(() => {
         //@ts-ignore
