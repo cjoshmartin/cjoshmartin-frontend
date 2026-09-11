@@ -34,7 +34,9 @@ export const FocusStateProvider = ({ children }: { children: React.ReactNode }) 
     const commitFocusChange = (focusMode: FocusModes) => {
         setFocusMode(focusMode);
         localStorage.setItem('cjoshmartin_focusMode', focusMode);
-        window.location.assign(`?project_audience=${focusMode}`);
+        const params = new URLSearchParams(window.location.search);
+        params.set('project_audience', focusMode);
+        window.location.assign(`?${params.toString()}`);
 
     }
 
@@ -64,14 +66,18 @@ function FocusModeUrlSync({ setFocusMode }: { setFocusMode: (focusMode: FocusMod
         if (projectAudience ) {
             setFocusMode(projectAudience as FocusModes);
             localStorage.setItem('cjoshmartin_focusMode', projectAudience);
-            // if the focus mode is set in the local storage, replace the search params with the focus mode
+            // if the focus mode is set in the local storage, add it to the search params
         } else  if (focusModeStorage) {
-            router.replace(`?project_audience=${focusModeStorage}`);
+            const params = new URLSearchParams(searchParams.toString());
+            params.set('project_audience', focusModeStorage);
+            router.replace(`?${params.toString()}`);
         } else if (!focusModeStorage && !projectAudience) {
             localStorage.setItem('cjoshmartin_focusMode', FocusModes.Developer);
-            router.replace(`?project_audience=${FocusModes.Developer}`);
+            const params = new URLSearchParams(searchParams.toString());
+            params.set('project_audience', FocusModes.Developer);
+            router.replace(`?${params.toString()}`);
         }
-    }, [projectAudience, router, setFocusMode]);
+    }, [projectAudience, router, searchParams, setFocusMode]);
 
     return null;
 }
