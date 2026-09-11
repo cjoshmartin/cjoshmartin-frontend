@@ -1,11 +1,8 @@
-'use client'
-
-import { useFocusState } from "../components/Context/FocusStateContext";
 import { FocusModes } from "../components/Context/FocusMode";
 
-export function Esty() {
+const focusMode: FocusModes = FocusModes.Developer;
 
-    const { focusMode } = useFocusState();
+export function Esty() {
 
     const isDeveloper = focusMode === FocusModes.Developer;
 

@@ -11,3 +11,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 # Git commit attribution
 
 Do not add a `Co-Authored-By` trailer (or any other AI-attribution line) to git commit messages or pull request descriptions in this repo.
+
+# Comments
+
+Do not remove existing comments (including commented-out code) as an incidental part of an edit. Only remove a comment when the user explicitly asks for it, or when it directly references code you are deleting in the same change and would otherwise dangle/mislead.

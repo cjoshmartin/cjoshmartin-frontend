@@ -76,9 +76,9 @@ function Service({service, index }: ServiceProps) {
           <h3>
             {title}
           </h3>
-          <p dangerouslySetInnerHTML={{ __html: description || "" }} />
+          <div dangerouslySetInnerHTML={{ __html: description || "" }} />
           {link && link.length > 0 && (
-            <span
+            <div
               style={{
                 color: "var(--secondary-color)",
                 textDecoration: "underline",

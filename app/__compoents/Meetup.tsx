@@ -1,8 +1,6 @@
-'use client'
-
-import { useFocusState } from "../components/Context/FocusStateContext";
 import { FocusModes } from "../components/Context/FocusMode";
 
+const focusMode: FocusModes = FocusModes.Developer;
 
 function MeetupItem({
   title,
@@ -37,8 +35,6 @@ function MeetupItem({
 }
 
 export function Meetup() {
-
-    const { focusMode } = useFocusState();
 
     const isDeveloper = focusMode === FocusModes.Developer;
     const isMaker = focusMode === FocusModes.Maker;

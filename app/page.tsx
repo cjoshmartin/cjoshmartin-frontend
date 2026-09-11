@@ -158,9 +158,9 @@ export default async function Home(
       >
         Brands I have worked with
       </h2> */}
-      <Services services={home_service as ServiceObj[]}  project_audience={searchParams?.project_audience as FocusModes}/>
-      <PortfolioPreview project_audience={searchParams?.project_audience as string}/>
-      <PersonalPortfolioPreview project_audience={searchParams?.project_audience as string} />
+      <Services services={home_service as ServiceObj[]}  project_audience={FocusModes.Developer}/>
+      <PortfolioPreview project_audience={FocusModes.Developer}/>
+      <PersonalPortfolioPreview project_audience={FocusModes.Developer} />
       {/* <Meetup /> */}
       {/* <Esty /> */}
 

@@ -2,11 +2,9 @@ import ProjectListingItem from './ProjectListingItem';
 import Tags from './Tags';
 import styles from '../projects.module.css'
 import ClearFilters from '../ClearFilters';
-import { FocusModes } from '@/app/components/Context/FocusMode';
 
 export function ProjectFilteration({homePageData, searchParams}: {homePageData: any, searchParams: any}) {
 
-  const focusType = searchParams?.project_audience ?? FocusModes.Developer;
   const params = Object.fromEntries(
     Object.entries(searchParams ?? {}).filter(
       ([key]) => key !== "project_audience"
@@ -69,9 +67,7 @@ export function ProjectFilteration({homePageData, searchParams}: {homePageData: 
     return (
       <div className={styles.container}>
         <div className={styles.filterContainer}>
-          <h1>
-            {focusType === FocusModes.Developer ? "Portfolio" : "Projects"}
-          </h1>
+          <h1>Portfolio</h1>
           <ClearFilters searchParams={params}/>
           <Tags title="Medium" tags={medium} searchParams={params} />
           <Tags
