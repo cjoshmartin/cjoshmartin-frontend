@@ -71,28 +71,30 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
         key={test.job_title}
       >
         <div
+          className={styles.imageWrapper}
           style={{
             display: shouldHideImage ? "none" : undefined,
           }}
+          onMouseEnter={() => setIsRevealed(true)}
+          onMouseLeave={() => setIsRevealed(false)}
+          onTouchStart={() => setIsRevealed(true)}
+          onTouchEnd={() => setIsRevealed(false)}
         >
-            { test?.image?.url && isRevealed ? (
+          <div
+            className={styles.image}
+            style={{ opacity: isRevealed ? 0 : 1 }}
+            dangerouslySetInnerHTML={{
+              __html: test?.image?.value ?? "",
+            }}
+          />
+          {test?.image?.url && (
             <img
               className={styles.revealedImage}
               src={test.image.url}
               alt={test.image.title}
-              onMouseLeave={() => setIsRevealed(false)}
-              onTouchEnd={() => setIsRevealed(false)}
+              style={{ opacity: isRevealed ? 1 : 0 }}
             />
-             ) : (
-               <div
-                 className={styles.image}
-                 onMouseEnter={() => setIsRevealed(true)}
-                 onTouchStart={() => setIsRevealed(true)}
-                 dangerouslySetInnerHTML={{
-                   __html: test?.image?.value ?? "",
-                 }}
-               />
-             )}
+          )}
         </div>
         <div className={styles.contentContainer}>
           {test?.body && stripHtml(test.body)?.result}
