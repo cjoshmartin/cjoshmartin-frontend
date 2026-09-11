@@ -14,6 +14,7 @@ import { motion } from "framer-motion";
 interface TestimonialImage {
   title: string;
   value: string;
+  url?: string;
 }
 
 interface TestimonialObject {
@@ -34,32 +35,17 @@ interface TestimonialProps {
   testimonial: TestimonialObject;
   title?: string,
   all?: FromAPI[],
-  shouldHideImage?: boolean 
+  shouldHideImage?: boolean
 }
 
 export default function Testimonial({ testimonial, title, all, shouldHideImage }: TestimonialProps) {
   const [test , setTest] = useState<TestimonialObject>(testimonial);
   const [testIndex, setTestIndex] = useState<number>(1);
-  // const [copyText, setCopyText] = useState<any | null>(null);
-
-  // useEffect(() => {
-  //   const comp = (
-  //     <TypeIt
-  //       options={{
-  //         speed: 20,
-  //       }}
-  //       className={styles.testimonialText}
-  //     >
-  //       {stripHtml(test.body).result}
-  //     </TypeIt>
-  //   );
-  //   setCopyText(comp);
-  //   console.log("firing!!!")
-  //   console.log(test.body)
-  // }, [test])
+  const [isRevealed, setIsRevealed] = useState<boolean>(false);
 
   if(!test){
-    return test
+    // if there is unvaild testimonial then return nothing
+    return null;
   }
 
   return (
@@ -89,12 +75,24 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
             display: shouldHideImage ? "none" : undefined,
           }}
         >
-          <div
-            className={styles.image}
-            dangerouslySetInnerHTML={{
-              __html: test?.image?.value ?? "",
-            }}
-          />
+            { test?.image?.url && isRevealed ? (
+            <img
+              className={styles.revealedImage}
+              src={test.image.url}
+              alt={test.image.title}
+              onMouseLeave={() => setIsRevealed(false)}
+              onTouchEnd={() => setIsRevealed(false)}
+            />
+             ) : (
+               <div
+                 className={styles.image}
+                 onMouseEnter={() => setIsRevealed(true)}
+                 onTouchStart={() => setIsRevealed(true)}
+                 dangerouslySetInnerHTML={{
+                   __html: test?.image?.value ?? "",
+                 }}
+               />
+             )}
         </div>
         <div className={styles.contentContainer}>
           {test?.body && stripHtml(test.body)?.result}
@@ -133,6 +131,7 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
               const newI = (testIndex + 1) % all.length;
               setTestIndex(newI)
               setTest(all[newI].testimonial)
+              setIsRevealed(false)
             }}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.9 }}
