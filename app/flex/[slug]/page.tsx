@@ -3,12 +3,13 @@ import generateURL from "@/app/components/generateURL"
 import styles from './flexPage.module.css'
 
 async function getPage(slug: string){
-    const url = generateURL(`/api/pages/get-page-from-slug?query=${slug}`)
+    const url = await generateURL(`/api/pages/get-page-from-slug?query=${slug}`)
     return await fetch(url)
     .then(data => data.json())
 }
 
-export default async function Page({ params }: { params: { slug: string } }){
+export default async function Page(props: { params: Promise<{ slug: string }> }) {
+    const params = await props.params;
     const {title, body} = await getPage(params.slug);
     return (
         <div className={styles.container}>

@@ -28,27 +28,26 @@ async function getPage(slug: string, searchParams: any){
     };
 }
 
-export async function generateMetadata(
-  { params, searchParams }: any,
-  parent: ResolvingMetadata
-): Promise<Metadata> {
-  
-    const content = await getPage(params.slug, searchParams);
-    const {meta} = content
-    let title =  content.title;
-    if (meta?.seo_title && meta?.seo_title.length > 0){
-      title = meta?.seo_title;
-    }
-    const fullTitle = `${title} - Blog - ${seo.sitename}`;
+export async function generateMetadata(props: any, parent: ResolvingMetadata): Promise<Metadata> {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
 
-    let description = content.intro;
-    if (meta?.seo_title && meta.seo_title.length > 0) {
-      description = meta.seo_title
-    }
+  const content = await getPage(params.slug, searchParams);
+  const {meta} = content
+  let title =  content.title;
+  if (meta?.seo_title && meta?.seo_title.length > 0){
+    title = meta?.seo_title;
+  }
+  const fullTitle = `${title} - Blog - ${seo.sitename}`;
+
+  let description = content.intro;
+  if (meta?.seo_title && meta.seo_title.length > 0) {
+    description = meta.seo_title
+  }
 
 
-    const {content_visuals} = content;
-    const  {type, value} = content_visuals.length > 0 ? content_visuals[0] : {type: "", value: undefined};
+  const {content_visuals} = content;
+  const  {type, value} = content_visuals.length > 0 ? content_visuals[0] : {type: "", value: undefined};
   return {
     description,
     title: fullTitle,
@@ -65,7 +64,7 @@ export async function generateMetadata(
       type: "article",
       publishedTime: content.date,
       images:
-        type == "image" ? value?.url : undefined ||
+        (type == "image" ? value?.url : undefined) ||
         content.content_image?.url ||
         content.preview_image?.url ||
         seo.defaultImg,
@@ -104,7 +103,7 @@ function OutlineGenerator({body}: {body: any}){
         }
       );
       return acc.concat(headersWithSize)
-    }, [])
+    }, []);
   
   }, [body])
 
@@ -132,15 +131,16 @@ function OutlineGenerator({body}: {body: any}){
 
 
 
-export default async function Page({
-  params,
-  searchParams,
-}: {
-  params: {
-    slug: string;
-  };
-  searchParams?: { [key: string]: string | string[] | undefined };
-}) {
+export default async function Page(
+  props: {
+    params: Promise<{
+      slug: string;
+    }>;
+    searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
+  }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
   const { title, body, date, id, author, content_visuals, content_image, technologies } =
     await getPage(params.slug, searchParams);
 

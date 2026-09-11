@@ -3,7 +3,6 @@
 import { motion } from 'framer-motion';
 import styles from './PortfolioPreview.module.css';
 import ShowImage from '@/app/blog/_compoents/ShowImage/ShowImage';
-import { useEffect, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowUpRightFromSquare } from '@fortawesome/free-solid-svg-icons';
 
@@ -21,37 +20,14 @@ export interface ProjectItemProps {
 
 export function ProjectItem(props: ProjectItemProps) {
     const {slug, website, body} = props
-    const [isNoContent, setIsNoContent] = useState((website ?? [])?.length > 0 && (body ?? [])?.length < 1 );
+    const isNoContent = (website ?? [])?.length > 0 && (body ?? [])?.length < 1;
 
-    useEffect(() => {
-      setIsNoContent((website ?? [])?.length > 0 && (body ?? [])?.length < 1 );
-    }, [website, body]);
-
-
-  const ParentCompoent = (props: any) =>
-    slug ? (
-      <motion.a
-        href={isNoContent ? website : `/projects/${slug}`}
-        className={props.className}
-        {...props}
-        target={isNoContent ? "_blank" : undefined}
-      >
-        {props.children}
-      </motion.a>
-    ) : (
-      <motion.div className={props.className} {...props}>
-        {props.children}{" "}
-      </motion.div>
-    );
-  return (
-    <ParentCompoent
-      whileHover={{ scale: 1.01 }}
-      className={styles.projectContainer}
-    >
+  const content = (
+    <>
       <div
       style={{
         position: 'relative'
-      }} 
+      }}
       >
         <ShowImage
           url={props.previewImage}
@@ -88,6 +64,25 @@ export function ProjectItem(props: ProjectItemProps) {
           </small>
         )}
       </div>
-    </ParentCompoent>
+    </>
+  );
+
+  if (slug) {
+    return (
+      <motion.a
+        whileHover={{ scale: 1.01 }}
+        className={styles.projectContainer}
+        href={isNoContent ? website : `/projects/${slug}`}
+        target={isNoContent ? "_blank" : undefined}
+      >
+        {content}
+      </motion.a>
+    );
+  }
+
+  return (
+    <motion.div whileHover={{ scale: 1.01 }} className={styles.projectContainer}>
+      {content}{" "}
+    </motion.div>
   );
 }

@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server"
-import { headers } from "next/headers"
+import { headers } from "next/headers";
 
 
-export default function getHost() {
-  const headersList = headers()
+export default async function getHost() {
+  const headersList = await headers()
   const referer = headersList.get("referer")
   
   if (!referer) {

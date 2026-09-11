@@ -4,7 +4,6 @@ import ShowImage from "../../blog/_compoents/ShowImage/ShowImage";
 import Link from 'next/link';
 import { ProjectType } from '../../components/PortfolioPreview/ProjectType';
 import { generateClassList } from './generateClassList';
-import { useEffect, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowUpRightFromSquare } from '@fortawesome/free-solid-svg-icons';
 import { motion } from 'framer-motion';
@@ -19,11 +18,7 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
     project_type, title, content_image, client, medium, technologies, intro, meta, website,body
   } = data;
 
-    const [isNoContent, setIsNoContent] = useState((website ?? [])?.length > 0 && (body ?? [])?.length < 1 );
-
-    useEffect(() => {
-      setIsNoContent((website ?? [])?.length > 0 && (body ?? [])?.length < 1 );
-    }, [website, body]);
+    const isNoContent = (website ?? [])?.length > 0 && (body ?? [])?.length < 1;
   return (
     <motion.a
       whileHover={{ scale: 1.01 }}

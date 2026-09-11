@@ -24,23 +24,22 @@ type Props = {
   searchParams: any 
 }
 
-export async function generateMetadata(
-  { params, searchParams }: Props,
-  parent: ResolvingMetadata
-): Promise<Metadata> {
-  
-    const content = await getPage(params.slug, searchParams);
-    const {meta} = content
-    let title =  content.title;
-    if (meta?.seo_title && meta?.seo_title.length > 0){
-      title = meta?.seo_title;
-    }
-    const fullTitle = `${title} - Projects - ${seo.sitename}`;
+export async function generateMetadata(props: Props, parent: ResolvingMetadata): Promise<Metadata> {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
 
-    let description = content.intro;
-    if (meta.seo_title && meta.seo_title.length > 0) {
-      description = meta.seo_title
-    }
+  const content = await getPage(params.slug, searchParams);
+  const {meta} = content
+  let title =  content.title;
+  if (meta?.seo_title && meta?.seo_title.length > 0){
+    title = meta?.seo_title;
+  }
+  const fullTitle = `${title} - Projects - ${seo.sitename}`;
+
+  let description = content.intro;
+  if (meta.seo_title && meta.seo_title.length > 0) {
+    description = meta.seo_title
+  }
 
   return {
     description,
@@ -65,13 +64,14 @@ export async function generateMetadata(
   };
 }
 
-export default async function Page({
-  params,
-  searchParams,
-}: {
-  params: { slug: string };
-  searchParams?: { [key: string]: string | string[] | undefined }
-}) {
+export default async function Page(
+  props: {
+    params: Promise<{ slug: string }>;
+    searchParams?: Promise<{ [key: string]: string | string[] | undefined }>
+  }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
   const {
     title,
     body,

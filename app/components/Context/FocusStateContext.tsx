@@ -1,5 +1,5 @@
 'use client'
-import { createContext, useContext, useState, useEffect, useMemo } from "react";    
+import { createContext, useContext, useState, useEffect, useMemo, Suspense } from "react";
 import { useRouter, useSearchParams } from 'next/navigation'
 import { FocusModes } from "./FocusMode";
 
@@ -18,12 +18,6 @@ interface FocusStateContextState {
 const FocusStateContext = createContext<FocusStateContextState>({});
 
 export const FocusStateProvider = ({ children }: { children: React.ReactNode }) => {
-    const searchParams = useSearchParams();
-    const router = useRouter();
-
-    // Get the project audience from the search params
-    const projectAudience = useMemo(() => searchParams.get('project_audience') as FocusModes, [searchParams]);
-
     // Get the focus mode from the local storage
     const localStorageFocusMode = useMemo(
       () =>
@@ -36,6 +30,32 @@ export const FocusStateProvider = ({ children }: { children: React.ReactNode }) 
 
     // Set the focus mode to the local storage focus mode
     const [focusMode, setFocusMode] = useState<FocusModes>(localStorageFocusMode);
+
+    const commitFocusChange = (focusMode: FocusModes) => {
+        setFocusMode(focusMode);
+        localStorage.setItem('cjoshmartin_focusMode', focusMode);
+        window.location.assign(`?project_audience=${focusMode}`);
+
+    }
+
+    return (
+        <FocusStateContext.Provider value={{ focusMode, commitFocusChange }}>
+            <Suspense fallback={null}>
+                <FocusModeUrlSync setFocusMode={setFocusMode} />
+            </Suspense>
+            {children}
+        </FocusStateContext.Provider>
+    );
+};
+
+// useSearchParams() requires a Suspense boundary, so the URL-syncing logic
+// lives in its own subtree rather than gating {children} on it.
+function FocusModeUrlSync({ setFocusMode }: { setFocusMode: (focusMode: FocusModes) => void }) {
+    const searchParams = useSearchParams();
+    const router = useRouter();
+
+    // Get the project audience from the search params
+    const projectAudience = useMemo(() => searchParams.get('project_audience') as FocusModes, [searchParams]);
 
     useEffect(() => {
         // check if focus mode has been set in local storage
@@ -50,18 +70,11 @@ export const FocusStateProvider = ({ children }: { children: React.ReactNode }) 
         } else if (!focusModeStorage && !projectAudience) {
             localStorage.setItem('cjoshmartin_focusMode', FocusModes.Developer);
             router.replace(`?project_audience=${FocusModes.Developer}`);
-        } 
-    }, [projectAudience,  router]);
+        }
+    }, [projectAudience, router, setFocusMode]);
 
-    const commitFocusChange = (focusMode: FocusModes) => {
-        setFocusMode(focusMode);
-        localStorage.setItem('cjoshmartin_focusMode', focusMode);
-        window.location.assign(`?project_audience=${focusMode}`);
-
-    }
-
-    return <FocusStateContext.Provider value={{ focusMode, commitFocusChange }}>{children}</FocusStateContext.Provider>;
-};
+    return null;
+}
 
 
 export const useFocusState = () => {
