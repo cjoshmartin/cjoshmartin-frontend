@@ -37,7 +37,7 @@ export function ProjectFilteration({homePageData, searchParams}: {homePageData: 
               return acc;
             }, [])
 
-      const counts = filteredData.reduce((acc: any, {medium, technologies} : any) => {
+      const counts = filteredData.reduce((acc: any, {medium}: any) => {
 
         medium.forEach((m: string) =>{
           const name = m.trim();
@@ -49,20 +49,37 @@ export function ProjectFilteration({homePageData, searchParams}: {homePageData: 
           }
         })
 
+        return acc;
+      }, {medium: {}})
+
+      const dataForTechnologyCounts = homePageData
+            .filter(({medium, project_type}: any) => {
+              const matchesProjectType =
+                !params?.project_type || project_type === params?.project_type;
+
+              const matchesMedium =
+                !params?.medium ||
+                medium.some((m: string) => m.trim() === params?.medium);
+
+              return matchesProjectType && matchesMedium;
+            })
+
+      const technologies = dataForTechnologyCounts.reduce((acc: any, {technologies}: any) => {
+
         technologies.forEach((t: string) =>{
           const name = t.trim();
-          if(!acc['technologies'][name]){
-             acc['technologies'][name] = 1;
+          if(!acc[name]){
+             acc[name] = 1;
           }
           else{
-            acc['technologies'][name] +=1;
+            acc[name] +=1;
           }
         })
 
         return acc;
-      }, {medium: {}, technologies: {}})
+      }, {})
 
-    const {medium, technologies} = counts;
+    const {medium} = counts;
 
     return (
       <div className={styles.container}>
