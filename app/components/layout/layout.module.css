@@ -8,12 +8,34 @@
     background-color: black;
 }
 
+@keyframes navFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 .nav{
     display: flex;
     justify-content: center;
     gap: 12px;
     flex-wrap: wrap;
     align-items: center;
+    animation: navFadeIn 0.3s ease-out;
+}
+
+:global(.nav-link) {
+    transition: transform 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+:global(.nav-link):hover {
+    background-color: #85ffa7;
+    color: black !important;
+    transform: scale(1.1);
 }
 .ctaLink {
     text-decoration: none;
