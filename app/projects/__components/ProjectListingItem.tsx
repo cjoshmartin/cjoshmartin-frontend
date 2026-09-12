@@ -1,7 +1,6 @@
 'use client'
 import styles from '../projects.module.css';
 import ShowImage from "../../blog/_compoents/ShowImage/ShowImage";
-import Link from 'next/link';
 import { ProjectType } from '../../components/PortfolioPreview/ProjectType';
 import { generateClassList } from './generateClassList';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -32,11 +31,7 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
           : "",
       ])}
     >
-      <div 
-        style={{
-          position: 'relative',
-        }}
-      >
+      <div className={styles.projectImageContainer}>
         <ShowImage
           width={content_image?.width ?? 480}
           height={content_image?.height ?? 320}

@@ -9,7 +9,7 @@ async function getResults(){
 }
 type Props = {
   params: Promise<{ id: string }>
-  searchParams: any 
+  searchParams: any
 }
 
 export async function generateMetadata(props: Props, parent: ResolvingMetadata): Promise<Metadata> {

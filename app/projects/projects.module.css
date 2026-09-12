@@ -93,7 +93,7 @@
 .projectContainer {
     background-color: var(--primary-color);
     color: var(--secondary-color) !important;
-    text-decoration: none; 
+    text-decoration: none;
     padding: 2rem;
 
     display: flex;
@@ -119,15 +119,25 @@
     gap: 0.5rem;
 }
 
+.projectImageContainer {
+    position: relative;
+}
+
 .projectImage {
     object-fit: cover;
     height: 320px;
     width: 480px;
 }
 
+@media only screen and (min-width: 1201px){
+    .projectImageContainer {
+        flex-shrink: 0;
+    }
+}
+
 @media only screen and (max-width: 1200px){
     .projectImage {
-        max-width: 100%;
+        width: 100%;
     }
 }
 
