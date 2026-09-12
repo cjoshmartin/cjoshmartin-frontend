@@ -63,7 +63,7 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
           </p>
         )}
       </div>
-      <div>
+      <div className={styles.projectDetails}>
         <div className={styles.projectInfo}>
           <h2>{title}</h2>
           {!noContent && <CalculateReadTime body={body} />}
