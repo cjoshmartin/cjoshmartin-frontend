@@ -61,7 +61,7 @@
     gap: 1rem;
 }
 
-@media only screen and (max-width: 900px){
+@media only screen and (max-width: 1200px){
     .mediaContainer{
         flex-direction: column;
     }
@@ -107,7 +107,7 @@
 }
 
 
-@media only screen and (max-width: 900px){
+@media only screen and (max-width: 1200px){
     .projectContainer {
         flex-direction: column;
     }
@@ -125,7 +125,7 @@
     width: 480px;
 }
 
-@media only screen and (max-width: 900px){
+@media only screen and (max-width: 1200px){
     .projectImage {
         max-width: 100%;
     }
