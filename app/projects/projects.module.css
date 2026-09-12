@@ -75,6 +75,11 @@
     align-items: center;
 }
 
+.mediaLinkContainer a:hover {
+    background-color: #85ffa7;
+    color: black !important;
+}
+
 .techLinkContainer {
     display: flex;
     flex-direction: row;

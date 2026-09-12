@@ -5,6 +5,8 @@ import styles from '../projects.module.css';
 import Link from 'next/link';
 import { generateClassList } from './generateClassList';
 
+const MotionLink = motion.create(Link);
+
 function removeKey(params: object, key: string){
   const query = {...params};
   // @ts-ignore
@@ -28,15 +30,10 @@ export default function Tags({ title, tags, searchParams }: any) {
       <div
         className={generateClassList(["tag-links", styles.mediaLinkContainer])}
       >
-        <motion.span
-          whileHover={{
-            scale: 1.1,
-            backgroundColor: "#85ffa7",
-            color: "black",
-            padding: "0.5rem",
-          }}
-        >
-          <Link
+          <MotionLink
+            whileHover={{
+              scale: 1.1,
+            }}
             href={{
               pathname: "/projects",
               query: removeKey(searchParams, searchKey),
@@ -47,19 +44,16 @@ export default function Tags({ title, tags, searchParams }: any) {
             ])}
           >
             All
-          </Link>
-        </motion.span>
+          </MotionLink>
         {sortedTags.map((key) => (
-          <motion.span
-            key={key}
-            whileHover={{
-              scale: 1.1,
-              backgroundColor: "#85ffa7",
-              color: "black",
-              padding: "0.5rem",
-            }}
-          >
-            <Link
+            <MotionLink
+              key={key}
+              whileHover={{
+                scale: 1.1,
+              }}
+              style={{
+                padding: "0.5rem",
+              }}
               href={{
                 pathname: "/projects",
                 query: { ...searchParams, [searchKey]: key },
@@ -70,8 +64,7 @@ export default function Tags({ title, tags, searchParams }: any) {
               ])}
             >
               {key}({tags[key]})
-            </Link>
-          </motion.span>
+            </MotionLink>
         ))}
       </div>
     </div>
