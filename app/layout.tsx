@@ -12,6 +12,7 @@ import "@fortawesome/fontawesome-svg-core/styles.css";
 import { config } from "@fortawesome/fontawesome-svg-core";
 import AnimationContainer from './components/layout/AnimationContainer';
 import LoaderContainer from './components/Loader/LoaderContainer';
+
 config.autoAddCss = false;
 
 
