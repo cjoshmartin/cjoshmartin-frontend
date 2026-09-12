@@ -13,12 +13,21 @@ interface ProjectListingItemProps {
     data: any
 }
 
+function getThumbnail(content_image?: any, preview_image?: any, content_visuals?: any[]) {
+  if (content_image) return content_image;
+  if (preview_image) return preview_image;
+
+  const firstImageVisual = content_visuals?.find((visual) => visual.type === "image");
+  return firstImageVisual?.value;
+}
+
 export default function ProjectListingItem({ data }: ProjectListingItemProps) {
   const {
-    project_type, title, content_image, client, medium, technologies, intro, meta, website,body
+    project_type, title, content_image, preview_image, content_visuals, client, medium, technologies, intro, meta, website,body
   } = data;
 
     const noContent = isNoContent(website, body);
+    const thumbnail = getThumbnail(content_image, preview_image, content_visuals);
   return (
     <motion.a
       whileHover={{ scale: 1.01 }}
@@ -33,9 +42,9 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
     >
       <div className={styles.projectImageContainer}>
         <ShowImage
-          width={content_image?.width ?? 480}
-          height={content_image?.height ?? 320}
-          url={content_image?.url}
+          width={thumbnail?.width ?? 480}
+          height={thumbnail?.height ?? 320}
+          url={thumbnail?.url}
           alt={title}
           className={styles.projectImage}
         />
