@@ -84,7 +84,11 @@ export function ProjectFilteration({homePageData, searchParams}: {homePageData: 
     return (
       <div className={styles.container}>
         <div className={styles.filterContainer}>
-          <h1>Portfolio</h1>
+          <h1>
+            <span className='bg-black'>
+              Portfolio
+            </span>
+          </h1>
           <ClearFilters searchParams={params}/>
           <Tags title="Medium" tags={medium} searchParams={params} />
           <Tags

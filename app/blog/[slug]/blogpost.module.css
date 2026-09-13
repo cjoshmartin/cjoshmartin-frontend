@@ -4,15 +4,16 @@
 }
 
 .outlineContainer {
-    /*margin-top: 2.5rem;*/
 }
 
 .outlineList {
     width: 300px;
     padding: 0;
+    padding-bottom: 1rem;
     margin: 0;
     position: sticky;
     top: 100px;
+    background-color: rgba(0,0,0,0.85);
 }
 
 .outlineList a {
@@ -24,6 +25,7 @@
     flex-direction: column;
     gap: 1rem;
     flex: 1 1 auto;
+    background-color: rgba(0,0,0,0.85);
 }
 .container.withOutline {
     max-width: calc(100% - 300px);

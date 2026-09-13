@@ -83,7 +83,7 @@ function OutlineGenerator({content}: {content: any}){
     <div
     className={styles.outlineContainer}
     >
-      <ul className={styles.outlineList}>
+        <ul className={styles.outlineList}>
         {content.map(({id, title, size}: any) => (
           <li key={id} style={{ marginLeft: `${(size - 1) * 20}px` }}>
             <a href={`#${id}`}>{title}</a>

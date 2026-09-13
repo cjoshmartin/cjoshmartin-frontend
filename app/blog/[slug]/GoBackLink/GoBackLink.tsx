@@ -6,8 +6,9 @@ import styles from './GoBackLink.module.css'
 export function GoBackLink({ href }: any) {
 
   return (
-    <div 
-    className={styles.container} 
+    <div
+    className={styles.container}
+
     >
     <motion.a
       href={href}
@@ -18,7 +19,7 @@ export function GoBackLink({ href }: any) {
       }}
 
     >
-      <u>{"<<< Go back"}</u>
+      <u className="bg-black p-4">{"<<< Go back"}</u>
     </motion.a>
 </div>
   );

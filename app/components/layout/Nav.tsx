@@ -2,6 +2,7 @@ import { headers } from 'next/headers';
 import styles from './layout.module.css';
 import { generateClassList } from '@/app/projects/__components/generateClassList';
 import { ProjectNavLink } from './ProjectNavLink';
+import { AsciiFluid } from '@/components/ui/ascii-fluid';
 
 interface NavLinkProps {
     title: string,
@@ -39,6 +40,14 @@ export default async function Nav () {
 
     return (
       <header className={styles.header}>
+        <AsciiFluid
+          className="-z-10"
+          theme="dark"
+          color="#85ffa7"
+          backgroundColor="#000000"
+          cellSize={8}
+          animate={false}
+        />
         <nav className={styles.nav}>
           <NavLink link="/" title="Home" isActive={pathname === "/"} />
             <ProjectNavLink pathname={pathname} />

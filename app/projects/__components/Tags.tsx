@@ -26,7 +26,7 @@ export default function Tags({ title, tags, searchParams }: any) {
 
   return (
     <div className={styles.mediaContainer}>
-      <h3>{title}:</h3>
+      <h3 className='bg-black'>{title}:</h3>
       <div
         className={generateClassList(["tag-links", styles.mediaLinkContainer])}
       >
@@ -39,6 +39,7 @@ export default function Tags({ title, tags, searchParams }: any) {
               query: removeKey(searchParams, searchKey),
             }}
             className={generateClassList([
+              styles.tagLink,
               !searchParams[searchKey] ? styles.activeTagLink : "",
               "tag-links",
             ])}
@@ -59,6 +60,7 @@ export default function Tags({ title, tags, searchParams }: any) {
                 query: { ...searchParams, [searchKey]: key },
               }}
               className={generateClassList([
+                styles.tagLink,
                 searchParams[searchKey] === key ? styles.activeTagLink : "",
                 "tag-links",
               ])}

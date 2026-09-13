@@ -10,6 +10,12 @@
     gap: 2rem;
 }
 
+.contantContainer {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+
 @media only screen and (max-width: 1200px){
     .blogListContainer{
         flex-direction: column;

@@ -13,7 +13,7 @@ async function getBlogPosts(){
     .filter(({meta}: any) =>  meta.type === PageTypes.BLOG_POST)
     .sort(sortingFuncForDate)
     )
-    
+
 
 }
 
@@ -28,7 +28,11 @@ export default async function Blog(){
 
     return (
       <div className={styles.container}>
-        <h1>Blog</h1>
+        <h1>
+          <span className="bg-black">
+            Blog
+          </span>
+        </h1>
         {blogPosts.map(({ id, meta, date, title, intro, content_visuals, body}: any) => (
           <BlogListItem
             key={id}
