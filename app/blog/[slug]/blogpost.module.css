@@ -8,8 +8,8 @@
 
 .outlineList {
     width: 300px;
-    padding: 0;
-    padding-bottom: 1rem;
+    list-style: disc;
+    padding: 0 1rem 1rem 1.25rem;
     margin: 0;
     position: sticky;
     top: 100px;
