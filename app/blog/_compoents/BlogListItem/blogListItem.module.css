@@ -36,17 +36,6 @@
 }
 
 
-.contantContainer a {
-    background-color: white;
-    color: black;
-    font-weight: bold;
-    padding: 1rem;
-    border-radius: 1rem;
-    /* text-decoration: green wavy underline; */
-    text-decoration: underline;
-    width: fit-content;
-}
-
 .readTime {
     display: flex;
     flex-direction: row;

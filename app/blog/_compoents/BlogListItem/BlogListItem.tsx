@@ -4,6 +4,7 @@ import Link from 'next/link';
 import moment from 'moment';
 import ShowImage from '../ShowImage/ShowImage';
 import { CalculateReadTime } from '@/app/components/CalculateReadTime/CalculateReadTime';
+import { Button } from '@/components/ui/button';
 
 export default function BlogListItem(props: any){
     const {slug, title, publishDate, intro, content_visuals, body} = props
@@ -21,7 +22,14 @@ export default function BlogListItem(props: any){
           </div>
           <p>{intro}</p>
 
-          <Link href={`/blog/${slug}`}>Read More</Link>
+          <Button
+            variant="secondary"
+            className="bg-white text-black hover:bg-white/90"
+            nativeButton={false}
+            render={<Link href={`/blog/${slug}`} />}
+          >
+            Read More
+          </Button>
         </div>
       </div>
     );

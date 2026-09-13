@@ -3,6 +3,16 @@
 @import "shadcn/tailwind.css";
 
 /*
+  shadcn component classes bake in `dark:` utility overrides (e.g. the
+  outline Button variant uses dark:bg-input/30 for contrast against a dark
+  page). Without this, Tailwind's `dark:` falls back to the visitor's OS
+  prefers-color-scheme, making those overrides fire unpredictably. Scoping
+  it to a `.dark` class we never apply keeps `dark:` permanently inert,
+  since this site has one fixed look with no light/dark toggle.
+*/
+@custom-variant dark (&:is(.dark *));
+
+/*
   Design tokens. Colors follow shadcn/ui's semantic naming (--background,
   --foreground, --primary, etc., mapped to Tailwind utilities in the
   `@theme inline` block below) so shadcn components and existing CSS
@@ -151,11 +161,18 @@ body{
     font-size: 14px;
 }
 
-a {
-    color: var(--cursor-color);
-}
-a:visited {
-    color: var(--visted-link-color);
+/*
+  In @layer base so Tailwind utility classes (e.g. on a shadcn Button
+  rendered as an <a>) can still override the link color — unlayered CSS
+  always beats layered CSS regardless of specificity.
+*/
+@layer base {
+  a {
+      color: var(--cursor-color);
+  }
+  a:visited {
+      color: var(--visted-link-color);
+  }
 }
 
 .richtext-image {

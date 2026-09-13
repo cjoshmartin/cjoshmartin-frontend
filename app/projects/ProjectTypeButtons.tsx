@@ -4,6 +4,9 @@ import { ProjectType } from "../components/PortfolioPreview/ProjectType";
 import styles from "./projects.module.css";
 import Link from "next/link";
 import { motion } from "framer-motion";
+import { Button } from "@/components/ui/button";
+
+const MotionLink = motion(Link);
 
 /*
   three query parameters:
@@ -20,76 +23,69 @@ import { motion } from "framer-motion";
 export function ProjectTypeButtons({ searchParams, projectTypeCounts }: any) {
   return (
     <div className={styles.buttonGroup}>
-      <Link
-        href={{
-          pathname: "/projects",
-          query: { ...searchParams, project_type: undefined },
-        }}
-        className={!searchParams?.project_type ? styles.activeLink : undefined}
-      >
-        <motion.span
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0, transition: { delay: 0.2 } }}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.9 }}
-          style={{
-            padding: "1rem 0",
-          }}
-        >
-          All (
-          {projectTypeCounts[ProjectType.Client] +
-            projectTypeCounts[ProjectType.Personal]}
-          ) Projects
-        </motion.span>
-      </Link>
-
-      <Link
-        href={{
-          pathname: "/projects",
-          query: { ...searchParams, project_type: ProjectType.Client },
-        }}
-        className={
-          searchParams?.project_type === ProjectType.Client
-            ? styles.activeLink
-            : undefined
+      <Button
+        variant={!searchParams?.project_type ? "default" : "outline"}
+        nativeButton={false}
+        render={
+          <MotionLink
+            href={{
+              pathname: "/projects",
+              query: { ...searchParams, project_type: undefined },
+            }}
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0, transition: { delay: 0.2 } }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.9 }}
+          />
         }
       >
-        <motion.span
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0, transition: { delay: 0.2 } }}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.9 }}
-          style={{
-            padding: "1rem 0",
-          }}
-        >
-          Client ({projectTypeCounts[ProjectType.Client]}) Projects
-        </motion.span>
-      </Link>
+        All (
+        {projectTypeCounts[ProjectType.Client] +
+          projectTypeCounts[ProjectType.Personal]}
+        ) Projects
+      </Button>
 
-      <Link
-        href={{
-          pathname: "/projects",
-          query: { ...searchParams, project_type: ProjectType.Personal },
-        }}
-        className={
-          searchParams?.project_type === ProjectType.Personal
-            ? styles.activeLink
-            : undefined
+      <Button
+        variant={
+          searchParams?.project_type === ProjectType.Client ? "default" : "outline"
+        }
+        nativeButton={false}
+        render={
+          <MotionLink
+            href={{
+              pathname: "/projects",
+              query: { ...searchParams, project_type: ProjectType.Client },
+            }}
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0, transition: { delay: 0.2 } }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.9 }}
+          />
         }
       >
-        <motion.span
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0, transition: { delay: 0.2 } }}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.9 }}
-          style={{
-            padding: "1rem 0",
-          }}
-        >
-          Personal ({projectTypeCounts[ProjectType.Personal]}) Projects
-        </motion.span>
-      </Link>
+        Client ({projectTypeCounts[ProjectType.Client]}) Projects
+      </Button>
+
+      <Button
+        variant={
+          searchParams?.project_type === ProjectType.Personal ? "default" : "outline"
+        }
+        nativeButton={false}
+        render={
+          <MotionLink
+            href={{
+              pathname: "/projects",
+              query: { ...searchParams, project_type: ProjectType.Personal },
+            }}
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0, transition: { delay: 0.2 } }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.9 }}
+          />
+        }
+      >
+        Personal ({projectTypeCounts[ProjectType.Personal]}) Projects
+      </Button>
     </div>
   );
 }

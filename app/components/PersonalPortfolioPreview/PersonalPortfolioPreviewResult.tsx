@@ -40,7 +40,6 @@ export function PersonalPortfolioPreviewResult({projects}: {projects: any[]}){
           ))}
         </div>
         <ActionButton
-            className={styles.readMoreClient}
             href="/projects?project_type=PER"
         >
             See More (Personal) Projects

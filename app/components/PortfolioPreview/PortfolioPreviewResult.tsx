@@ -39,7 +39,6 @@ export function PortfolioPreviewResult({projects}: {projects: any[]}){
             ))}
         </div>
         <ActionButton
-          className={styles.readMoreClient}
           href="/projects?project_type=CLI"
         >
           See More (Client) Projects
