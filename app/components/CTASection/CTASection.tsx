@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import styles from './styles.module.css'
 
-const MotionLink = motion(Link);
+const MotionLink = motion.create(Link);
 
 export default function CTASection() {
     return (

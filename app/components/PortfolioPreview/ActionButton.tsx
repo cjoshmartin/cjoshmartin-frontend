@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-const MotionLink = motion(Link);
+const MotionLink = motion.create(Link);
 
 export default function ActionButton({className, href, children}: any){
 
