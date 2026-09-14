@@ -1,6 +1,10 @@
 'use client'
 import { motion } from "framer-motion";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+const MotionLink = motion.create(Link);
 
 export default function ActionButton({className, href, children}: any){
 
@@ -12,11 +16,14 @@ export default function ActionButton({className, href, children}: any){
           display: "flex",
         }}
       >
-        <motion.span whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.9 }}>
-          <Link className={className} href={href}>
-            {children}
-          </Link>
-        </motion.span>
+        <Button
+          variant="outline"
+          className={cn("text-white", className)}
+          nativeButton={false}
+          render={<MotionLink whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.9 }} href={href} />}
+        >
+          {children}
+        </Button>
       </div>
     );
 }

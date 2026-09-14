@@ -26,31 +26,13 @@
     font-size: 2rem;
 }
 
+.tagLink {
+    padding: 0.5rem;
+    background-color: black;
+}
+
 .activeTagLink {
     background-color: var(--primary-color);
-    color: var(--secondary-color) !important;
-    padding: 0.5rem;
-}
-
-.buttonGroup {
-    display: flex;
-    flex-direction: row;
-    gap: 1rem;
-}
-
-.buttonGroup a {
-    padding: 0.5rem;
-    border-radius: 1rem;
-    font-weight: 700;
-    border: 1px solid;
-    background-color: black;
-    color: white;
-    display: flex;
-    align-items: center;
-}
-
-.activeLink {
-    background-color: var(--primary-color) !important;
     color: var(--secondary-color) !important;
 }
 

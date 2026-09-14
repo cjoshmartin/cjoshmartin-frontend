@@ -23,13 +23,6 @@
     object-fit: cover;
 }
 
-.readMoreClient {
-    background-color: var(--secondary-color);
-    color: white !important;
-    padding: 1rem;
-    margin: 1rem 0;
-}
-
 .noContent {
     position: absolute;
     bottom: 0;

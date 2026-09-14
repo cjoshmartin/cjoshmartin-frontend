@@ -12,6 +12,8 @@ import "@fortawesome/fontawesome-svg-core/styles.css";
 import { config } from "@fortawesome/fontawesome-svg-core";
 import AnimationContainer from './components/layout/AnimationContainer';
 import LoaderContainer from './components/Loader/LoaderContainer';
+import { AsciiFluid } from '@/components/ui/ascii-fluid';
+
 config.autoAddCss = false;
 
 
@@ -39,6 +41,12 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
+        <AsciiFluid
+          className="fixed inset-0 -z-10"
+          theme="dark"
+          color="#85ffa7"
+          backgroundColor="#000000"
+        />
         <PlausibleProvider
           domain="cjoshmartin.com"
           selfHosted={true}
