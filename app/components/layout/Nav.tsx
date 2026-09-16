@@ -2,7 +2,7 @@ import { headers } from 'next/headers';
 import styles from './layout.module.css';
 import { generateClassList } from '@/app/projects/__components/generateClassList';
 import { ProjectNavLink } from './ProjectNavLink';
-import { AsciiFluid } from '@/components/ui/ascii-fluid';
+import LazyAsciiFluid from './LazyAsciiFluid';
 
 interface NavLinkProps {
     title: string,
@@ -40,7 +40,7 @@ export default async function Nav () {
 
     return (
       <header className={styles.header}>
-        <AsciiFluid
+        <LazyAsciiFluid
           className="-z-10"
           theme="dark"
           color="#85ffa7"

@@ -12,7 +12,7 @@ import "@fortawesome/fontawesome-svg-core/styles.css";
 import { config } from "@fortawesome/fontawesome-svg-core";
 import AnimationContainer from './components/layout/AnimationContainer';
 import LoaderContainer from './components/Loader/LoaderContainer';
-import { AsciiFluid } from '@/components/ui/ascii-fluid';
+import LazyAsciiFluid from './components/layout/LazyAsciiFluid';
 
 config.autoAddCss = false;
 
@@ -41,7 +41,7 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <AsciiFluid
+        <LazyAsciiFluid
           className="fixed inset-0 -z-10"
           theme="dark"
           color="#85ffa7"
