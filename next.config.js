@@ -16,6 +16,11 @@ const nextConfig = {
         port: "",
         pathname: "/media/**",
       },
+      {
+        protocol: "https",
+        hostname: "storage.googleapis.com",
+        pathname: "/images-for-cms/**",
+      },
     ],
     dangerouslyAllowSVG: true,
   },

@@ -9,24 +9,9 @@ enum TypeOfContent {
 
 }
 
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { gruvboxDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-
-function CodeArea({value}: any){
-
-    return (
-      <SyntaxHighlighter
-        language={value.language}
-        style={gruvboxDark}
-        showLineNumbers={true}
-      >
-        {value.text}
-      </SyntaxHighlighter>
-    );
-}
-
 import { ReactNode } from 'react';
-import { STLFileArea } from '../STLFileArea';
+import { STLFileArea } from '../STLFileAreaLazy';
+import { CodeArea } from './CodeArea';
 import { RichTextArea } from './RichTextArea/RichTextArea';
 
 

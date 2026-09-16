@@ -2,6 +2,7 @@
 
 import TypeIt from "typeit-react";
 import { stripHtml } from "string-strip-html";
+import Image from "next/image";
 
 import styles from './Testimonial.module.css'
 import { useEffect, useState } from "react";
@@ -88,10 +89,12 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
             }}
           />
           {test?.image?.url && (
-            <img
+            <Image
               className={styles.revealedImage}
               src={test.image.url}
               alt={test.image.title}
+              fill
+              sizes="208px"
               style={{ opacity: isRevealed ? 1 : 0 }}
             />
           )}

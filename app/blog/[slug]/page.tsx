@@ -1,4 +1,5 @@
 import { JSDOM } from 'jsdom';
+import { unstable_cache } from 'next/cache';
 
 import seo from '@/app/components/SEO'
 
@@ -95,22 +96,9 @@ function OutlineGenerator({content}: {content: any}){
 }
 
 
-
-export default async function Page(
-  props: {
-    params: Promise<{
-      slug: string;
-    }>;
-    searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
-  }
-) {
-  const searchParams = await props.searchParams;
-  const params = await props.params;
-  const { title, body, date, id, author, content_visuals, content_image, technologies } =
-    await getPage(params.slug, searchParams);
-
-
-  const content = body.filter(({type, value, id}: any) => {
+const getOutlineHeaders = unstable_cache(
+  async (slug: string, body: any) => {
+    return body.filter(({type, value, id}: any) => {
         // const headers = value.match(/<h[1-6]>.*<\/h[1-6]>/g);
         return(type === "full_richtext")
       })
@@ -139,6 +127,28 @@ export default async function Page(
         );
         return acc.concat(headersWithSize)
       }, []);
+  },
+  ['blog-outline-headers'],
+  { revalidate: 3600 }
+);
+
+
+
+export default async function Page(
+  props: {
+    params: Promise<{
+      slug: string;
+    }>;
+    searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
+  }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
+  const { title, body, date, id, author, content_visuals, content_image, technologies } =
+    await getPage(params.slug, searchParams);
+
+
+  const content = await getOutlineHeaders(params.slug, body);
   return (
     <div
     className={styles.outerContainer}

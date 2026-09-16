@@ -1,4 +1,4 @@
-/* eslint-disable @next/next/no-img-element */
+import Image from "next/image";
 
 import { FocusModes } from "../Context/FocusMode";
 import styles from "./service.module.css";
@@ -65,10 +65,13 @@ function Service({service, index }: ServiceProps) {
           flexDirection: index % 2 === 0 ? "row" : "row-reverse",
         }}
       >
-        <img
+        <Image
           src={image.file}
+          width={image.width}
+          height={image.height}
           style={{
             width: "350px",
+            height: "auto",
           }}
           alt={image.title}
         />

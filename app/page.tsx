@@ -51,7 +51,11 @@ export async function generateMetadata(
 
 
     const content: any = (await getPages({type: PageTypes.HOME}))[0];
-    
+
+    if (!content) {
+      throw new Error('generateMetadata: no page with type PageTypes.HOME was returned by getPages() — the CMS home page may have failed to load.');
+    }
+
     const {meta} = content;
     let title =  content.title;
     if (meta?.seo_title && meta?.seo_title.length > 0){
@@ -82,8 +86,13 @@ export async function generateMetadata(
 async function getHomePageData(): Promise<HomePageData> {
     return getPages({type: PageTypes.HOME})
     .then((dataset ) => {
+          const homePage = dataset[0];
+          if (!homePage) {
+            throw new Error('getHomePageData: no page with type PageTypes.HOME was returned by getPages() — the CMS home page may have failed to load.');
+          }
+
           //@ts-ignore
-          const { blog_authors, body, testimonials, home_service } = dataset[0];
+          const { blog_authors, body, testimonials, home_service } = homePage;
 
           return {
             blog_authors: [blog_authors[0]],
