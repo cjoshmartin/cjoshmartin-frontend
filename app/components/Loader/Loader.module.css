@@ -5,10 +5,17 @@
     align-items: center;
     height: 80vh;
 }
+.loaderContainer.small {
+    height: 100%;
+    width: 100%;
+}
 .InnerloaderContainer {
     height: 100px;
     width: 100px;
     position: relative;
+}
+.loaderContainer.small .InnerloaderContainer {
+    transform: scale(0.4);
 }
 
 .loader {

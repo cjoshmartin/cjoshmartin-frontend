@@ -1,15 +1,8 @@
 'use client'
 import { motion } from 'framer-motion';
-import { Suspense, useEffect, useState } from 'react';
+import { useState } from 'react';
 import styles from './ShowImage.module.css';
-
-function checkImage(imageSrc: string, good: any, bad: any) {
-  var img = new Image();
-  img.onload = good; 
-  img.onerror = bad;
-  img.src = imageSrc;
-}
-
+import Loader from '@/app/components/Loader/Loader';
 
 export default function ShowImage({
   url,
@@ -18,19 +11,22 @@ export default function ShowImage({
   width,
   height,
   className,
+  wrapperClassName,
   initial,
   animate,
   exit,
   shouldHideImageOnFail,
 }: any) {
   const [imgError, setImgError] = useState(false);
-  useEffect(() => {
-    if (url) {
-      const onLoad = () => console.log("Image loaded");
-      const onError = () => setImgError(true);
-      checkImage(url, onLoad, onError);
+  const [loaded, setLoaded] = useState(false);
+
+  // A cached image can fire its native `load` event before React finishes
+  // attaching the onLoad handler, so check `complete` directly on mount too.
+  const checkAlreadyLoaded = (node: HTMLImageElement | null) => {
+    if (node?.complete) {
+      setLoaded(true);
     }
-  }, [url]);
+  };
 
   if (shouldHideImageOnFail && imgError) {
     return null;
@@ -38,7 +34,7 @@ export default function ShowImage({
 
   if (url && !imgError) {
     return (
-      <Suspense>
+      <div className={wrapperClassName} style={{ position: 'relative', flexShrink: 0 }}>
         <motion.img
           src={url}
           alt={alt}
@@ -49,13 +45,24 @@ export default function ShowImage({
           animate={animate ?? { opacity: 1, transition: { delay: 0.1 } }}
           exit={exit ?? { opacity: 0 }}
           key={alt}
+          ref={checkAlreadyLoaded}
+          onLoad={() => setLoaded(true)}
+          onError={() => {
+            setLoaded(false);
+            setImgError(true);
+          }}
         />
-      </Suspense>
+        {!loaded && (
+          <div className={`${styles.image} ${className}`} style={{ position: 'absolute', inset: 0, backgroundColor: 'black' }}>
+            <Loader size="small" />
+          </div>
+        )}
+      </div>
     );
   }
 
   return (
-    <Suspense>
+    <div className={wrapperClassName} style={{ position: 'relative', flexShrink: 0 }}>
       <motion.img
         src={
           defaultUrl ??
@@ -69,7 +76,14 @@ export default function ShowImage({
         animate={animate ?? { opacity: 1, transition: { delay: 0.1 } }}
         key={"Default image for blog post when there is not an image to show"}
         draggable="false"
+        ref={checkAlreadyLoaded}
+        onLoad={() => setLoaded(true)}
       />
-    </Suspense>
+      {!loaded && (
+        <div className={className} style={{ position: 'absolute', inset: 0, backgroundColor: 'black' }}>
+          <Loader size="small" />
+        </div>
+      )}
+    </div>
   );
 }

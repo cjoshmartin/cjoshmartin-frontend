@@ -1,6 +1,5 @@
-import Image from "next/image";
-
 import { FocusModes } from "../Context/FocusMode";
+import LoadingImage from "../LoadingImage/LoadingImage";
 import styles from "./service.module.css";
 
 interface ImageObj {
@@ -65,10 +64,11 @@ function Service({service, index }: ServiceProps) {
           flexDirection: index % 2 === 0 ? "row" : "row-reverse",
         }}
       >
-        <Image
+        <LoadingImage
           src={image.file}
           width={image.width}
           height={image.height}
+          wrapperStyle={{ width: "350px", height: (350 * image.height) / image.width, flexShrink: 0 }}
           style={{
             width: "350px",
             height: "auto",

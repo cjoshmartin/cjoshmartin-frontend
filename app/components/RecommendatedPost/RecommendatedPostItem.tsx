@@ -10,11 +10,14 @@ export function RecommendatedPostItem({post}: {post: any}) {
         height={320}
         url={post.content_visuals[0]?.value?.url}
         className={styles.image}
+        wrapperClassName={styles.imageWrapper}
       />
       <div className={styles.content}>
         <h3>{post.title}</h3>
         <CalculateReadTime body={post.body} />
-        <p>{post.intro.trim()}</p>
+        <div className={styles.introWrapper}>
+          <p>{post.intro.trim()}</p>
+        </div>
       </div>
     </a>
   );
