@@ -7,6 +7,7 @@ import PersonalPortfolioPreview from './components/PersonalPortfolioPreview'
 import { RandomIntFromInterval } from './randomIntFromInterval'
 import { getPages, getPreviewContent } from './components/api/pages'
 import CTASection from './components/CTASection/CTASection'
+import ResumeSection from './components/ResumeSection/ResumeSection'
 import { Metadata, ResolvingMetadata } from 'next'
 import seo from '@/app/components/SEO'
 import { ServiceObj, Services } from './components/Services/Services'
@@ -23,10 +24,10 @@ interface AuthorImageData {
 interface AuthorData {
   first_name: string,
   last_name: string,
-  location: string, 
+  location: string,
   job_title: string,
-  bio?: string, 
-  email?: string, 
+  bio?: string,
+  email?: string,
   github?: string,
   image: AuthorImageData
 }
@@ -117,7 +118,7 @@ async function getPreviewHomePageData(searchParams: object){
 }
 
 export default async function Home(
-  props: {  
+  props: {
     searchParams?: Promise<{ [key: string]: string | string[] | undefined }>
   }
 ) {
@@ -186,7 +187,8 @@ export default async function Home(
       >
         <h2>[ Download Resume ]</h2>
       </a> */}
-      <CTASection />
+      <ResumeSection />
+      {/*<CTASection />*/}
     </div>
   );
 }
