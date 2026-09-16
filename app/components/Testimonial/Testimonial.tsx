@@ -95,6 +95,7 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
               alt={test.image.title}
               fill
               sizes="208px"
+              loading="eager"
               wrapperStyle={{ position: "absolute", inset: 0, opacity: isRevealed ? 1 : 0 }}
             />
           )}
