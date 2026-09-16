@@ -4,7 +4,8 @@ import Link from 'next/link';
 import moment from 'moment';
 import ShowImage from '../ShowImage/ShowImage';
 import { CalculateReadTime } from '@/app/components/CalculateReadTime/CalculateReadTime';
-import { Button } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
+import { cn } from 'cn';
 
 export default function BlogListItem(props: any){
     const {slug, title, publishDate, intro, content_visuals, body} = props
@@ -26,14 +27,12 @@ export default function BlogListItem(props: any){
             <p>{intro}</p>
           </div>
 
-          <Button
-            variant="secondary"
-            className="bg-white text-black hover:bg-white/90"
-            nativeButton={false}
-            render={<Link href={`/blog/${slug}`} />}
-          >
+          {/* A styled span, not a Button/Link, because the whole card above
+              is already an <a> and <a> cannot contain another interactive
+              element such as a nested <a> or <button>. */}
+          <span className={cn(buttonVariants({ variant: "secondary" }), "bg-white text-black hover:bg-white/90")}>
             Read More
-          </Button>
+          </span>
         </div>
       </Link>
     );
