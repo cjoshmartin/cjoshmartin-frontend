@@ -60,6 +60,10 @@ npm run migrate -- --dataset production --confirm-production --steps mux,videos
 ```
 
 The `videos` step fails while any video is still pending, unless `--allow-pending-videos` is given.
+To run the full validation afterwards, use `--steps transform,validate`: the transform then writes
+all 29 video documents to the NDJSON (nothing is imported), and validation compares the dataset
+with it. Until the Studio is used, all 12 checks must pass. After editors have changed content,
+the parity and convergence checks list their edits as differences, which is expected.
 
 ## Steps
 
