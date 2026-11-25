@@ -195,3 +195,138 @@ A real run first checks each resource.
 - Google Cloud:
   - [Free Tier](https://docs.cloud.google.com/free/docs/free-cloud-features)
   - `@google-cloud/storage` 8.4.0 source (`ifGenerationMatch`, endpoint handling)
+
+---
+
+# WP5b: end-to-end tests against the real datasets
+
+Status: **done**. The tests ran on 2026-11-25 from 22:28 to 22:50 UTC against project `j3vdh6ti` with the `local` storage target. Real GCS is set up in the morning. Production was only read; its fingerprint was `4c60ba14…` before, during and after every test. Staging was changed on purpose and ends as an exact copy of production.
+
+Two restore bugs were found and fixed in `8df2641` (see [Bugs found and fixed](#bugs-found-and-fixed)). Every task passed after the fix.
+
+## How it was checked
+
+The checks do not trust the tool under test. Small scripts in `~/cjoshmartin-migration/backup-test/tools/` (outside git) re-implement each check on their own and import nothing from `scripts/backup`:
+
+| Script | What it checks |
+|---|---|
+| `dataset-stats.mjs` | Exports a live dataset and counts its documents by kind and type. Cross-checks with GROQ `count(*)` and `*[]._id` in the raw perspective, and computes the fingerprint. |
+| `verify-bucket.mjs` | For one snapshot, checks the hash chain marker → manifest → data. Then checks the manifest against the live counts and fingerprint, the sha1 and size of every stored asset against its asset document, and each Mux original with `ffprobe`: the video stream, and that its duration is within 1 s of the document's. |
+| `compare-datasets.mjs` | Compares two live datasets document by document. It ignores `_rev`, `_updatedAt` and `_createdAt`. For assets it also ignores `uploadId`, and it normalizes the dataset name in `url` and `path`. |
+| `verify-dataset-assets.mjs` | Downloads every asset from the target dataset's CDN and compares its bytes with the backup copy. Also checks that every asset reference resolves. |
+| `tree-snapshot.mjs` | Records every file in a backup directory: size, mtime, inode and sha256. Diffing two records shows exactly what a run wrote. |
+| `snapshot-diff.mjs` | Lists which document ids were added, removed or changed between two snapshots, with the changed field paths (not their values), and what each manifest says was stored. |
+| `staging-change.mjs`, `release-test.mjs` | Make the deliberate staging changes. Both are hard-wired to `staging`. |
+
+All logs and JSON evidence are in `~/cjoshmartin-migration/reports/wp5b/`. A scan of the logs, the evidence, `scripts/backup` and this folder found none of the four secret values.
+
+## 1. Production backup
+
+`node backup.mjs --dataset production --target local --local-dir ~/cjoshmartin-migration/backup-test/production`: exit 0 in 3 min 36 s. It wrote snapshot **`20261125T222817Z`**, 230.76 MiB in 128 objects.
+
+| | Manifest | Live export | GROQ, raw perspective |
+|---|---|---|---|
+| Documents | 233 | 233 | `count(*)` = 233, same id set |
+| Published / drafts / versions / system | 202 / 19 / 0 / 12 | 202 / 19 / 0 / 12 | |
+| Per type | blogPost 23, flexPage 2, homePage 1, medium 8, mux.videoAsset 10, person 1, project 16, redirect 4, service 5, technology 27, testimonial 9, sanity.imageAsset 110, sanity.fileAsset 5, system.group 10, system.retention 1, system.schema 1 | identical | identical |
+| Fingerprint | `4c60ba14b10e8030…` | identical | |
+| Assets | 115 (110 images, 5 files), 124,486,220 bytes, all 115 verified by `sha1hash` | 115 asset documents | |
+| Mux originals | 10 of 10 stored, 117,256,047 bytes (111.82 MiB), 0 warnings | 10 `mux.videoAsset` documents, 10 distinct asset ids | |
+
+`verify-bucket.mjs` passed. The hash chain is intact, and every stored asset has its document's sha1 and size. All 10 Mux files are MP4s that `ffprobe` reads, each with a video stream (8 H.264, 2 HEVC; up to 1440×1920) and an AAC audio stream. Their durations are within 0.06 s of the documents' (287 s in total). Every manifest item records `1080p` / `basic`.
+
+## 2. Immediate re-run
+
+The second run logged `No changes since snapshot 20261125T222817Z; nothing written` and exited 0. All 128 files had the same size, mtime, inode and sha256 before and after the run. No `.partial-*` files and no `sanity-backup-*` temp directories were left behind. A third run, just before the final restore, gave the same result.
+
+## 3. Restore into staging
+
+`node restore.mjs --latest --from-dataset production --source local --local-dir …/production --dataset staging --exact --verify`
+
+- **First attempt, with the WP5a code: failed.** The import itself worked: 106 documents, 115 assets, references strengthened. But `--verify` reported 106 differences, all at `_createdAt`. The independent comparison showed what the tool's check had missed: 15 image assets in staging still had a `metadata.thumbHash` that production does not have. Both are fixed in `8df2641`.
+- **Second attempt, with the fix: passed.**
+  - The tool patched `metadata` on those 15 assets.
+  - `--exact` found nothing to delete.
+  - `--verify` reported 0 missing, 0 changed, 0 missing assets and 0 extra, and noted that 106 documents kept staging's own `_createdAt`.
+- **Independent checks.**
+  - `compare-datasets.mjs production staging`: 221 of 221 non-system documents identical, including 115 assets and 10 `mux.videoAsset`, with no missing or extra documents. The only system-document difference is `_.schemas.production` vs `_.schemas.staging`, which are managed by Sanity and never imported.
+  - `verify-dataset-assets.mjs staging`: all 115 binaries served by the staging CDN are byte-identical to the backup copies. All 95 distinct asset references resolve, and there are no extra assets.
+  - `npx sanity@latest documents validate --workspace staging --dataset staging --level info` (run from `studio/`): 0 errors and 48 warnings on 12 documents. 46 are the known "unknown field" warnings on `mux.videoAsset.data`, and 2 are `seo.description` length warnings on blog posts. Production gives exactly the same markers.
+- **Mux check:** the restore confirmed that all 10 Mux assets still exist in Mux.
+
+## 4. Staging change test
+
+Backups of `staging` went to a separate directory, `~/cjoshmartin-migration/backup-test/staging-changes`, and the directory tree was recorded before and after each run.
+
+| Run | Before it | Result | Written to the directory |
+|---|---|---|---|
+| S1 | staging = production | snapshot `20261125T223843Z` | 128 objects: 115 assets, 10 Mux originals, 3 snapshot files |
+| S2 | nothing | "No changes", exit 0 | nothing; all 128 files unchanged |
+| S3 | **change A:** edited one field (`intro`) of `blogPost-13` | snapshot `20261125T223956Z` | exactly 3 objects (data, manifest, marker), 217.95 KiB. Manifest: 0 assets and 0 Mux originals stored this run. Snapshot diff: only `blogPost-13` at `intro`. |
+| S4 | **change B:** uploaded a new 320×200 PNG and set it as `blogPost-13.contentImage`; created `technology-wp5b-backup-test`; deleted the draft-only `drafts.project-9` | snapshot `20261125T224025Z` | exactly 4 objects: the new image (`assets/images/6d4df83d….png`, 9.10 KiB) and 3 snapshot files. Counts went from 233 to 234 documents (204 published, 18 drafts), and assets from 115 to 116. |
+| S5 | nothing | "No changes", exit 0 | nothing |
+| S6 | created release `rWp5bBackupTest` with a version of `blogPost-13` (and two restores, see below) | snapshot `20261125T224444Z` | exactly 3 snapshot files. Counts: 1 release version, 13 system documents. |
+
+`verify-bucket.mjs` passed for S4. The Mux originals that the staging S1 run downloaded again are byte-identical to the production run's, so Mux masters are deterministic.
+
+**Restores from the staging backups.**
+
+- **Point in time:** `--snapshot 20261125T223956Z --exact --verify` (that is S3, before change B). It passed and did the following:
+  - `--exact` deleted the extra document and the new asset. The asset's CDN URL then returned 404.
+  - The import re-created `drafts.project-9` with the snapshot's `_createdAt` (2026-11-25T20:14:10Z).
+  - The change-A edit stayed, as it should for a snapshot taken after it.
+- **Release round trip:**
+  1. Restoring production over the dataset with `--exact` deleted `versions.rWp5bBackupTest.blogPost-13` with a plain Mutate API delete. It kept `_.releases.rWp5bBackupTest` and reported it.
+  2. After the release was archived and deleted, restoring S6 re-created the release and its version, and `--verify` passed.
+  3. Restoring production again removed the version. The release was archived and deleted again.
+
+## 5. Final state of staging
+
+The final run was `--latest --from-dataset production --exact --verify` (log `18-…`), then the test release was archived and deleted. Afterwards:
+
+- **Comparison with production:** 221 of 221 non-system documents identical, with no missing or extra documents.
+- **Counts:** 233 documents (202 published, 19 drafts, 0 versions, 12 system), the same counts per type as production, and no releases in either dataset.
+- **Assets:** all 115 binaries are byte-identical to the backup, and all 95 references resolve.
+- **Validation:** markers identical to production's (0 errors, 48 warnings).
+
+The test document, the test asset and the release are gone. The ASCII-art Function changed nothing: all 9 testimonials are identical to production. Staging's `_createdAt` values are its own, from the WP3a import.
+
+## 6. Tests
+
+| Check | Result |
+|---|---|
+| `npm test`, Node 26.4.0 | 57/57 pass. 4 tests are new: `_createdAt` and asset-field verification, asset metadata patches, the Mutate API batches for deletes and patches, and `--replace` without a token. |
+| `npm test`, Node 24.22.3 (`npx node@24`, the CI version) | 57/57 pass |
+| `npm run test:gcs-emulator` (fake-gcs-server 1.56.1 on port 4453) | 2/2 pass |
+| ESLint with the repo config (`--no-ignore`, because the root config now ignores `scripts/**`) on `scripts/backup` | clean, `--max-warnings=0` |
+
+## Bugs found and fixed
+
+Commit `8df2641`, in `scripts/backup`:
+
+1. **The restore left the target's own asset metadata in place.**
+   - **Cause.** `sanity datasets import` only applies `assets.json` to binaries it uploads (`@sanity/import` 7.1.1, `ensureAsset`). An asset with the same content that already exists in the target is reused as it is. On staging, that left 15 images with a `thumbHash` that production lacks. An edited `title`, `description`, `source` or `originalFilename` would have survived a restore the same way.
+   - **Fix.** With `--replace` (and so with `--exact`), `restore.mjs` now exports the target after the import. For every reused asset whose restorable fields differ from the snapshot, it sets those fields to the snapshot's values and unsets the ones the snapshot doesn't have.
+   - **Fields it never touches.** The fields the asset service derives: `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt`, `assetId`, `extension`, `mimeType`, `path`, `url`, `sha1hash`, `size`, `uploadId`. `@sanity/import` also refuses to replay `uploadId`.
+   - **Verify.** `--verify` now compares asset documents on their restorable fields, not only by id and sha1.
+   - **Code.** New exports: `planAssetMetadataPatches` and `restorableAssetFields` in `lib/restore.mjs`, and `patchDocuments` in `lib/sanity-mutate.mjs`.
+2. **`--verify` failed on every document that already existed in the target.**
+   - **Cause.** The import keeps the target's `_createdAt` for documents that already exist. Documents it creates get the snapshot's value, but a re-created release definition gets the time of the import. So a restore over existing data can never pass a check that includes `_createdAt`.
+   - **Fix.** `--verify` now ignores `_createdAt`, the same way the brief's equality rule does, and prints how many values differ. `compareWithSnapshot` returns them as `createdAtDiffers`. The site never reads `_createdAt`.
+3. **`--replace` now needs `SANITY_WRITE_TOKEN`**, like `--exact` and `--verify`, because the asset metadata step uses the API. Only a plain import into an empty dataset can still run on a `sanity login` session. The README and `--help` say so.
+
+The README's restore section was updated, and it now notes that the first backup after a restore always writes a snapshot: every imported document gets a new `_rev`, though no asset is uploaded again.
+
+## Open questions from WP5a, answered
+
+- **Real Mux master download.** It works on this Mux plan. All 10 masters were stored in one run, with no warnings. Each one takes roughly 10–30 s of polling after `PUT master-access`. Within 24 hours, a second run skips the PUT because master access is still `temporary`. The staging S1 run, which downloaded all 10 again, took 53 s in total.
+- **Plain `delete` of `versions.*` ids.** The Mutate API accepts it. Tested for real in the release round trip.
+- **`_createdAt` after an import.** Documents the import creates keep the snapshot's value. Documents that already exist keep the target's. A re-created release gets the time of the import.
+- **Releases through the restore.** A release definition and its version are restored by `sanity datasets import`, and `--verify` compares the release document field by field.
+- **`secrets.mux`.** It still does not exist in either dataset, as checked with the Editor token. This remains open until a Mux token is entered in the Studio.
+
+## Notes for the morning
+
+- In the real bucket, production and staging snapshots share `assets/` and `assets/mux/`, so a staging run never stores what a production run already has.
+- The local test backups are 231 MB (`backup-test/production`) and 232 MB (`backup-test/staging-changes`), outside git. Both can be deleted once this report is reviewed. WP5a's `tmp/wp5-local-bucket` is still there.
+- Manual test H34 ("edit a document, run it again, expect a new snapshot with no re-uploaded assets") matches S3 above. Expect exactly 3 new objects.
