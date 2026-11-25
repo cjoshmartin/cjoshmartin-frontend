@@ -20,7 +20,7 @@ before(async () => {
   schema = await loadStudioSchema()
 })
 
-function context(issues: Issue[] = []): RichTextContext {
+function context(issues: Issue[] = [], linkHref: (href: string) => string = (href) => href): RichTextContext {
   return {
     record: 'test',
     schema,
@@ -30,6 +30,7 @@ function context(issues: Issue[] = []): RichTextContext {
     image: (id) => ({assetId: `image-${'a'.repeat(40)}-${id}x${id}-jpg`}),
     document: (id) => `file-${'b'.repeat(40)}-stl${id > 0 ? '' : ''}`,
     page: (id) => ({documentId: `blogPost-${id}`, published: id !== 99, type: 'blogPost'}),
+    linkHref,
   }
 }
 
@@ -50,6 +51,23 @@ describe('richTextToBlocks', () => {
     assert.equal(p!._key, 'abcde')
     assert.deepEqual(p!.markDefs, [{_type: 'link', _key: 'abcdem0', href: 'https://x.com/?a=1&b=2', openInNewTab: false}])
     assert.deepEqual(p!.children[1]!.marks, ['abcdem0'])
+  })
+
+  it('passes every external href through linkHref (content fixes) and keeps the rest of the link', () => {
+    const seen: string[] = []
+    const out = richTextToBlocks(
+      '<p data-block-key="k1">a <a href="#https://pypi.org/x/">x</a> and <a href="https://y.com/">y</a></p>',
+      context([], (href) => {
+        seen.push(href)
+        return href.replace(/^#/, '')
+      }),
+    ) as PTBlock[]
+    assert.deepEqual(seen, ['#https://pypi.org/x/', 'https://y.com/'])
+    assert.deepEqual(
+      out[0]!.markDefs.map((d) => d.href),
+      ['https://pypi.org/x/', 'https://y.com/'],
+    )
+    assert.equal(portableTextPlainText(out), 'a x and y')
   })
 
   it('turns br into a newline, keeps empty paragraphs and maps lists', () => {

@@ -22,11 +22,13 @@
  * Writes reports/validation-<dataset>.json and reports/validation-<dataset>.md and fails
  * (non-zero exit) if any check fails.
  */
+import {existsSync} from 'node:fs'
 import path from 'node:path'
 
 import {JSDOM} from 'jsdom'
 
 import {type Dataset, type DataPaths, type Secrets} from '../config'
+import {linkHrefFix} from '../content-fixes'
 import {KNOWN_DISCREPANCIES} from '../discrepancies'
 import {migratedRevisions} from '../references'
 import {sanityClient} from '../sanity'
@@ -42,7 +44,15 @@ import {
 } from '../transform/richtext'
 import {loadStudioSchema} from '../transform/schema'
 import {log, readJson, stableStringify, writeJson, writeText} from '../util'
-import {isMigratedPageType, loadExport, type PageRevision, type StreamBlock, type WagtailExport, type WagtailPage} from '../wagtail'
+import {
+  isMigratedPageType,
+  loadExport,
+  wagtailTagOrder,
+  type PageRevision,
+  type StreamBlock,
+  type WagtailExport,
+  type WagtailPage,
+} from '../wagtail'
 import {liveAsciiArt} from './ascii'
 import type {AssetMap} from './assets'
 import type {Inventory} from './extract'
@@ -106,6 +116,21 @@ function walk(value: unknown, at: string, visit: (value: unknown, at: string) =>
 const HTML_TAG = /<\/?[a-z][a-z0-9]*(?:\s[^<>]*)?\/?>/i
 const HTML_ENTITY = /&(?:[a-z][a-z0-9]*|#\d+|#x[0-9a-f]+);/i
 
+/** A page as the old site's public API returned it (live-api-snapshot/page-<id>.json). */
+interface LiveApiPage {
+  id: number
+  medium?: string[]
+  technologies?: string[]
+}
+
+function liveApiPage(paths: DataPaths, pageId: number): LiveApiPage | undefined {
+  const file = path.join(paths.liveSnapshot, `page-${pageId}.json`)
+  if (!existsSync(file)) return undefined
+  const page = readJson<LiveApiPage>(file)
+  if (page.id !== pageId) throw new Error(`${file} holds page ${page.id}, not ${pageId}`)
+  return page
+}
+
 /** Expected counts from export.json alone. */
 function expectedCounts(data: WagtailExport): Record<string, {published: number; drafts: number}> {
   const counts: Record<string, {published: number; drafts: number}> = {}
@@ -128,7 +153,9 @@ function expectedCounts(data: WagtailExport): Record<string, {published: number;
   add('person', data.snippets['home.Author'].length, 0)
   add('testimonial', data.snippets['home.Testimonial'].length, 0)
   add('service', data.snippets['home.Service'].length, 0)
-  add('redirect', data.redirects.length, 0)
+  // A redirect to a page that is not live is a draft until that page is published.
+  const draftRedirects = data.redirects.filter((r) => r.redirect_page_id != null && data.pages.find((p) => p.id === r.redirect_page_id)?.live === false).length
+  add('redirect', data.redirects.length - draftRedirects, draftRedirects)
   add('mux.videoAsset', data.media.length, 0)
   for (const [kind, type] of [['medium', 'medium'], ['technologies', 'technology']] as const) {
     const names = new Set<string>()
@@ -336,6 +363,8 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
     field: string
     html?: string
     stream?: StreamBlock[]
+    /** Wagtail page id of a StreamField body (content fixes are keyed by page and block). */
+    pageId?: number
   }
   const sources: Source[] = []
   const pageRevisions: {doc: string; page: WagtailPage; revision: PageRevision}[] = []
@@ -346,7 +375,7 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
       pageRevisions.push({doc: docId, page, revision})
       const body = revision.fields.body
       if (typeof body === 'string') sources.push({docId, field: 'bio', html: body})
-      else sources.push({docId, field: 'body', stream: body ?? []})
+      else sources.push({docId, field: 'body', stream: body ?? [], pageId: page.id})
     }
   }
   for (const a of data.snippets['home.Author']) sources.push({docId: `person-${a.id}`, field: 'bio', html: a.bio ?? ''})
@@ -415,7 +444,7 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
   {
     const check = new Check('textParity')
     let compared = 0
-    const compareRichText = (html: string, pt: PTItem[], where: string) => {
+    const compareRichText = (html: string, pt: PTItem[], where: string, streamBlock?: {pageId: number; blockId: string}) => {
       compared++
       const expectedText = richTextPlainText(html)
       const actualText = portableTextPlainText(pt)
@@ -433,7 +462,13 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
           return target ? `page:${pageDocumentId(target)}` : h
         }
         const document = /^document:(\d+)$/.exec(h)
-        return document ? `document:${assetMap.documents[document[1]!] ?? h}` : h
+        if (document) return `document:${assetMap.documents[document[1]!] ?? h}`
+        const fix = streamBlock && linkHrefFix(streamBlock.pageId, streamBlock.blockId, h)
+        if (fix) {
+          check.explained.push(`${where}: link ${JSON.stringify(fix.from)} is ${JSON.stringify(fix.to)} in Sanity (content fix: ${fix.reason})`)
+          return fix.to
+        }
+        return h
       })
       check.expect(stableStringify(expectedHrefs) === stableStringify(a.hrefs), `${where}: links differ (${expectedHrefs.length} vs ${a.hrefs.length})`)
       check.expect(stableStringify(e.imageIds.map((id) => assetMap.images[String(id)])) === stableStringify(a.imageRefs), `${where}: inline images differ`)
@@ -458,7 +493,7 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
           const prefix = `${block.id.slice(0, 8)}-`
           const items: PTItem[] = []
           while (cursor < pt.length && pt[cursor]!._key.startsWith(prefix)) items.push(pt[cursor++]!)
-          compareRichText(String(block.value), items, where)
+          compareRichText(String(block.value), items, where, source.pageId === undefined ? undefined : {pageId: source.pageId, blockId: block.id})
           continue
         }
         const item = pt[cursor++] as PTObject | undefined
@@ -550,9 +585,22 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
       eq(`${where}.website`, doc.website, blank(f.website ?? undefined))
       eq(`${where}.previewImage`, (doc.previewImage as {asset?: {_ref?: string}} | undefined)?.asset?._ref, imageRef(f.preview_image_id))
       eq(`${where}.testimonials`, refIds(doc.testimonials), [...(revision.children.testimonials ?? [])].sort((a, b) => a.sort_order - b.sort_order).map((o) => `testimonial-${String(o.testimonial_id)}`))
-      eq(`${where}.mediums`, refIds(doc.mediums).map(tagTitle), [...new Set((revision.tags.medium ?? []).map(norm))])
-      eq(`${where}.technologies`, refIds(doc.technologies).map(tagTitle), [...new Set((revision.tags.technologies ?? []).map(norm))])
+      eq(`${where}.mediums`, refIds(doc.mediums).map(tagTitle), [...new Set(wagtailTagOrder(revision.tags.medium ?? []).map(norm))])
+      eq(`${where}.technologies`, refIds(doc.technologies).map(tagTitle), [...new Set(wagtailTagOrder(revision.tags.technologies ?? []).map(norm))])
       fields += 7
+      // Independent of the ordering rule: a live project shows its tags exactly as the old site's
+      // API returned them (live-api-snapshot/page-<id>.json).
+      if (!docId.startsWith('drafts.')) {
+        const live = liveApiPage(paths, page.id)
+        if (!live) {
+          check.fail(`${where}: no live API snapshot of page ${page.id}`)
+        } else {
+          const exactTitle = (id: string) => String(byId.get(id)?.title ?? `missing ${id}`)
+          eq(`${where}.mediums (live API order)`, refIds(doc.mediums).map(exactTitle), live.medium ?? [])
+          eq(`${where}.technologies (live API order)`, refIds(doc.technologies).map(exactTitle), live.technologies ?? [])
+          fields += 2
+        }
+      }
     }
     for (const a of data.snippets['home.Author']) {
       const doc = byId.get(`person-${a.id}`)
@@ -593,14 +641,18 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
       fields += 5
     }
     for (const r of data.redirects) {
-      const doc = byId.get(`redirect-${r.id}`)
+      const target = data.pages.find((p) => p.id === r.redirect_page_id)
+      // Only a redirect to a live page (or to a link) may be served by the site.
+      const expectedId = `${target && !target.live ? 'drafts.' : ''}redirect-${r.id}`
+      const unexpectedId = expectedId.startsWith('drafts.') ? `redirect-${r.id}` : `drafts.redirect-${r.id}`
+      check.expect(!byId.has(unexpectedId), `${unexpectedId}: should not exist (expected only ${expectedId})`)
+      const doc = byId.get(expectedId)
       if (!doc) {
-        check.fail(`redirect-${r.id}: missing`)
+        check.fail(`${expectedId}: missing`)
         continue
       }
       eq(`${doc._id}.source`, doc.source, r.old_path)
       eq(`${doc._id}.permanent`, doc.permanent, r.is_permanent)
-      const target = data.pages.find((p) => p.id === r.redirect_page_id)
       if (target) {
         const rev = target.live ? target.published : target.latest
         const prefix = target.type === 'blog.BlogPage' ? '/blog/' : target.type === 'blog.ProjectPage' ? '/projects/' : target.type === 'flex.FlexPage' ? '/flex/' : '/'

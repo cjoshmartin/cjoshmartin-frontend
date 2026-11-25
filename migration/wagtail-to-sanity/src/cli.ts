@@ -9,10 +9,18 @@
  *   mux        create or reuse a Mux asset per Wagtail media item and wait until it is ready
  *   ascii      generate testimonial ASCII art from the uploaded photos (WP2 generator)
  *   transform  build every Sanity document and write NDJSON to transformed/<dataset>/
- *   import     validate the NDJSON with the Studio schema, import it with --replace, prune
- *              documents a previous run created that the transform no longer produces
+ *   import     refuse if migration documents changed in the dataset since the last import
+ *              (state/imported-<dataset>.json), validate the NDJSON with the Studio schema,
+ *              import it with --replace, prune documents a previous run created that the
+ *              transform no longer produces, record what is now in the dataset
  *   validate   counts, references, Portable Text integrity, hashes, Mux status, text parity
  *              and `sanity documents validate`; writes reports/validation-<dataset>.json
+ *
+ * Steps that only run when named in --steps:
+ *   baseline   record an untouched dataset that was imported before imports kept a record
+ *   videos     create only the missing mux.videoAsset documents (createIfNotExists) and
+ *              change nothing else; the follow-up for videos Mux refused, once the Studio is
+ *              in use (`--steps mux,videos`)
  *
  * Every step is deterministic and rerunnable; rerunning the whole pipeline converges to the
  * same dataset content.
@@ -28,6 +36,9 @@
  *                                    still fails until every video is on Mux. The transform refuses
  *                                    pending videos without it. With production it also needs
  *                                    --confirm-production.
+ *   --discard-studio-edits           let the import overwrite or delete migration documents
+ *                                    that changed in the dataset since the last import (the
+ *                                    import refuses otherwise and lists them)
  *   --data-dir <path>                migration data folder (default ~/cjoshmartin-migration)
  */
 import {parseArgs} from 'node:util'
@@ -36,7 +47,10 @@ import {DATASETS, dataPaths, loadSecrets, type Dataset} from './config'
 import {log} from './util'
 
 const STEPS = ['extract', 'assets', 'mux', 'ascii', 'transform', 'import', 'validate'] as const
-type Step = (typeof STEPS)[number]
+/** Steps that never run by default; their position in this list is their order in a run. */
+const EXTRA_STEPS = ['baseline', 'videos'] as const
+const ALL_STEPS = ['baseline', ...STEPS, 'videos'] as const
+type Step = (typeof ALL_STEPS)[number]
 
 async function main(): Promise<void> {
   const {values} = parseArgs({
@@ -46,6 +60,7 @@ async function main(): Promise<void> {
       steps: {type: 'string'},
       'no-gcs-sync': {type: 'boolean', default: false},
       'allow-pending-videos': {type: 'boolean', default: false},
+      'discard-studio-edits': {type: 'boolean', default: false},
       'data-dir': {type: 'string'},
     },
     strict: true,
@@ -61,7 +76,9 @@ async function main(): Promise<void> {
   const steps: Step[] = values.steps
     ? values.steps.split(',').map((s) => {
         const step = s.trim() as Step
-        if (!STEPS.includes(step)) throw new Error(`Unknown step "${s}". Steps: ${STEPS.join(', ')}`)
+        if (!(ALL_STEPS as readonly string[]).includes(step)) {
+          throw new Error(`Unknown step "${s}". Steps: ${STEPS.join(', ')}; only with --steps: ${EXTRA_STEPS.join(', ')}`)
+        }
         return step
       })
     : [...STEPS]
@@ -69,10 +86,15 @@ async function main(): Promise<void> {
   const target = dataset as Dataset
 
   log(`migrate: dataset ${target}, steps ${steps.join(', ')}`)
-  for (const step of STEPS) {
+  for (const step of ALL_STEPS) {
     if (!steps.includes(step)) continue
     const started = Date.now()
     switch (step) {
+      case 'baseline': {
+        const {recordBaseline} = await import('./steps/baseline')
+        await recordBaseline(paths, target, loadSecrets(paths))
+        break
+      }
       case 'extract': {
         const {extract} = await import('./steps/extract')
         await extract(paths, {syncGcs: !values['no-gcs-sync']})
@@ -102,12 +124,21 @@ async function main(): Promise<void> {
       }
       case 'import': {
         const {importDataset} = await import('./steps/import')
-        await importDataset(paths, target, loadSecrets(paths))
+        await importDataset(paths, target, loadSecrets(paths), {
+          discardStudioEdits: values['discard-studio-edits'],
+        })
         break
       }
       case 'validate': {
         const {validateDataset} = await import('./steps/validate')
         await validateDataset(paths, target, loadSecrets(paths))
+        break
+      }
+      case 'videos': {
+        const {addMissingVideos} = await import('./steps/videos')
+        await addMissingVideos(paths, target, loadSecrets(paths), {
+          allowPendingVideos: values['allow-pending-videos'],
+        })
         break
       }
     }

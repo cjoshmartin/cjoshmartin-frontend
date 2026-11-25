@@ -1,28 +1,45 @@
 /**
  * Step 6: import.
  *
- * 1. Validates the NDJSON against the Studio schema of the target workspace with
+ * 1. Checks that no migration document changed in the dataset since this migration last wrote it
+ *    (src/import-guard.ts, record in state/imported-<dataset>.json). Studio edits, drafts opened
+ *    in the Studio, documents published from a migrated draft and release versions all stop the
+ *    run before anything is written, unless `discardStudioEdits` is set.
+ * 2. Validates the NDJSON against the Studio schema of the target workspace with
  *    `sanity documents validate --file ... --level error` (run from studio/ with the Studio's
  *    own CLI, so the schema, plugins and custom rules are exactly the deployed ones).
- * 2. Imports it with `sanity datasets import --replace`: documents with the same _id are
+ * 3. Imports it with `sanity datasets import --replace`: documents with the same _id are
  *    replaced, so reruns converge.
- * 3. Prunes documents that an earlier run created but the transform no longer produces (for
+ * 4. Prunes documents that an earlier run created but the transform no longer produces (for
  *    example a page that has since been published, whose drafts.<id> must go). Only ids that
  *    follow this migration's deterministic patterns are considered; assets, secrets.mux and
  *    anything an editor created (Studio ids are random) are never touched.
+ * 5. Records the `_rev` and content hash of every migration document for the next run's check.
  *
  * The CLI uses the machine's `sanity login` (the project owner).
  */
+import {createHash} from 'node:crypto'
+import {existsSync, readFileSync} from 'node:fs'
 import path from 'node:path'
 
+import type {SanityClient} from '@sanity/client'
+
 import {STUDIO_DIR, type Dataset, type DataPaths, type Secrets} from '../config'
+import {
+  buildImportRecord,
+  describeStudioEdits,
+  findStudioEdits,
+  hasStudioEdits,
+  MIGRATION_ID_PATTERN,
+  type ImportRecord,
+  type StoredDocument,
+  type StudioEdits,
+} from '../import-guard'
 import {sanityClient} from '../sanity'
-import {log, run, writeText} from '../util'
+import {log, readJson, run, writeJson, writeText} from '../util'
 import {ndjsonPath, readNdjson} from './transform'
 
-/** _id patterns this migration owns (published and drafts). */
-export const MIGRATION_ID_PATTERN =
-  /^(?:drafts\.)?(?:homePage|person-\d+|testimonial-\d+|service-\d+|blogPost-\d+|project-\d+|flexPage-\d+|medium-[a-z0-9]+(?:-[a-z0-9]+)*|technology-[a-z0-9]+(?:-[a-z0-9]+)*|redirect-\d+|mux-video-\d+)$/
+export {MIGRATION_ID_PATTERN}
 
 export async function sanityCli(args: string[], logName: string, paths: DataPaths): Promise<string> {
   const result = await run('npx', ['--no-install', 'sanity', ...args], {cwd: STUDIO_DIR, timeoutMs: 30 * 60 * 1000})
@@ -43,12 +60,91 @@ export async function validateNdjson(paths: DataPaths, dataset: Dataset, file: s
   if (errors.length) throw new Error(`The NDJSON fails Studio validation:\n- ${errors.join('\n- ')}`)
 }
 
-export async function importDataset(paths: DataPaths, dataset: Dataset, secrets: Secrets): Promise<void> {
+export function importRecordPath(paths: DataPaths, dataset: Dataset): string {
+  return path.join(paths.state, `imported-${dataset}.json`)
+}
+
+export function readImportRecord(paths: DataPaths, dataset: Dataset): ImportRecord | null {
+  const file = importRecordPath(paths, dataset)
+  if (!existsSync(file)) return null
+  const record = readJson<ImportRecord>(file)
+  if (record.dataset !== dataset) throw new Error(`${file} is the record of dataset ${record.dataset}, not ${dataset}`)
+  return record
+}
+
+export function fileSha256(file: string): string {
+  return createHash('sha256').update(readFileSync(file)).digest('hex')
+}
+
+/** Every document outside `_.**` and `versions.**` (raw perspective: published and drafts). */
+export async function fetchStoredDocuments(client: SanityClient): Promise<StoredDocument[]> {
+  return client.fetch<StoredDocument[]>(`*[!(_id in path("_.**")) && !(_id in path("versions.**"))]`)
+}
+
+export async function fetchVersionIds(client: SanityClient): Promise<string[]> {
+  return client.fetch<string[]>(`*[_id in path("versions.**")]._id`)
+}
+
+/**
+ * The Studio-edit check. Throws, before anything is written, when migration documents changed
+ * since the record, or when there is no record for a dataset that already holds migration
+ * documents. Returns what was found (all empty when nothing changed).
+ */
+export async function checkForStudioEdits(
+  paths: DataPaths,
+  dataset: Dataset,
+  client: SanityClient,
+  options: {discardStudioEdits: boolean},
+): Promise<StudioEdits> {
+  const [stored, versionIds] = await Promise.all([fetchStoredDocuments(client), fetchVersionIds(client)])
+  const record = readImportRecord(paths, dataset)
+  const migrationIds = stored.filter((doc) => MIGRATION_ID_PATTERN.test(doc._id)).map((doc) => doc._id)
+  if (!record) {
+    if (migrationIds.length === 0) {
+      log(`import: ${dataset} holds no migration documents yet, nothing to protect`)
+      return {changed: [], created: [], deleted: [], inReleases: []}
+    }
+    if (!options.discardStudioEdits) {
+      throw new Error(
+        `import: ${dataset} already holds ${migrationIds.length} migration documents, but there is no record of the last ` +
+          `import (${importRecordPath(paths, dataset)}), so Studio edits cannot be told apart. ` +
+          `If the dataset is untouched since the last import, record it with --steps baseline before changing the transform.`,
+      )
+    }
+    log(`import: WARNING no import record for ${dataset}; --discard-studio-edits replaces all ${migrationIds.length} migration documents`)
+    return {changed: migrationIds, created: [], deleted: [], inReleases: []}
+  }
+  const edits = findStudioEdits(record, stored, versionIds)
+  if (!hasStudioEdits(edits)) {
+    log(`import: no Studio edits to migration documents since the record of ${record.recordedAt}`)
+    return edits
+  }
+  if (!options.discardStudioEdits) {
+    throw new Error(
+      `import: refusing to import into ${dataset}; migration documents changed since this migration last wrote them ` +
+        `(${record.source}, ${record.recordedAt}):\n${describeStudioEdits(edits)}\n` +
+        'An import would overwrite or delete these changes. Keep them and only add missing videos with --steps mux,videos, ' +
+        'or pass --discard-studio-edits to overwrite them on purpose.',
+    )
+  }
+  log(`import: WARNING --discard-studio-edits overwrites these changes in ${dataset}:\n${describeStudioEdits(edits)}`)
+  return edits
+}
+
+export async function importDataset(
+  paths: DataPaths,
+  dataset: Dataset,
+  secrets: Secrets,
+  options: {discardStudioEdits: boolean},
+): Promise<void> {
   const file = ndjsonPath(paths, dataset)
   const documents = readNdjson(file)
   for (const doc of documents) {
     if (!MIGRATION_ID_PATTERN.test(doc._id)) throw new Error(`Refusing to import ${doc._id}: not a migration id`)
   }
+  const client = sanityClient(dataset, secrets)
+
+  await checkForStudioEdits(paths, dataset, client, options)
 
   log(`import: validating ${documents.length} documents against the ${dataset} workspace schema`)
   await validateNdjson(paths, dataset, file)
@@ -56,7 +152,6 @@ export async function importDataset(paths: DataPaths, dataset: Dataset, secrets:
   log(`import: sanity datasets import --replace into ${dataset}`)
   await sanityCli(['datasets', 'import', file, '--dataset', dataset, '--replace'], `import-${dataset}.log`, paths)
 
-  const client = sanityClient(dataset, secrets)
   const wanted = new Set(documents.map((d) => d._id))
   const present = await client.fetch<string[]>(`*[!(_id in path("_.**")) && !(_id in path("versions.**"))]._id`)
   const stale = present.filter((id) => MIGRATION_ID_PATTERN.test(id) && !wanted.has(id)).sort()
@@ -68,5 +163,17 @@ export async function importDataset(paths: DataPaths, dataset: Dataset, secrets:
   }
   const missing = [...wanted].filter((id) => !present.includes(id))
   if (missing.length) throw new Error(`import: ${missing.length} documents are missing after the import: ${missing.join(', ')}`)
-  log(`import: ${documents.length} documents in ${dataset}, ${stale.length} stale documents removed`)
+
+  const record = buildImportRecord({
+    dataset,
+    source: 'import',
+    ndjsonSha256: fileSha256(file),
+    expected: documents,
+    stored: await fetchStoredDocuments(client),
+  })
+  writeJson(importRecordPath(paths, dataset), record)
+  log(
+    `import: ${documents.length} documents in ${dataset}, ${stale.length} stale documents removed; ` +
+      `recorded ${Object.keys(record.documents).length} revisions in ${importRecordPath(paths, dataset)}`,
+  )
 }

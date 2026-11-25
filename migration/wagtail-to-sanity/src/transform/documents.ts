@@ -9,7 +9,8 @@
  * - Snippets (author, testimonials, services) become published documents.
  * - Tags become medium/technology documents, merging names that differ only by case or
  *   whitespace (every merge is reported).
- * - Redirects become redirect documents; Mux videos become mux.videoAsset documents.
+ * - Redirects become redirect documents (a draft when the target page is not published);
+ *   Mux videos become mux.videoAsset documents.
  *
  * Empty values are left unset (never null). `_key`s come from Wagtail block ids.
  */
@@ -27,7 +28,8 @@ import {
 import type {StudioSchema} from './schema'
 import type {AssetMap} from '../steps/assets'
 import type {AsciiMap} from '../steps/ascii'
-import type {MuxMap} from '../steps/mux'
+import type {MuxMap, MuxMapEntry} from '../steps/mux'
+import {LINK_HREF_FIXES, linkHrefFix, type LinkHrefFix} from '../content-fixes'
 import {migratedRevisions} from '../references'
 import {
   isMigratedPageType,
@@ -40,6 +42,7 @@ import {
   type WagtailExport,
   type WagtailImage,
   type WagtailPage,
+  wagtailTagOrder,
 } from '../wagtail'
 
 export interface SanityDocument {
@@ -184,7 +187,16 @@ export function buildDocuments(input: TransformInput): TransformResult {
     return {documentId: pageDocumentId(page), published: page.live, type: PAGE_TYPE_MAP[page.type]}
   }
 
-  const richText = (html: string | null | undefined, record: string, keys: KeyRegistry, keyPrefix: string): PTItem[] => {
+  // Content fixes (src/content-fixes.ts) that matched; every listed fix must match once.
+  const appliedFixes = new Set<LinkHrefFix>()
+  /** `streamBlock` identifies a StreamField rich-text block, the only place content fixes apply. */
+  const richText = (
+    html: string | null | undefined,
+    record: string,
+    keys: KeyRegistry,
+    keyPrefix: string,
+    streamBlock?: {pageId: number; blockId: string},
+  ): PTItem[] => {
     if (!html || html.trim() === '') return []
     const ctx: RichTextContext = {
       record,
@@ -195,6 +207,13 @@ export function buildDocuments(input: TransformInput): TransformResult {
       image: (id) => ({assetId: imageAsset(id, record)}),
       document: (id) => documentAsset(id, record),
       page: (id) => pageTarget(id, record),
+      linkHref: (href) => {
+        const fix = streamBlock && linkHrefFix(streamBlock.pageId, streamBlock.blockId, href)
+        if (!fix) return href
+        appliedFixes.add(fix)
+        issues.push({record, level: 'info', code: 'content-fix', message: `link ${JSON.stringify(fix.from)} -> ${JSON.stringify(fix.to)}: ${fix.reason}`})
+        return fix.to
+      },
     }
     return richTextToBlocks(html, ctx)
   }
@@ -227,7 +246,7 @@ export function buildDocuments(input: TransformInput): TransformResult {
     return {_type: 'youtube', _key: key, url}
   }
 
-  const streamBody = (blocks: StreamBlock[], record: string): PTItem[] => {
+  const streamBody = (blocks: StreamBlock[], record: string, pageId: number): PTItem[] => {
     const keys = new KeyRegistry(record, issues)
     const out: PTItem[] = []
     blocks.forEach((block, index) => {
@@ -235,7 +254,7 @@ export function buildDocuments(input: TransformInput): TransformResult {
       if (typeof block.id !== 'string' || !block.id) throw new TransformError(`${where}: block has no id`)
       switch (block.type) {
         case 'full_richtext':
-          out.push(...richText(String(block.value), where, keys, `${block.id.slice(0, 8)}-`))
+          out.push(...richText(String(block.value), where, keys, `${block.id.slice(0, 8)}-`, {pageId, blockId: block.id}))
           break
         case 'code': {
           const value = block.value as {language?: unknown; text?: unknown}
@@ -376,7 +395,8 @@ export function buildDocuments(input: TransformInput): TransformResult {
     }
   }
   const tagRefs = (names: string[] | undefined, kind: 'medium' | 'technologies', where: string) => {
-    const refs = (names ?? []).map((name) => {
+    // The order the old site showed, not the export's (see wagtailTagOrder).
+    const refs = wagtailTagOrder(names ?? []).map((name) => {
       const id = tagIds[kind].get(name)
       if (!id) throw new TransformError(`${where}: tag ${name} has no document`)
       return keyedRef(id)
@@ -505,7 +525,7 @@ export function buildDocuments(input: TransformInput): TransformResult {
     }
 
     if (!Array.isArray(f.body)) throw new TransformError(`${record}: body is not a StreamField`)
-    const body = streamBody(f.body, record)
+    const body = streamBody(f.body, record, page.id)
     const seoValue = seo(f)
     if (page.type === 'flex.FlexPage') {
       return {
@@ -606,6 +626,9 @@ export function buildDocuments(input: TransformInput): TransformResult {
       const source = redirect.old_path
       if (validation.validateSitePath(source) !== true) throw new TransformError(`${record}: source ${source} is not a site path`)
       let destination: string
+      // A redirect to a page that is not on the site would only lead to a 404 (and reveal the
+      // draft's slug), so it is migrated as a draft, to be published together with its page.
+      let draftOnly = false
       if (redirect.redirect_page_id != null) {
         const page = pagesById.get(redirect.redirect_page_id)
         if (!page) throw new TransformError(`${record}: page ${redirect.redirect_page_id} is not in the export`)
@@ -615,7 +638,13 @@ export function buildDocuments(input: TransformInput): TransformResult {
         destination = pageSitePath(page, targetSlug)
         if (redirect.redirect_page_route_path) destination = `${destination.replace(/\/$/, '')}/${redirect.redirect_page_route_path.replace(/^\//, '')}`
         if (!page.live) {
-          issues.push({record, level: 'warning', code: 'redirect-to-draft', message: `redirects ${source} to ${destination}, a page that was never published (404 until it is)`})
+          draftOnly = true
+          issues.push({
+            record,
+            level: 'warning',
+            code: 'redirect-to-draft',
+            message: `redirects ${source} to ${destination}, a page that is not published; migrated as a draft redirect, publish it together with the page`,
+          })
         }
       } else if (text(redirect.redirect_link)) {
         destination = redirect.redirect_link
@@ -624,8 +653,9 @@ export function buildDocuments(input: TransformInput): TransformResult {
       }
       if (validation.validatePathOrAbsoluteUrl(destination) !== true) throw new TransformError(`${record}: destination ${destination} is not a path or URL`)
       if (destination === source) throw new TransformError(`${record}: destination equals source`)
-      documents.push({_id: `redirect-${redirect.id}`, _type: 'redirect', source, destination, permanent: redirect.is_permanent})
-      mapping.push({wagtail: `wagtailredirects.Redirect ${redirect.id}`, sanity: [`redirect-${redirect.id}`]})
+      const id = `${draftOnly ? 'drafts.' : ''}redirect-${redirect.id}`
+      documents.push({_id: id, _type: 'redirect', source, destination, permanent: redirect.is_permanent})
+      mapping.push({wagtail: `wagtailredirects.Redirect ${redirect.id}`, sanity: [id]})
     } catch (error) {
       if (!(error instanceof TransformError)) throw error
       errors.push(error.message)
@@ -646,15 +676,7 @@ export function buildDocuments(input: TransformInput): TransformResult {
       mapping.push({wagtail: `wagtailmedia.Media ${media.id}`, sanity: []})
       continue
     }
-    documents.push({
-      _id: `mux-video-${media.id}`,
-      _type: 'mux.videoAsset',
-      assetId: video.assetId,
-      playbackId: video.playbackId,
-      status: video.status,
-      filename: video.filename,
-      data: withArrayKeys(video.asset),
-    })
+    documents.push(muxVideoDocument(media.id, video))
     mapping.push({wagtail: `wagtailmedia.Media ${media.id}`, sanity: [`mux-video-${media.id}`]})
   }
 
@@ -684,8 +706,28 @@ export function buildDocuments(input: TransformInput): TransformResult {
     redirectSources.set(doc.source as string, doc._id)
   }
 
+  for (const fix of LINK_HREF_FIXES) {
+    if (!appliedFixes.has(fix)) errors.push(`content fix for page ${fix.pageId}: link ${JSON.stringify(fix.from)} in block ${fix.blockId} is not in the export any more; remove the fix`)
+  }
+
   for (const message of errors) issues.push({record: message.split(':')[0] ?? 'transform', level: 'error', code: 'transform-failed', message})
   return {documents, issues, tagMerges, linkTextFlattening, mapping}
+}
+
+/**
+ * The mux.videoAsset document for a Wagtail media item that is on Mux, in the shape
+ * sanity-plugin-mux-input stores. Used by the transform and by the `videos` step.
+ */
+export function muxVideoDocument(mediaId: number, video: MuxMapEntry): SanityDocument {
+  return {
+    _id: `mux-video-${mediaId}`,
+    _type: 'mux.videoAsset',
+    assetId: video.assetId,
+    playbackId: video.playbackId,
+    status: video.status,
+    filename: video.filename,
+    data: withArrayKeys(video.asset),
+  }
 }
 
 /**

@@ -119,6 +119,18 @@ export class MuxClient {
   }
 }
 
+/**
+ * The asset JSON stored in mux.videoAsset `data`, in its steady state. Temporary master access,
+ * which the weekly backup requests to download each original and which Mux reverts after 24 hours,
+ * adds a signed download URL (`master.url`) and sets `master_access` to "temporary". Neither may
+ * end up in a public document, and recording them would make a rerun's output depend on when the
+ * last backup ran. The steady state is `master_access: "none"` with no `master` object.
+ */
+export function steadyStateAsset(asset: MuxAsset): MuxAsset {
+  const withoutMaster = Object.fromEntries(Object.entries(asset).filter(([key]) => key !== 'master')) as MuxAsset
+  return {...withoutMaster, master_access: 'none'}
+}
+
 function publicPlaybackId(asset: MuxAsset): string {
   const id = asset.playback_ids?.find((p) => p.policy === 'public')?.id
   if (!id) throw new Error(`Mux asset ${asset.id} (${asset.passthrough}) has no public playback id`)
@@ -241,7 +253,7 @@ export async function migrateVideos(
       assetId: asset.id,
       playbackId: publicPlaybackId(asset),
       status: asset.status,
-      asset,
+      asset: steadyStateAsset(asset),
     }
   }
   writeJson(mapPath, map)

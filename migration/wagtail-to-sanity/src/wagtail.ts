@@ -220,6 +220,19 @@ export function loadTagSlugs(dumpdataPath: string): Map<string, string> {
   return slugs
 }
 
+const TAG_NAME_COLLATOR = new Intl.Collator('en-US', {sensitivity: 'base'})
+
+/**
+ * A page's tags in the order the old site showed them. The Wagtail API (and so the old frontend)
+ * listed tags by name in the database's collation, which ignores case: "cricut, Fusion 360". The
+ * export lists them in Python's codepoint order instead ("Fusion 360", "cricut"), and the tag
+ * through-table's row order matches neither. Names that are equal ignoring case keep codepoint
+ * order, so the result is deterministic.
+ */
+export function wagtailTagOrder(names: readonly string[]): string[] {
+  return [...names].sort((a, b) => TAG_NAME_COLLATOR.compare(a, b) || (a < b ? -1 : a > b ? 1 : 0))
+}
+
 /** The Wagtail page models this migration knows, and the Sanity type each one becomes. */
 export const PAGE_TYPE_MAP = {
   'home.HomePage': 'homePage',

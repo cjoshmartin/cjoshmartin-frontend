@@ -121,6 +121,8 @@ export interface RichTextContext {
   image(id: number): ResolvedImage
   document(id: number): string
   page(id: number): ResolvedPage
+  /** The href a `<a href>` link gets in Sanity (the Wagtail value unless src/content-fixes.ts corrects it). */
+  linkHref(href: string): string
 }
 
 const TEXT_BLOCK_STYLES: Record<string, string> = {
@@ -332,7 +334,7 @@ export function richTextToBlocks(html: string, ctx: RichTextContext): PTItem[] {
             } else {
               const href = el.getAttribute('href') ?? ''
               if (!href.trim()) fail(ctx, `link without href: ${describe(el)}`)
-              markDef = {_type: 'link', href, openInNewTab: false}
+              markDef = {_type: 'link', href: ctx.linkHref(href), openInNewTab: false}
             }
             // block-tools takes the mark key from markDef._key; without one the spans get null marks.
             return {_type: '__annotation', markDef: {...markDef, _key: `tmp${generated++}`}, children: next(el.childNodes)}
