@@ -1,6 +1,9 @@
 import { createImageUrlBuilder, type SanityImageSource } from '@sanity/image-url'
 
 import { dataset, projectId } from '@/sanity/env'
+import { croppedDimensions, fitWidth, type ImageDimensions } from '@/sanity/lib/imageDimensions'
+
+export type { ImageDimensions }
 
 const builder = createImageUrlBuilder({ projectId, dataset })
 
@@ -26,21 +29,14 @@ export function hasAsset<T extends SanityImageValue>(
   return Boolean(image?.asset?._ref)
 }
 
-export interface ImageDimensions {
-  width: number
-  height: number
-}
-
 /**
- * Image asset ids are `image-<sha1>-<width>x<height>-<format>`, a stable format documented by Sanity,
- * so the original dimensions can be read without dereferencing the asset document.
+ * Width and height of the image `urlFor(image)` delivers, which applies the editor's crop. Image
+ * asset ids are `image-<sha1>-<width>x<height>-<format>`, a stable format documented by Sanity, so
+ * the original dimensions can be read without dereferencing the asset document; the crop is then
+ * applied the way `@sanity/image-url` applies it.
  */
 export function getImageDimensions(image: SanityImageWithAsset): ImageDimensions {
-  const match = /^image-[a-zA-Z0-9]+-(\d+)x(\d+)-[a-z0-9]+$/.exec(image.asset._ref)
-  if (!match) {
-    throw new Error(`Unexpected Sanity image asset id: ${image.asset._ref}`)
-  }
-  return { width: Number(match[1]), height: Number(match[2]) }
+  return croppedDimensions(image.asset._ref, image.crop)
 }
 
 /**
@@ -53,11 +49,7 @@ export function imageUrl(image: SanityImageWithAsset, maxWidth: number): string 
 
 /** Width and height of `imageUrl(image, maxWidth)`, for `<img width height>` attributes. */
 export function scaledDimensions(image: SanityImageWithAsset, maxWidth: number): ImageDimensions {
-  const { width, height } = getImageDimensions(image)
-  if (width <= maxWidth) {
-    return { width, height }
-  }
-  return { width: maxWidth, height: Math.round((height * maxWidth) / width) }
+  return fitWidth(getImageDimensions(image), maxWidth)
 }
 
 /** The original file on the Sanity CDN, for components that hand the URL to next/image. */
