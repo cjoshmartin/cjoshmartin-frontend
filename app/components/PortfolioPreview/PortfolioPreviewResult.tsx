@@ -1,8 +1,8 @@
-import { ProjectItem } from "./ProjectItem";
+import { ProjectItem, type ProjectItemProps } from "./ProjectItem";
 import ActionButton from "./ActionButton";
 import styles from './PortfolioPreview.module.css'
 
-export function PortfolioPreviewResult({projects}: {projects: any[]}){
+export function PortfolioPreviewResult({projects}: {projects: ProjectItemProps[]}){
   if (projects.length < 1) {
     return null;
   }
@@ -18,25 +18,10 @@ export function PortfolioPreviewResult({projects}: {projects: any[]}){
         </div>
         <br />
         <div className={styles.profileContainer}>
-          {projects
-            .filter(
-              (project: any) =>
-                !project.is_unlisted 
-            )
-            .slice(0, 3)
-            .map((project: any, i: number) => (
-              <ProjectItem
-                key={project.title}
-                previewImage={project?.preview_image?.url}
-                projectName={project.title}
-                client={project.client}
-                media={project.medium}
-                technologies={project.technologies}
-                slug={project.meta.slug}
-                website={project.website}
-                body={project.body}
-              />
-            ))}
+          {/* Unlisted projects are excluded and the list is limited to 3 by PORTFOLIO_PREVIEW_QUERY. */}
+          {projects.map((project) => (
+            <ProjectItem key={project.slug ?? project.projectName} {...project} />
+          ))}
         </div>
         <ActionButton
           href="/projects?project_type=CLI"

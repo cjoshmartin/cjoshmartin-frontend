@@ -4,6 +4,7 @@ import { Edges, OrbitControls } from "@react-three/drei";
 import { Canvas, useLoader,  useFrame  } from "@react-three/fiber";
 //@ts-ignore
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader";
+import { STLErrorBoundary } from "./STLErrorBoundary";
 
 interface ModelRenderProps {
     url: string;
@@ -40,6 +41,7 @@ export function STLFileArea({ value }: any) {
 
 
     return (
+      <STLErrorBoundary url={url}>
       <div className="App">
         <Canvas
           style={{ height: "400px", border: "5px solid white" }}
@@ -62,5 +64,6 @@ export function STLFileArea({ value }: any) {
         </Canvas>
         <p style={{marginTop: '0.5rem'}}><i>(click and drag to see around the model)</i></p>
       </div>
+      </STLErrorBoundary>
     );
 }

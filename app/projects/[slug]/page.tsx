@@ -1,52 +1,52 @@
 import styles from './projectPage.module.css';
-import HtmlGenerator from '@/app/components/HtmlGenerator/HtmlGenerator';
 import Testimonial from "@/app/components/Testimonial";
 import { GoBackLink } from "@/app/blog/[slug]/GoBackLink/GoBackLink";
-import { Metadata, ResolvingMetadata } from "next";
-import { getFromSlug, getPreviewContent } from "@/app/components/api/pages";
+import { Metadata } from "next";
+import { notFound } from 'next/navigation';
+import { stegaClean } from '@sanity/client/stega';
 import seo from '@/app/components/SEO'
 import { AuthorInfo } from "@/app/blog/[slug]/AuthorInfo/AuthorInfo";
 import Comments from "@/app/blog/[slug]/Comments";
 import HeaderGenerator from "@/app/components/HeaderGenerator";
 import UnlistedBanner from '@/app/components/UnlistedBanner/UnlistedBanner';
-
-async function getPage(slug: string, searchParams: any){
-  if(slug === 'preview'){
-    return await getPreviewContent(searchParams)
-  }
-
-
-    return await getFromSlug(slug);
-}
+import PortableTextBody from '@/app/components/PortableTextBody/PortableTextBody';
+import { tagTitles } from '@/app/components/PortfolioPreview/tagTitles';
+import { toTestimonialViews } from '@/app/components/Testimonial/testimonialView';
+import { sanityFetch } from '@/sanity/lib/live';
+import { PROJECT_QUERY, PROJECT_SEO_QUERY } from '@/sanity/lib/queries';
+import { hasAsset, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH, ogImageUrl } from '@/sanity/lib/image';
 
 type Props = {
-  params: any 
-  searchParams: any 
+  params: Promise<{ slug: string }>
 }
 
-export async function generateMetadata(props: Props, parent: ResolvingMetadata): Promise<Metadata> {
-  const searchParams = await props.searchParams;
+export async function generateMetadata(props: Props): Promise<Metadata> {
   const params = await props.params;
 
-  const content = await getPage(params.slug, searchParams);
-  const {meta} = content
-  let title =  content.title;
-  if (meta?.seo_title && meta?.seo_title.length > 0){
-    title = meta?.seo_title;
+  const { data: content } = await sanityFetch({
+    query: PROJECT_SEO_QUERY,
+    params: { slug: params.slug },
+    stega: false,
+  });
+
+  if (!content) {
+    notFound();
   }
+
+  const title = content.seo?.title || content.title || '';
   const fullTitle = `${title} - Projects - ${seo.sitename}`;
 
-  let description = content.intro;
-  if (meta.seo_title && meta.seo_title.length > 0) {
-    description = meta.seo_title
-  }
+  // The SEO description, falling back to the intro (never the SEO title).
+  const description = content.seo?.description || content.intro || undefined;
+
+  const image = [content.contentImage, content.previewImage].find(hasAsset);
 
   return {
     description,
     title: fullTitle,
     authors: [{ name: "Josh Martin" }],
     publisher: "cjoshmartin.com",
-    keywords: content.technologies,
+    keywords: tagTitles(content.technologies),
     alternates: {
       canonical: `https://cjoshmartin.com/projects/${params.slug}`,
     },
@@ -55,62 +55,68 @@ export async function generateMetadata(props: Props, parent: ResolvingMetadata):
       siteName: seo.sitename,
       description: description,
       type: "article",
-      publishedTime: content.date,
-      images:
-        content.content_image?.url ||
-        content.preview_image?.url ||
-        seo.defaultImg,
+      publishedTime: content.date ?? undefined,
+      images: image
+        ? { url: ogImageUrl(image), width: OG_IMAGE_WIDTH, height: OG_IMAGE_HEIGHT }
+        : seo.defaultImg,
     },
   };
 }
 
-export default async function Page(
-  props: {
-    params: Promise<{ slug: string }>;
-    searchParams?: Promise<{ [key: string]: string | string[] | undefined }>
-  }
-) {
-  const searchParams = await props.searchParams;
+export default async function Page(props: Props) {
   const params = await props.params;
+  const { data: project } = await sanityFetch({
+    query: PROJECT_QUERY,
+    params: { slug: params.slug },
+  });
+
+  if (!project) {
+    notFound();
+  }
+
   const {
+    _id,
     title,
     body,
-    content_visuals,
-    content_image,
+    heroMedia,
+    contentImage,
     client,
-    medium,
-    technologies,
-    testimonials,
-    author,
-    id,
-    is_unlisted
-  } = await getPage(params.slug, searchParams);
+    legacyId,
+    isUnlisted,
+  } = project;
+  const medium = tagTitles(project.mediums);
+  const technologies = tagTitles(project.technologies);
+  const testimonials = toTestimonialViews(project.testimonials);
 
   return (
     <div className={styles.container}>
-      {(is_unlisted || params.slug === 'preview') && <UnlistedBanner />}
+      {isUnlisted && <UnlistedBanner />}
       <GoBackLink href={"/projects"} />
       <HeaderGenerator
         className={styles.headerImage}
-        content_visuals={content_visuals}
-        content_image={content_image}
+        heroMedia={heroMedia}
+        contentImage={contentImage}
       />
       <div className={styles.projectInfo}>
         <h2>{title}</h2>
         {client && <h3 style={{ fontWeight: "400" }}>Client: {client}</h3>}
-        <h4>Medium: {medium?.join(", and ")}</h4>
+        <h4>Medium: {medium.join(", and ")}</h4>
         <h5>Technologies: {technologies.join(", ")}</h5>
       </div>
       <div className={styles.testimonials}>
-        {testimonials.map(({ testimonial }: any, i: number) => (
-          <Testimonial testimonial={testimonial} key={i} />
+        {testimonials.map((testimonial) => (
+          <Testimonial testimonial={testimonial} key={testimonial.key} />
         ))}
       </div>
       <div className={styles.contentArea}>
-        <HtmlGenerator body={body} />
+        <PortableTextBody value={body} />
       </div>
       {/* <AuthorInfo {...author} /> */}
-      <Comments slug={params.slug} id={id} title={title} />
+      <Comments
+        slug={params.slug}
+        identifier={legacyId != null ? String(legacyId) : _id}
+        title={stegaClean(title) ?? ''}
+      />
     </div>
   );
 }

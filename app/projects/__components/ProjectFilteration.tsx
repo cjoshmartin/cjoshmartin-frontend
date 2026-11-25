@@ -2,18 +2,30 @@ import ProjectListingItem from './ProjectListingItem';
 import Tags from './Tags';
 import styles from '../projects.module.css'
 import ClearFilters from '../ClearFilters';
+import type { ProjectListingData } from './projectListing';
 
-export function ProjectFilteration({homePageData, searchParams}: {homePageData: any, searchParams: any}) {
+export type ProjectSearchParams = { [key: string]: string | string[] | undefined }
+
+/** One value per filter: a repeated query param (`?medium=a&medium=b`) uses the first value. */
+function firstValues(searchParams: ProjectSearchParams): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(searchParams)
+      .map(([key, value]): [string, string | undefined] => [key, Array.isArray(value) ? value[0] : value])
+      .filter((entry): entry is [string, string] => entry[1] !== undefined)
+  );
+}
+
+export function ProjectFilteration({homePageData, searchParams}: {homePageData: ProjectListingData[], searchParams: ProjectSearchParams}) {
 
   const params = Object.fromEntries(
-    Object.entries(searchParams ?? {}).filter(
+    Object.entries(firstValues(searchParams)).filter(
       ([key]) => key !== "project_audience"
     )
   );
 
     const filteredData = homePageData
-            .reduce((acc: any, project: any) => {
-              const { medium, technologies, project_type } = project;
+            .reduce((acc: ProjectListingData[], project) => {
+              const { mediums: medium, technologies, projectType: project_type } = project;
               if (!params || Object.keys(params).length < 1) {
                 acc.push(project);
                 return acc;
@@ -37,7 +49,7 @@ export function ProjectFilteration({homePageData, searchParams}: {homePageData: 
               return acc;
             }, [])
 
-      const counts = filteredData.reduce((acc: any, {medium}: any) => {
+      const counts = filteredData.reduce((acc: {medium: Record<string, number>}, {mediums: medium}) => {
 
         medium.forEach((m: string) =>{
           const name = m.trim();
@@ -53,7 +65,7 @@ export function ProjectFilteration({homePageData, searchParams}: {homePageData: 
       }, {medium: {}})
 
       const dataForTechnologyCounts = homePageData
-            .filter(({medium, project_type}: any) => {
+            .filter(({mediums: medium, projectType: project_type}) => {
               const matchesProjectType =
                 !params?.project_type || project_type === params?.project_type;
 
@@ -64,7 +76,7 @@ export function ProjectFilteration({homePageData, searchParams}: {homePageData: 
               return matchesProjectType && matchesMedium;
             })
 
-      const technologies = dataForTechnologyCounts.reduce((acc: any, {technologies}: any) => {
+      const technologies = dataForTechnologyCounts.reduce((acc: Record<string, number>, {technologies}) => {
 
         technologies.forEach((t: string) =>{
           const name = t.trim();
@@ -99,8 +111,8 @@ export function ProjectFilteration({homePageData, searchParams}: {homePageData: 
         </div>
         <div className={styles.listItems}>
           {filteredData
-          .map((project: any) => (
-            <ProjectListingItem data={project} key={project.title} />
+          .map((project) => (
+            <ProjectListingItem data={project} key={project.key} />
           ))}
         </div>
       </div>

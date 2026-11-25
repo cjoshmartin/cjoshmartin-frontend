@@ -9,19 +9,21 @@ import { isNoContent } from './isNoContent';
 
 export interface ProjectItemProps {
   previewImage?: string
+  /** The project name without stega characters, for the image's alt attribute. */
+  imageAlt?: string
   projectName: string
   client?: string
   media: string[]
   technologies: string[]
   slug?:string,
   website?: string,
-  body?: string[]
+  hasBody?: boolean
 }
 
 
 export function ProjectItem(props: ProjectItemProps) {
-    const {slug, website, body} = props
-    const noContent = isNoContent(website, body);
+    const {slug, website, hasBody} = props
+    const noContent = isNoContent(website, hasBody);
 
   const content = (
     <>
@@ -33,7 +35,7 @@ export function ProjectItem(props: ProjectItemProps) {
         <ShowImage
           url={props.previewImage}
           className={styles.profileImage}
-          alt={props.projectName}
+          alt={props.imageAlt}
           width={150}
           height={150}
         />

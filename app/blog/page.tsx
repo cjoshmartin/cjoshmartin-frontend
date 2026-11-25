@@ -1,20 +1,13 @@
 import { Metadata } from "next";
-import { PageTypes } from "../PageTypes";
 import BlogListItem from "./_compoents/BlogListItem";
 import styles from './blog.module.css'
-import { getPages } from "../components/api/pages";
+import { sanityFetch } from "@/sanity/lib/live";
+import { BLOG_LIST_QUERY } from "@/sanity/lib/queries";
 
+/** Every listed (not unlisted) blog post, newest first. */
 async function getBlogPosts(){
-    const getDate = ({meta}: any) => new Date(meta.first_published_at).getTime();
-    const sortingFuncForDate = (a: any ,b: any) => getDate(b) - getDate(a);
-
-    return getPages()
-    .then((data) => data
-    .filter(({meta}: any) =>  meta.type === PageTypes.BLOG_POST)
-    .sort(sortingFuncForDate)
-    )
-
-
+    const { data } = await sanityFetch({ query: BLOG_LIST_QUERY })
+    return data
 }
 
 
@@ -33,15 +26,10 @@ export default async function Blog(){
             Blog
           </span>
         </h1>
-        {blogPosts.map(({ id, meta, date, title, intro, content_visuals, body}: any) => (
+        {blogPosts.map((post) => (
           <BlogListItem
-            key={id}
-            title={title}
-            slug={meta.slug}
-            publishDate={date}
-            intro={intro}
-            content_visuals={content_visuals}
-            body={body}
+            key={post._id}
+            post={post}
           />
         ))}
       </div>

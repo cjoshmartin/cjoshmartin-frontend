@@ -1,39 +1,48 @@
 import ShowImage from "../blog/_compoents/ShowImage/ShowImage";
+import YouTubeEmbed from "./PortableTextBody/YouTubeEmbed";
+import { stegaClean } from "@sanity/client/stega";
+import { hasAsset, imageUrl, scaledDimensions } from "@/sanity/lib/image";
+import type { HeroMediaValue, ImageWithAltValue } from "@/sanity/lib/types";
 
-enum HeaderTypes {
-    YOUTUBE = "youtube_video",
-    IMAGE = "image"
-}
+/** Widest rendition of a hero image. */
+const HERO_IMAGE_WIDTH = 1600
 
-function getImage(currentVisual?: object, content_image?: object){
-    let output = content_image;
-
-    if(currentVisual){
-        //@ts-ignore
-        output = currentVisual.value
-    }
-
-    return output
-}
-
-export default function HeaderGenerator({content_visuals, content_image, className}: any){
-    const currentVisual = content_visuals ? content_visuals[0] : null
-    if ( currentVisual?.type === HeaderTypes.YOUTUBE) {
+/**
+ * The hero of a blog post or project: the first hero media item (a YouTube video or an image),
+ * otherwise the content image, otherwise the default image.
+ */
+export default function HeaderGenerator({heroMedia, contentImage, className}: {
+    heroMedia?: HeroMediaValue | null,
+    contentImage?: ImageWithAltValue | null,
+    className?: string,
+}){
+    const currentVisual = heroMedia ? heroMedia[0] : undefined
+    if ( currentVisual?._type === "youtube") {
         return (
-          <div
-            dangerouslySetInnerHTML={{ __html: currentVisual.value }} />
+          <div>
+            <YouTubeEmbed url={currentVisual.url} />
+          </div>
         );
     }
 
-    const image = getImage(currentVisual, content_image);
+    const image = currentVisual ?? contentImage;
+    if (!hasAsset(image)) {
+        return (
+          <ShowImage
+            width={770}
+            height={360}
+            className={className}
+          />
+        )
+    }
+
+    const { width, height } = scaledDimensions(image, HERO_IMAGE_WIDTH);
     return (
       <ShowImage
-      //@ts-ignore
-        width={image?.width ?? 770}
-      //@ts-ignore
-        height={image?.height ?? 360}
-      //@ts-ignore
-        url={image?.url}
+        width={width}
+        height={height}
+        url={imageUrl(image, HERO_IMAGE_WIDTH)}
+        alt={stegaClean(image.alt) ?? undefined}
         className={className}
       />
     )

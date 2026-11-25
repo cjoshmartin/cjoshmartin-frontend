@@ -1,81 +1,51 @@
 import styles from './page.module.css'
-import DesktopIntro from './components/intro/DesktopIntro'
-import { PageTypes } from './PageTypes'
+import DesktopIntro, { type IntroAuthor } from './components/intro/DesktopIntro'
 import Testimonial from './components/Testimonial'
 import PortfolioPreview from './components/PortfolioPreview/PortfolioPreview'
 import PersonalPortfolioPreview from './components/PersonalPortfolioPreview'
-import { RandomIntFromInterval } from './randomIntFromInterval'
-import { getPages, getPreviewContent } from './components/api/pages'
 import CTASection from './components/CTASection/CTASection'
 import ResumeSection from './components/ResumeSection/ResumeSection'
-import { Metadata, ResolvingMetadata } from 'next'
+import { Metadata } from 'next'
+import { stegaClean } from '@sanity/client/stega'
 import seo from '@/app/components/SEO'
-import { ServiceObj, Services } from './components/Services/Services'
+import { Services } from './components/Services/Services'
 import { Meetup } from './__compoents/Meetup'
 import { Esty } from './__compoents/Esty'
 import { FocusModes } from './components/Context/FocusMode'
-interface AuthorImageData {
-    url: string,
-    title: string,
-    width: number,
-    height: number,
-}
+import PortableTextBody from './components/PortableTextBody/PortableTextBody'
+import { toTestimonialViews } from './components/Testimonial/testimonialView'
+import { sanityFetch } from '@/sanity/lib/live'
+import { HOME_PAGE_QUERY, HOME_PAGE_SEO_QUERY } from '@/sanity/lib/queries'
+import { hasAsset, imageUrl, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH, ogImageUrl, scaledDimensions } from '@/sanity/lib/image'
 
-interface AuthorData {
-  first_name: string,
-  last_name: string,
-  location: string,
-  job_title: string,
-  bio?: string,
-  email?: string,
-  github?: string,
-  image: AuthorImageData
-}
-interface AuthorEntryData {
-  author: AuthorData
-}
-interface HomePageData {
-  blog_authors: AuthorEntryData[],
-  body: string,
-  testimonials: any[],
-  // known but lazy teehee
-  home_service: unknown[]
-}
+const DEFAULT_DESCRIPTION = 'This website showcase the work of Josh Martin.\
+    A Chicago based (freelance) programmer who can create your next mobile app, web application or embedded project'
 
-export async function generateMetadata(
-  props: {
-    params: Promise<{ [key: string]: string | string[] | undefined }>
-    searchParams: Promise<{ [key: string]: string | string[] | undefined }>
-  },
-  parent: ResolvingMetadata
-): Promise<Metadata> {
+/** Widest rendition of the profile photo (the original is 937px wide). */
+const AUTHOR_IMAGE_WIDTH = 1000
 
+export async function generateMetadata(): Promise<Metadata> {
+  const { data: content } = await sanityFetch({ query: HOME_PAGE_SEO_QUERY, stega: false })
 
-    const content: any = (await getPages({type: PageTypes.HOME}))[0];
+  if (!content) {
+    throw new Error('generateMetadata: the "homePage" document was not found in Sanity.')
+  }
 
-    if (!content) {
-      throw new Error('generateMetadata: no page with type PageTypes.HOME was returned by getPages() — the CMS home page may have failed to load.');
-    }
-
-    const {meta} = content;
-    let title =  content.title;
-    if (meta?.seo_title && meta?.seo_title.length > 0){
-      title = meta?.seo_title;
-    }
-    const fullTitle = `Home - ${seo.sitename}`;
-
-    const image = content?.blog_authors[0].author?.image?.file || seo.defaultImg
+  const title = content.seo?.title || content.title || seo.sitename
+  const fullTitle = `Home - ${seo.sitename}`
+  const description = content.seo?.description || DEFAULT_DESCRIPTION
+  const image = hasAsset(content.authorImage)
+    ? { url: ogImageUrl(content.authorImage), width: OG_IMAGE_WIDTH, height: OG_IMAGE_HEIGHT }
+    : seo.defaultImg
 
   return {
-    description: 'This website showcase the work of Josh Martin.\
-    A Chicago based (freelance) programmer who can create your next mobile app, web application or embedded project',
+    description,
     title: fullTitle,
     // metadataBase: new URL('http://badideas.cards'),
     openGraph: {
       title,
       siteName: seo.sitename,
-      description: 'This website showcase the work of Josh Martin.\
-      A Chicago based (freelance) programmer who can create your next mobile app, web application or embedded project',
+      description,
       images: image,
     },
     alternates: {
@@ -84,77 +54,47 @@ export async function generateMetadata(
   };
 }
 
-async function getHomePageData(): Promise<HomePageData> {
-    return getPages({type: PageTypes.HOME})
-    .then((dataset ) => {
-          const homePage = dataset[0];
-          if (!homePage) {
-            throw new Error('getHomePageData: no page with type PageTypes.HOME was returned by getPages() — the CMS home page may have failed to load.');
-          }
-
-          //@ts-ignore
-          const { blog_authors, body, testimonials, home_service } = homePage;
-
-          return {
-            blog_authors: [blog_authors[0]],
-            body,
-            testimonials,
-            home_service
-          };
-        });
-}
-
-async function getPreviewHomePageData(searchParams: object){
-  return getPreviewContent(searchParams)
-  .then(data =>{
-    const { blog_authors, body, testimonials, home_service } = data;
-    return {
-      blog_authors: [blog_authors[0]],
-      body,
-      testimonials,
-      home_service
-    };
+// Query parameters (for example ?utm_source=...) are ignored: drafts are only shown in Draft Mode.
+export default async function Home() {
+  const { data: content } = await sanityFetch({
+    query: HOME_PAGE_QUERY,
+    params: { audience: FocusModes.Developer },
   })
-}
 
-export default async function Home(
-  props: {
-    searchParams?: Promise<{ [key: string]: string | string[] | undefined }>
-  }
-) {
-  const searchParams = await props.searchParams;
-  let content = undefined;
-
-
-  console.log('searchParams', searchParams);
-
-  const params = Object.fromEntries(
-    Object.entries(searchParams ?? {}).filter(
-      ([key]) => key !== "project_audience"
-    )
-  );
-
-
-
-  if(params && Object.keys(params).length > 0){
-    content = await getPreviewHomePageData(params);
-  }
-  else {
-    content = await getHomePageData();
+  if (!content) {
+    throw new Error('Home: the "homePage" document was not found in Sanity.')
   }
 
-  const {blog_authors, body, testimonials, home_service}: HomePageData  = content;
+  const { author, bio, services } = content
+  const testimonials = toTestimonialViews(content.testimonials)
+
+  const introAuthor: IntroAuthor | undefined = author
+    ? {
+        firstName: author.firstName ?? undefined,
+        lastName: author.lastName ?? undefined,
+        jobTitle: author.jobTitle ?? undefined,
+        location: author.location ?? undefined,
+        email: stegaClean(author.email) ?? undefined,
+        github: stegaClean(author.github) ?? undefined,
+        image: hasAsset(author.image)
+          ? {
+              url: imageUrl(author.image, AUTHOR_IMAGE_WIDTH),
+              alt: stegaClean(author.image.alt) ?? '',
+              ...scaledDimensions(author.image, AUTHOR_IMAGE_WIDTH),
+            }
+          : undefined,
+      }
+    : undefined
 
   return (
     <div className={styles.body}>
       <DesktopIntro
-        //@ts-ignore
-        blog_authors={blog_authors && blog_authors}
-        bio={body}
+        author={introAuthor}
+        bio={<PortableTextBody value={bio} />}
       />
       <Testimonial
         title="What People Have To Say,"
-        testimonial={testimonials[0]?.testimonial}
+        testimonial={testimonials[0]}
         all={testimonials}
       />
 
@@ -168,7 +108,7 @@ export default async function Home(
       >
         Brands I have worked with
       </h2> */}
-      <Services services={home_service as ServiceObj[]}  project_audience={FocusModes.Developer}/>
+      <Services services={services ?? []} />
       <PortfolioPreview project_audience={FocusModes.Developer}/>
       <PersonalPortfolioPreview project_audience={FocusModes.Developer} />
       {/* <Meetup /> */}

@@ -20,6 +20,23 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
 
+## Content (Sanity)
+
+All content comes from Sanity (project `j3vdh6ti`). The Studio lives in [`studio/`](studio) and is
+deployed at <https://cjoshmartin.sanity.studio> (`/admin` redirects there). The app needs these
+environment variables (put them in `.env.local` for local development):
+
+| Variable | Value |
+|---|---|
+| `NEXT_PUBLIC_SANITY_PROJECT_ID` | `j3vdh6ti` |
+| `NEXT_PUBLIC_SANITY_DATASET` | `production` (or `staging`) |
+| `NEXT_PUBLIC_SANITY_STUDIO_URL` | `https://cjoshmartin.sanity.studio` |
+| `SANITY_API_READ_TOKEN` | a Sanity API token with the Viewer role (server only; used for Draft Mode and Visual Editing) |
+
+Queries live in `sanity/lib/queries.ts`. After changing a query or the Studio schema, run
+`npm run typegen` (it runs the Studio's TypeGen and rewrites `sanity.types.ts`). Redirect documents
+are read from Sanity when the app is built, so a new redirect needs a redeploy.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

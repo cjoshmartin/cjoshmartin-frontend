@@ -1,43 +1,23 @@
 'use client'
 
-import { PageTypes } from "@/app/PageTypes";
-import { ProjectType } from "@/app/components/PortfolioPreview/ProjectType";
 import { useEffect, useState } from "react"
 import styles from './ProjectShower.module.css'
-import Testimonial from "@/app/components/Testimonial";
+import Testimonial, { type TestimonialView } from "@/app/components/Testimonial";
 import ShowImage from "@/app/blog/_compoents/ShowImage/ShowImage";
 
 import { motion } from "framer-motion";
-import { FromAPI } from "@/app/components/Testimonial/Testimonial";
 
-interface Meta {
-    type: PageTypes,
-    slug: string,
-    seo_title: string,
-    first_published_at: string,
-    parent: any,
-}
-
-interface ImageShape {
-    url: string,
-    title: string,
-    width: number,
-    height: number
-}
-
+/** A project on /screen, prepared on the server. */
 export interface Project {
-    meta: Meta,
+    key: string,
     title: string,
-    body?: any[],
-    date: string, 
-    intro: string, 
-    content_image?: ImageShape,
-    preview_image?: ImageShape,
-    project_type: ProjectType
-    client: string,
+    /** The title without stega characters, for the image's alt attribute. */
+    imageAlt: string,
+    previewImageUrl?: string,
     medium: string[],
     technologies: string[],
-    testimonials?: FromAPI[],
+    /** The project's first testimonial. */
+    testimonial?: TestimonialView,
 }
 
 interface ProjectShowerProps {
@@ -103,16 +83,15 @@ export default function ProjectShower(props: ProjectShowerProps) {
         </div>
 
       <ShowImage 
-        url={currentProject?.preview_image?.url}
+        url={currentProject?.previewImageUrl}
         className={styles.placeHolderImage}
-        alt={currentProject?.title}
+        alt={currentProject?.imageAlt}
         width={150}
         height={150}
       />
-        {currentProject?.testimonials &&
-          currentProject?.testimonials.length > 0 && (
+        {currentProject?.testimonial && (
             <Testimonial
-              testimonial={currentProject?.testimonials[0]?.testimonial}
+              testimonial={currentProject.testimonial}
               shouldHideImage={true}
             />
           )}

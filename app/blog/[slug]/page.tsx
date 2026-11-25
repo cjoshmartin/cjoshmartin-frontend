@@ -1,60 +1,55 @@
-import { JSDOM } from 'jsdom';
-import { unstable_cache } from 'next/cache';
-
 import seo from '@/app/components/SEO'
 
 import styles from './blogpost.module.css'
 import moment from "moment"
-import HtmlGenerator from "@/app/components/HtmlGenerator/HtmlGenerator"
 import Comments from "./Comments"
 import { GoBackLink } from "./GoBackLink/GoBackLink"
-import { Metadata, ResolvingMetadata } from "next"
-import { getFromSlug, getPreviewContent } from "@/app/components/api/pages"
+import { Metadata } from "next"
+import { notFound } from 'next/navigation'
+import { stegaClean } from '@sanity/client/stega'
 import { AuthorInfo } from './AuthorInfo/AuthorInfo'
 import HeaderGenerator from '@/app/components/HeaderGenerator'
-import { useMemo } from 'react'
 import { CalculateReadTime } from '@/app/components/CalculateReadTime/CalculateReadTime'
 import RecommendatedPost from '@/app/components/RecommendatedPost/RecommendatedPost'
+import PortableTextBody from '@/app/components/PortableTextBody/PortableTextBody'
+import UnlistedBanner from '@/app/components/UnlistedBanner/UnlistedBanner'
+import { getHeadings, readingMinutes, readingSourceFromBody, type Heading } from '@/lib/portableText'
+import { sanityFetch } from '@/sanity/lib/live'
+import { BLOG_POST_QUERY, BLOG_POST_SEO_QUERY } from '@/sanity/lib/queries'
+import { hasAsset, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH, ogImageUrl } from '@/sanity/lib/image'
 
-async function getPage(slug: string, searchParams: any){
-  if(slug === 'preview'){
-    return await getPreviewContent(searchParams)
-  }
-    const content =  await getFromSlug(slug);
-    const {blog_authors} = content;
-
-    return {
-      ...content,
-      author: blog_authors[0].author
-    };
+type Props = {
+  params: Promise<{
+    slug: string;
+  }>;
 }
 
-export async function generateMetadata(props: any, parent: ResolvingMetadata): Promise<Metadata> {
-  const searchParams = await props.searchParams;
+export async function generateMetadata(props: Props): Promise<Metadata> {
   const params = await props.params;
 
-  const content = await getPage(params.slug, searchParams);
-  const {meta} = content
-  let title =  content.title;
-  if (meta?.seo_title && meta?.seo_title.length > 0){
-    title = meta?.seo_title;
+  const { data: content } = await sanityFetch({
+    query: BLOG_POST_SEO_QUERY,
+    params: { slug: params.slug },
+    stega: false,
+  })
+
+  if (!content) {
+    notFound()
   }
+
+  const title = content.seo?.title || content.title || ''
   const fullTitle = `${title} - Blog - ${seo.sitename}`;
 
-  let description = content.intro;
-  if (meta?.seo_title && meta.seo_title.length > 0) {
-    description = meta.seo_title
-  }
+  // The SEO description, falling back to the intro (never the SEO title).
+  const description = content.seo?.description || content.intro || undefined
 
+  const image = [content.heroImage, content.contentImage].find(hasAsset)
 
-  const {content_visuals} = content;
-  const  {type, value} = content_visuals.length > 0 ? content_visuals[0] : {type: "", value: undefined};
   return {
     description,
     title: fullTitle,
     authors: [{name: "Josh Martin"}],
     publisher: "cjoshmartin.com",
-    keywords: content.technologies,
     alternates: {
       canonical: `https://cjoshmartin.com/blog/${params.slug}`,
     },
@@ -63,18 +58,16 @@ export async function generateMetadata(props: any, parent: ResolvingMetadata): P
       siteName: seo.sitename,
       description: description,
       type: "article",
-      publishedTime: content.date,
-      images:
-        (type == "image" ? value?.url : undefined) ||
-        content.content_image?.url ||
-        content.preview_image?.url ||
-        seo.defaultImg,
+      publishedTime: content.date ?? undefined,
+      images: image
+        ? { url: ogImageUrl(image), width: OG_IMAGE_WIDTH, height: OG_IMAGE_HEIGHT }
+        : seo.defaultImg,
     },
   };
 }
 
 
-function OutlineGenerator({content}: {content: any}){
+function OutlineGenerator({content}: {content: Heading[]}){
   if(content.length < 1){
     return null;
   }
@@ -85,7 +78,7 @@ function OutlineGenerator({content}: {content: any}){
     className={styles.outlineContainer}
     >
         <ul className={styles.outlineList}>
-        {content.map(({id, title, size}: any) => (
+        {content.map(({id, title, level: size}) => (
           <li key={id} style={{ marginLeft: `${(size - 1) * 20}px` }}>
             <a href={`#${id}`}>{title}</a>
           </li>
@@ -96,59 +89,22 @@ function OutlineGenerator({content}: {content: any}){
 }
 
 
-const getOutlineHeaders = unstable_cache(
-  async (slug: string, body: any) => {
-    return body.filter(({type, value, id}: any) => {
-        // const headers = value.match(/<h[1-6]>.*<\/h[1-6]>/g);
-        return(type === "full_richtext")
-      })
-      .reduce((acc: any, {value}: any) => {
-        const {window} = new JSDOM(value);
-        const {document} = window;
-        const headers = document.querySelectorAll('h1, h2, h3, h4, h5, h6');
-        //get value of each header and get header size h1, h2, h3, h4, h5, h6
-        const headersWithSize = Array.from(headers).map(
-          (header: any, index: number) => {
-            const title = header.textContent;
-            const sanitizedText = title
-              .toLowerCase()
-              .replace(/[^a-z0-9\s-]/g, "") // Remove special characters
-              .replace(/\s+/g, "-") // Replace spaces with hyphens
-              .trim();
 
-            const id = sanitizedText || `header-${index + 1}`;
-
-            return {
-              title: title,
-              id: id,
-              size: parseInt(header.tagName.toLowerCase().split("h")[1]),
-            };
-          }
-        );
-        return acc.concat(headersWithSize)
-      }, []);
-  },
-  ['blog-outline-headers'],
-  { revalidate: 3600 }
-);
-
-
-
-export default async function Page(
-  props: {
-    params: Promise<{
-      slug: string;
-    }>;
-    searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
-  }
-) {
-  const searchParams = await props.searchParams;
+export default async function Page(props: Props) {
   const params = await props.params;
-  const { title, body, date, id, author, content_visuals, content_image, technologies } =
-    await getPage(params.slug, searchParams);
+  const { data: post } = await sanityFetch({
+    query: BLOG_POST_QUERY,
+    params: { slug: params.slug },
+  })
 
+  if (!post) {
+    notFound()
+  }
 
-  const content = await getOutlineHeaders(params.slug, body);
+  const { _id, title, body, date, legacyId, author, heroMedia, contentImage, isUnlisted } = post;
+
+  // The outline and the rendered headings use the same ids (lib/portableText.ts).
+  const content = getHeadings(body);
   return (
     <div
     className={styles.outerContainer}
@@ -156,19 +112,20 @@ export default async function Page(
       {/* generate clickaable links that jump to headers in this blog post */}
       <OutlineGenerator content={content} />
       <div className={`${styles.container} ${content.length > 0 ? styles.withOutline : ''}`}>
+        {isUnlisted && <UnlistedBanner />}
         <HeaderGenerator
           className={styles.headerImage}
-          content_visuals={content_visuals}
-          content_image={content_image}
+          heroMedia={heroMedia}
+          contentImage={contentImage}
         />
         <div className={styles.contentArea}>
           <h2>{title}</h2>
           <div className={styles.readTime}>
-            <small>{moment(date).format("MMMM DD, YYYY")}</small>
-            <CalculateReadTime body={body} />
+            <small>{moment(stegaClean(date) ?? undefined).format("MMMM DD, YYYY")}</small>
+            <CalculateReadTime minutes={readingMinutes(readingSourceFromBody(body))} />
           </div>
           <div className={styles.content}>
-            <HtmlGenerator body={body} />
+            <PortableTextBody value={body} />
           </div>
           <hr
             style={{
@@ -176,17 +133,19 @@ export default async function Page(
               marginBottom: "1rem",
             }}
           />
-          <AuthorInfo {...author} slug={params.slug} />
+          {author && <AuthorInfo author={author} />}
           <hr
             style={{
               marginTop: "2rem",
               marginBottom: "1rem",
             }}
           />
-          <RecommendatedPost slug={params.slug} tags={technologies} />
-          {params.slug !== "preview" && (
-            <Comments slug={params.slug} id={id} title={title} />
-          )}
+          <RecommendatedPost slug={params.slug} />
+          <Comments
+            slug={params.slug}
+            identifier={legacyId != null ? String(legacyId) : _id}
+            title={stegaClean(title) ?? ''}
+          />
         </div>
       </div>
     </div>

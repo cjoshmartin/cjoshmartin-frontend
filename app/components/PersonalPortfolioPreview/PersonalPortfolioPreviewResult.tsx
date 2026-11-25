@@ -1,8 +1,8 @@
-import { ProjectItem } from "../PortfolioPreview/ProjectItem";
+import { ProjectItem, type ProjectItemProps } from "../PortfolioPreview/ProjectItem";
 import styles from './PersonalPortfolioPreview.module.css'
 import ActionButton from '../PortfolioPreview/ActionButton';
 
-export function PersonalPortfolioPreviewResult({projects}: {projects: any[]}){
+export function PersonalPortfolioPreviewResult({projects}: {projects: ProjectItemProps[]}){
 
     if(projects.length < 1){
       return null;
@@ -19,24 +19,9 @@ export function PersonalPortfolioPreviewResult({projects}: {projects: any[]}){
         </div>
         <br />
         <div className={styles.profileContainer}>
-          {projects
-            .filter(
-              (project: any) =>
-                !project.is_unlisted 
-            )
-          .slice(0, 3)
-          .map((project: any, i: number) => (
-            <ProjectItem
-              key={project.title}
-              previewImage={project?.preview_image?.url}
-              projectName={project.title}
-              client={project.client}
-              media={project.medium}
-              technologies={project.technologies}
-              slug={project.meta.slug}
-              website={project.website}
-              body={project.body}
-            />
+          {/* Unlisted projects are excluded and the list is limited to 3 by PORTFOLIO_PREVIEW_QUERY. */}
+          {projects.map((project) => (
+            <ProjectItem key={project.slug ?? project.projectName} {...project} />
           ))}
         </div>
         <ActionButton
