@@ -23,6 +23,11 @@ package's control:
 > minutes each month are free. That's well inside the $20 monthly credit that comes with Pay as
 > you go. Then run `npm run migrate -- --dataset staging`. The 10 existing assets are reused by
 > passthrough, the other 19 are created, and validation must pass before the production import.
+>
+> **Updated by the round-1 review fixes ([fixes.md](fixes.md)):** once the Studio is in use, a
+> full rerun would overwrite editors' changes, so the import now refuses when migration documents
+> changed since it last wrote them. Add the videos with the narrow `videos` step instead:
+> `npm run migrate -- --dataset <name> --steps mux,videos` (see "Still open" below).
 
 ## How to run
 
@@ -339,13 +344,16 @@ generated `sanity.imageMetadata` type. I left staging as it is rather than strip
 
    ```sh
    cd migration/wagtail-to-sanity
-   npm run migrate -- --dataset staging                           # creates the 19 Mux assets; must pass 12/12
-   npm run migrate -- --dataset production --confirm-production   # reuses them by passthrough; must pass 12/12
-   npm run compare -- --datasets staging,production
+   npm run migrate -- --dataset staging --steps mux,videos                           # creates the 19 Mux assets and their documents
+   npm run migrate -- --dataset production --confirm-production --steps mux,videos   # reuses the assets by passthrough
    ```
 
    Neither command passes `--allow-pending-videos`, so each one fails if any video is still
-   pending.
+   pending. The `videos` step only creates the missing `mux-video-<id>` documents and leaves
+   every other document as it is, so it is safe after Studio edits. It checks that every video
+   block then resolves. (This replaces the full `npm run migrate` rerun this section first gave,
+   which would have overwritten Studio edits; see [fixes.md](fixes.md).) The bucket must stay
+   public until this is done: `scripts/decommission/04-gcs-lockdown.sh` refuses to run before.
 2. **The `secrets.mux` document** is absent in both datasets. The Mux token still has to be saved
    once per dataset in the Studio's Videos tool (manual test 30). The migration never writes
    that document.
