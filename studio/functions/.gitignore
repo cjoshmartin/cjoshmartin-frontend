@@ -1,0 +1,4 @@
+# Sanity Functions: per-function installs, local env files and build output
+**/node_modules/
+**/.build/
+**/.env*

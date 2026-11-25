@@ -1,0 +1,28 @@
+{
+  "name": "testimonial-ascii-art",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Sanity Function that renders a testimonial photo as colored ASCII art (exact port of ascii-magic 2.3.0 to_html).",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "index.ts",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@sanity/client": "^8.17.0",
+    "@sanity/functions": "^1.11.1",
+    "pngjs": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.4",
+    "@types/pngjs": "^6.0.5",
+    "groq-js": "^2.0.3",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0"
+  }
+}
