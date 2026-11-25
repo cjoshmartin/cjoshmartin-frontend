@@ -143,7 +143,8 @@ async function main() {
 
   const workDir = await mkdtemp(path.join(args['work-dir'] ?? os.tmpdir(), 'sanity-restore-'))
   const tarballPath = path.resolve(args.output ?? path.join(workDir, `snapshot-${timestamp}.tar.gz`))
-  let keepWorkDir = args['keep-work-dir'] || buildOnly
+  // --build-only without --output leaves the tarball inside the work directory, so keep it.
+  let keepWorkDir = args['keep-work-dir'] || (buildOnly && !args.output)
   try {
     const archive = await buildRestoreArchive({
       storage,

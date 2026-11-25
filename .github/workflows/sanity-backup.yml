@@ -1,0 +1,104 @@
+# Weekly backup of the Sanity dataset to the private GCS bucket.
+# Design: docs/sanity-migration-plan.md §10 and scripts/backup/README.md.
+name: Sanity backup
+
+on:
+  schedule:
+    # Sundays 09:00 UTC.
+    - cron: '0 9 * * 0'
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: Sanity dataset to back up
+        type: choice
+        options:
+          - production
+          - staging
+        default: production
+      dry_run:
+        description: Fingerprint and compare only; write nothing to the bucket
+        type: boolean
+        default: false
+
+# Nothing by default; each job asks for what it needs.
+permissions: {}
+
+concurrency:
+  # Never run two backups of the same dataset at once. Queued runs wait.
+  group: sanity-backup-${{ inputs.dataset || 'production' }}
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Back up ${{ inputs.dataset || 'production' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      # Lets google-github-actions/auth request a GitHub OIDC token for
+      # Workload Identity Federation. No Google key is stored anywhere.
+      id-token: write
+    defaults:
+      run:
+        working-directory: scripts/backup
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: scripts/backup/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_BACKUP_SERVICE_ACCOUNT }}
+
+      - name: Back up Sanity
+        env:
+          SANITY_PROJECT_ID: ${{ vars.SANITY_PROJECT_ID }}
+          SANITY_READ_TOKEN: ${{ secrets.SANITY_BACKUP_TOKEN }}
+          MUX_TOKEN_ID: ${{ secrets.MUX_TOKEN_ID }}
+          MUX_TOKEN_SECRET: ${{ secrets.MUX_TOKEN_SECRET }}
+          BACKUP_BUCKET: ${{ vars.BACKUP_BUCKET }}
+          DATASET: ${{ inputs.dataset || 'production' }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+        run: |
+          args=(--dataset "$DATASET" --target gcs --bucket "$BACKUP_BUCKET")
+          if [ "$DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          node backup.mjs "${args[@]}"
+
+  # GitHub disables scheduled workflows in a public repository after 60 days
+  # without repository activity, and a scheduled run does not count as
+  # activity. Re-enabling the workflow through the REST API on every run
+  # resets that timer without making commits. It runs even when the backup
+  # job fails, so a broken backup still keeps its schedule (and keeps
+  # emailing failures) instead of going silent.
+  keepalive:
+    name: Keep the schedule enabled
+    needs: backup
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Re-enable this workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: gh api --method PUT "repos/$REPOSITORY/actions/workflows/sanity-backup.yml/enable"
