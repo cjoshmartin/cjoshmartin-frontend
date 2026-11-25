@@ -17,11 +17,14 @@ import {
   compareWithSnapshot,
   loadSnapshot,
   needsAllowAssetsInDifferentDataset,
+  planAssetMetadataPatches,
   planExactDeletions,
   prepareImportDocuments,
   resolveSnapshot,
+  restorableAssetFields,
   rewriteAssetReferences,
 } from '../lib/restore.mjs'
+import {deleteDocuments, patchDocuments} from '../lib/sanity-mutate.mjs'
 import {
   buildDataset,
   DATASET,
@@ -229,7 +232,13 @@ test('verification ignores _rev and _updatedAt and reports real differences', ()
   const restored = documents
     .filter((doc) => !doc._id.startsWith('_.groups.') && !doc._id.startsWith('_.retention.'))
     .map((doc) => ({...doc, _rev: 'new-rev', _updatedAt: '2027-01-01T00:00:00Z'}))
-  assert.deepEqual(compareWithSnapshot({documents, prepared, targetDocuments: restored}), {missing: [], changed: [], missingAssets: [], extra: []})
+  assert.deepEqual(compareWithSnapshot({documents, prepared, targetDocuments: restored}), {
+    missing: [],
+    changed: [],
+    missingAssets: [],
+    extra: [],
+    createdAtDiffers: [],
+  })
 
   const broken = restored
     .filter((doc) => doc._id !== 'person-1')
@@ -239,6 +248,66 @@ test('verification ignores _rev and _updatedAt and reports real differences', ()
   assert.deepEqual(result.missing, ['person-1'])
   assert.deepEqual(result.changed, [{id: 'blogPost-7', path: 'title'}])
   assert.deepEqual(result.extra, ['service-1'])
+})
+
+test('verification reports _createdAt separately and compares asset documents on their restorable fields', () => {
+  const {documents, assets} = buildDataset()
+  const prepared = prepareImportDocuments(documents)
+  const inTarget = documents.filter((doc) => !doc._id.startsWith('_.groups.') && !doc._id.startsWith('_.retention.'))
+  // What a real import into another dataset looks like: documents that
+  // already existed keep their own _createdAt, and asset documents have that
+  // dataset's url, path and uploadId.
+  const restored = inTarget.map((doc) => {
+    if (doc._id === 'blogPost-7') return {...doc, _createdAt: '2026-01-01T00:00:00Z'}
+    if (doc._type === 'sanity.imageAsset' || doc._type === 'sanity.fileAsset') {
+      return {...doc, url: doc.url.replace('/production/', '/staging/'), path: doc.path.replace('/production/', '/staging/'), uploadId: 'other-upload'}
+    }
+    return doc
+  })
+  const result = compareWithSnapshot({documents, prepared, targetDocuments: restored})
+  assert.deepEqual(result.changed, [])
+  assert.deepEqual(result.createdAtDiffers, ['blogPost-7'])
+
+  // A reused asset whose metadata or user fields differ is a real difference.
+  const withStaleAsset = restored.map((doc) =>
+    doc._id === assets.hero._id ? {...doc, metadata: {...doc.metadata, thumbHash: 'abc'}, title: 'Added later'} : doc,
+  )
+  assert.deepEqual(compareWithSnapshot({documents, prepared, targetDocuments: withStaleAsset}).changed, [{id: assets.hero._id, path: 'metadata.thumbHash'}])
+})
+
+test('asset metadata patches set differing restorable fields and unset ones the snapshot lacks', () => {
+  const {documents, assets} = buildDataset()
+  const prepared = prepareImportDocuments(documents)
+  const stale = {
+    ...assets.hero,
+    _rev: 'other',
+    _createdAt: '2026-01-01T00:00:00Z',
+    uploadId: 'other-upload',
+    url: assets.hero.url.replace('/production/', '/staging/'),
+    path: assets.hero.path.replace('/production/', '/staging/'),
+    metadata: {...assets.hero.metadata, thumbHash: 'abc'},
+    originalFilename: 'renamed.jpg',
+    title: 'Added later',
+  }
+  // The same content under the same sha1 but another id is matched too.
+  const sameContentOtherId = {...assets.avatar, _id: `image-${assets.avatar.sha1hash}-8x6-png`, source: {name: 'unsplash', id: 'x'}}
+  const targetDocuments = [
+    ...documents.filter((doc) => ![assets.hero._id, assets.avatar._id].includes(doc._id)),
+    stale,
+    sameContentOtherId,
+  ]
+  assert.deepEqual(planAssetMetadataPatches({prepared, targetDocuments}), [
+    {
+      id: assets.hero._id,
+      set: {metadata: assets.hero.metadata, originalFilename: assets.hero.originalFilename},
+      unset: ['title'],
+    },
+    {id: sameContentOtherId._id, set: {}, unset: ['source']},
+  ])
+  // Nothing to do when the target already matches, whatever url, path, uploadId, _rev or dates say.
+  const matching = documents.map((doc) => (doc._type === 'sanity.imageAsset' ? {...doc, uploadId: 'x', _rev: 'y', url: 'https://cdn.sanity.io/images/p/staging/a.png'} : doc))
+  assert.deepEqual(planAssetMetadataPatches({prepared, targetDocuments: matching}), [])
+  assert.deepEqual(restorableAssetFields(assets.stl), {originalFilename: 'model.stl'})
 })
 
 test('--allow-assets-in-different-dataset is only needed for leftover asset documents from elsewhere', () => {
@@ -261,6 +330,54 @@ test('restore.mjs refuses --exact against production without --i-understand-prod
   ], {encoding: 'utf8', env: {...process.env, SANITY_WRITE_TOKEN: 'not-used'}})
   assert.equal(run.status, 1)
   assert.match(run.stderr, /Refusing to run it against "production" without --i-understand-production/)
+})
+
+test('restore.mjs refuses --replace without SANITY_WRITE_TOKEN', async (t) => {
+  const dir = await makeTempDir(t)
+  const env = {...process.env}
+  delete env.SANITY_WRITE_TOKEN
+  const run = spawnSync(process.execPath, [
+    path.join(here, '..', 'restore.mjs'),
+    '--latest',
+    '--source', 'local',
+    '--local-dir', dir,
+    '--dataset', 'staging',
+    '--project', 'abc123',
+    '--replace',
+  ], {encoding: 'utf8', env})
+  assert.equal(run.status, 1)
+  assert.match(run.stderr, /--replace, --exact and --verify need SANITY_WRITE_TOKEN/)
+})
+
+test('deletes and asset metadata patches go to the Mutate API in batches', async () => {
+  const requests = []
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body)
+    requests.push({url, body, authorization: init.headers.Authorization})
+    return new Response(JSON.stringify({results: body.mutations.map((mutation) => ({id: (mutation.delete ?? mutation.patch).id}))}))
+  }
+  const deleted = await deleteDocuments({projectId: 'abc123', dataset: 'staging', token: 'tok', ids: ['a', 'b', 'c'], fetchImpl, batchSize: 2})
+  assert.equal(deleted, 3)
+  assert.deepEqual(requests.map((request) => request.body.mutations), [[{delete: {id: 'a'}}, {delete: {id: 'b'}}], [{delete: {id: 'c'}}]])
+  assert.match(requests[0].url, /^https:\/\/abc123\.api\.sanity\.io\/v2025-02-19\/data\/mutate\/staging\?returnIds=true&visibility=sync&tag=sanity\.restore\.exact$/)
+  assert.equal(requests[0].authorization, 'Bearer tok')
+
+  requests.length = 0
+  const patched = await patchDocuments({
+    projectId: 'abc123',
+    dataset: 'staging',
+    token: 'tok',
+    patches: [{id: 'image-1', set: {metadata: {lqip: 'x'}}, unset: ['title']}, {id: 'file-2', set: {}, unset: ['source']}],
+    fetchImpl,
+  })
+  assert.equal(patched, 2)
+  assert.deepEqual(requests[0].body.mutations, [
+    {patch: {id: 'image-1', set: {metadata: {lqip: 'x'}}, unset: ['title']}},
+    {patch: {id: 'file-2', unset: ['source']}},
+  ])
+  assert.match(requests[0].url, /tag=sanity\.restore\.asset-metadata$/)
+  await assert.rejects(patchDocuments({projectId: 'abc123', dataset: 'staging', token: 'tok', patches: [{id: 'x', set: {}, unset: []}], fetchImpl}), /neither sets nor unsets/)
+  await assert.rejects(deleteDocuments({projectId: 'abc123', dataset: 'staging', token: '', ids: ['a'], fetchImpl}), /SANITY_WRITE_TOKEN/)
 })
 
 test('restore.mjs --build-only writes a tarball from a local backup without touching Sanity', async (t) => {

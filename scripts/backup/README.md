@@ -41,7 +41,7 @@ A run that dies midway leaves stored assets in place, because they are content-a
 
 ### What counts as a change
 
-Any document, draft, release version, asset, or system document that is added, edited, or deleted changes some `_id:_rev` pair, so it triggers a snapshot. That includes a Studio schema deploy (`_.schemas.*`). Reordering does not trigger one: the fingerprint is order-independent.
+Any document, draft, release version, asset, or system document that is added, edited, or deleted changes some `_id:_rev` pair, so it triggers a snapshot. That includes a Studio schema deploy (`_.schemas.*`). Reordering does not trigger one: the fingerprint is order-independent. A restore rewrites every imported document with a new `_rev`, so the first backup after a restore always writes a new snapshot, even when the content is the same. It uploads no assets again.
 
 ### What a snapshot contains
 
@@ -100,6 +100,7 @@ Run the tests with `npm test`. They cover:
 - Mux polling and timeouts
 - the GCS adapter's create-only preconditions
 - the restore NDJSON rewriting and tarball layout
+- the asset metadata patches, `--verify` (including `_createdAt`), and the Mutate API calls behind `--exact`
 
 They also include a contract test that feeds the restore tarball to `@sanity/import`, the library behind `sanity datasets import`, and checks that the backed-up documents come back unchanged.
 
@@ -111,6 +112,7 @@ They also include a contract test that feeds the restore tarball to `@sanity/imp
 
 - documents and assets created after the snapshot remain (use `--exact` to remove them)
 - document history is not restored, and `_rev` and `_updatedAt` get new values
+- `_createdAt` is only partly restored. Documents the import creates get the snapshot's value, documents that already exist in the target keep their own, and a re-created release definition gets the time of the import. The site does not read `_createdAt`.
 - Sanity-managed system documents (`_.groups.*` roles, `_.retention.*`, `_.schemas.*`) are not restored
 - Studio, schema, CORS origins, tokens, webhooks, and Functions are not in the dataset at all
 - release definitions (`_.releases.*`) and their versions are restored through Sanity's release import action
@@ -125,9 +127,16 @@ What `restore.mjs` does:
    - Sanity-managed system documents are left out. Release definitions are kept.
    - Everything else is kept as is, including drafts, release versions, and `mux.videoAsset` documents.
    - `--allow-assets-in-different-dataset` is passed only when the import file still holds asset documents of another type whose URL points at a different project or dataset. Image and file assets are never kept as documents, so with today's content it is never needed.
-4. It runs `npx --yes sanity@latest datasets import <tarball> --project <id> --dataset <target> [--replace]` with `SANITY_AUTH_TOKEN` set to `SANITY_WRITE_TOKEN` (or uses your `sanity login` session when that variable is unset).
-5. `--exact` (which implies `--replace`) then deletes target documents that are not in the snapshot: other documents first, then other assets. System documents are never deleted; a release that is not in the snapshot is reported so you can archive it in the Studio. The deletes run *after* the import rather than before. A document that is in the snapshot may still hold a strong reference to a newer document or asset, and the import has to replace it first, or Sanity would refuse the delete. `--exact` refuses to touch `production` unless you also pass `--i-understand-production`.
-6. `--verify` exports the target and compares it with the snapshot: every document field by field (ignoring only `_rev` and `_updatedAt`), every asset by id or sha1, and extra documents (which fail only with `--exact`). It exits non-zero on any difference and keeps the work directory.
+4. It runs `npx --yes sanity@latest datasets import <tarball> --project <id> --dataset <target> [--replace]` with `SANITY_AUTH_TOKEN` set to `SANITY_WRITE_TOKEN`. `--replace`, `--exact` and `--verify` need that token. Only a plain import into an empty dataset can run without it, on your `sanity login` session.
+5. With `--replace` (and so with `--exact`) it then restores asset metadata.
+   - **Why.** The import only applies `assets.json` to binaries it uploads. When the target already has an asset with the same content, the import reuses that asset document as it is, so the target keeps its own metadata. On 2026-11-26, 15 image assets in `staging` had a `metadata.thumbHash` that `production` lacked, and the plain import left them that way.
+   - **What it does.** It compares every snapshot asset with the target asset of the same id or sha1. For each one that differs, it sets the differing top-level fields to the snapshot's values and unsets the fields the snapshot doesn't have.
+   - **Fields it never touches.** `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt`, `assetId`, `extension`, `mimeType`, `path`, `url`, `sha1hash`, `size`, `uploadId`. The asset service derives these from the stored blob, its location, or the upload. `@sanity/import` refuses to replay `uploadId`, because doing so makes the asset impossible to delete.
+6. `--exact` (which implies `--replace`) then deletes target documents that are not in the snapshot: other documents first, then other assets. System documents are never deleted; a release that is not in the snapshot is reported so you can archive it in the Studio. The deletes run *after* the import rather than before. A document that is in the snapshot may still hold a strong reference to a newer document or asset, and the import has to replace it first, or Sanity would refuse the delete. `--exact` refuses to touch `production` unless you also pass `--i-understand-production`.
+7. `--verify` exports the target and compares it with the snapshot. It exits non-zero on any difference and keeps the work directory. It checks:
+   - every document, field by field, ignoring `_rev`, `_updatedAt` and `_createdAt`; it prints how many `_createdAt` values differ
+   - every asset: it must exist under the snapshot's id or sha1, and its restorable fields must match (the fields listed in step 5 are left out)
+   - extra documents, which fail only with `--exact`
 
 If `MUX_TOKEN_ID` / `MUX_TOKEN_SECRET` are set, it also checks that every Mux asset in the snapshot still exists in Mux.
 

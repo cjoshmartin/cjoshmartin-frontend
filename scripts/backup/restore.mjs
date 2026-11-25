@@ -12,11 +12,12 @@ import {
   buildRestoreArchive,
   compareWithSnapshot,
   needsAllowAssetsInDifferentDataset,
+  planAssetMetadataPatches,
   planExactDeletions,
   resolveSnapshot,
 } from './lib/restore.mjs'
 import {assertDatasetName, assertProjectId, exportDataset} from './lib/sanity-export.mjs'
-import {deleteDocuments} from './lib/sanity-mutate.mjs'
+import {deleteDocuments, patchDocuments} from './lib/sanity-mutate.mjs'
 import {createStorage} from './lib/storage/index.mjs'
 import {formatBytes} from './lib/util.mjs'
 
@@ -35,7 +36,8 @@ Source:
 Target and import:
   --dataset <name>             Dataset to import into (required unless --build-only)
   --project <id>               Target project (default: $SANITY_PROJECT_ID)
-  --replace                    Replace documents that already exist (sanity datasets import --replace)
+  --replace                    Replace documents that already exist (sanity datasets import --replace),
+                               then restore the metadata of asset documents the import reused
   --exact                      After importing, delete target documents that are not in the snapshot
                                (implies --replace; never touches _.* system documents)
   --i-understand-production    Required for --exact when the target dataset is "production"
@@ -54,7 +56,8 @@ Archive:
 Environment:
   SANITY_PROJECT_ID            Default for --project
   SANITY_WRITE_TOKEN           Editor token. Passed to the CLI as SANITY_AUTH_TOKEN; required for
-                               --exact and --verify. Without it the import uses your \`sanity login\` session.
+                               --replace, --exact and --verify. Without it a plain import uses
+                               your \`sanity login\` session.
   BACKUP_BUCKET                Default for --bucket
   MUX_TOKEN_ID, MUX_TOKEN_SECRET
                                Optional: check that every Mux asset in the snapshot still exists
@@ -133,8 +136,8 @@ async function main() {
     }
   }
   const token = process.env.SANITY_WRITE_TOKEN
-  if ((args.exact || args.verify) && !token) throw new UsageError('--exact and --verify need SANITY_WRITE_TOKEN (Editor role)')
   const replace = args.replace || args.exact
+  if ((replace || args.verify) && !token) throw new UsageError('--replace, --exact and --verify need SANITY_WRITE_TOKEN (Editor role)')
   const concurrency = parsePositiveInteger(args.concurrency, '--concurrency') ?? 4
 
   const storage = await createStorage({kind: args.source, bucket: args.bucket ?? process.env.BACKUP_BUCKET, localDir: args['local-dir']})
@@ -186,6 +189,16 @@ async function main() {
     log.info(`Running: npx ${cliArgs.join(' ')}`)
     await runCommand('npx', cliArgs, {env})
 
+    if (replace) {
+      const targetDocuments = await exportDataset({projectId, dataset: args.dataset, token})
+      const patches = planAssetMetadataPatches({prepared, targetDocuments})
+      log.info(`Asset metadata: ${patches.length} of ${prepared.assetDocuments.length} asset documents in the target differ from the snapshot`)
+      for (const {id, set, unset} of patches) {
+        log.info(`  ${id}: set ${Object.keys(set).join(', ') || '(nothing)'}; unset ${unset.join(', ') || '(nothing)'}`)
+      }
+      if (patches.length > 0) await patchDocuments({projectId, dataset: args.dataset, token, patches})
+    }
+
     if (args.exact) {
       const targetDocuments = await exportDataset({projectId, dataset: args.dataset, token})
       const plan = planExactDeletions({prepared, targetDocuments})
@@ -207,11 +220,18 @@ async function main() {
       for (const {id, path: fieldPath} of result.changed.slice(0, 20)) log.warn(`Differs from snapshot: ${id} at ${fieldPath}`)
       for (const id of result.missingAssets.slice(0, 20)) log.warn(`Asset missing in target: ${id}`)
       for (const id of result.extra.slice(0, 20)) (args.exact ? log.warn : log.info)(`Not in snapshot: ${id}`)
+      if (result.createdAtDiffers.length > 0) {
+        log.info(
+          `${result.createdAtDiffers.length} restored documents have another _createdAt than in the snapshot. ` +
+            'sanity datasets import --replace keeps the _createdAt of documents that already exist in the target, and a ' +
+            're-created release definition gets the time of the import. This is not counted as a difference.',
+        )
+      }
       if (problems > 0) {
         keepWorkDir = true
         throw new Error(`Verification failed with ${problems} problem(s); the work directory is kept at ${workDir}`)
       }
-      log.info('Verification passed: the target matches the snapshot (ignoring _rev and _updatedAt)')
+      log.info('Verification passed: the target matches the snapshot (ignoring _rev, _updatedAt and _createdAt, and the url, path and uploadId of assets)')
     }
     log.info(`Restore of ${timestamp} into ${projectId}/${args.dataset} finished (tarball ${formatBytes((await stat(tarballPath)).size)})`)
   } finally {
