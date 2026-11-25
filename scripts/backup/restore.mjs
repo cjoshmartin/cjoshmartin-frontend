@@ -1,0 +1,228 @@
+#!/usr/bin/env node
+// Restores a snapshot written by backup.mjs into a Sanity dataset with
+// `sanity datasets import`. See README.md ("Restore") before using it.
+import {spawn} from 'node:child_process'
+import {mkdtemp, rm, stat} from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+
+import {createLogger, parseCli, parsePositiveInteger, UsageError} from './lib/cli.mjs'
+import {MuxClient} from './lib/mux.mjs'
+import {
+  buildRestoreArchive,
+  compareWithSnapshot,
+  needsAllowAssetsInDifferentDataset,
+  planExactDeletions,
+  resolveSnapshot,
+} from './lib/restore.mjs'
+import {assertDatasetName, assertProjectId, exportDataset} from './lib/sanity-export.mjs'
+import {deleteDocuments} from './lib/sanity-mutate.mjs'
+import {createStorage} from './lib/storage/index.mjs'
+import {formatBytes} from './lib/util.mjs'
+
+const USAGE = `Usage: node restore.mjs (--snapshot <ts> | --latest) --dataset <target> --source gcs|local [options]
+
+Snapshot selection:
+  --snapshot <ts>              A completed snapshot, e.g. 20261129T090000Z
+  --latest                     The newest completed snapshot (newest marker name)
+  --from-dataset <name>        With --latest: only consider snapshots of this source dataset
+
+Source:
+  --source gcs|local           Where the backups are (required)
+  --bucket <name>              GCS bucket (default: $BACKUP_BUCKET)
+  --local-dir <dir>            Backup directory for --source local
+
+Target and import:
+  --dataset <name>             Dataset to import into (required unless --build-only)
+  --project <id>               Target project (default: $SANITY_PROJECT_ID)
+  --replace                    Replace documents that already exist (sanity datasets import --replace)
+  --exact                      After importing, delete target documents that are not in the snapshot
+                               (implies --replace; never touches _.* system documents)
+  --i-understand-production    Required for --exact when the target dataset is "production"
+  --verify                     After importing, compare the target with the snapshot and fail on differences
+  --allow-failing-assets       Let the import skip assets that are missing from the bucket
+  --sanity-cli <spec>          npm spec of the CLI to run with npx (default: sanity@latest)
+
+Archive:
+  --build-only                 Only build the import tarball; do not touch Sanity
+  --output <file.tar.gz>       Where to write the tarball (default: inside the work directory)
+  --work-dir <dir>             Parent of the temporary work directory (default: OS temp)
+  --keep-work-dir              Keep the work directory (and tarball) after an import
+  --concurrency <n>            Parallel asset downloads (default: 4)
+  -h, --help                   Show this help
+
+Environment:
+  SANITY_PROJECT_ID            Default for --project
+  SANITY_WRITE_TOKEN           Editor token. Passed to the CLI as SANITY_AUTH_TOKEN; required for
+                               --exact and --verify. Without it the import uses your \`sanity login\` session.
+  BACKUP_BUCKET                Default for --bucket
+  MUX_TOKEN_ID, MUX_TOKEN_SECRET
+                               Optional: check that every Mux asset in the snapshot still exists
+
+A restore is not a point-in-time reset: see README.md.`
+
+function runCommand(command, commandArgs, {env}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, commandArgs, {stdio: 'inherit', env})
+    child.on('error', reject)
+    child.on('close', (code, signal) => {
+      if (code === 0) resolve()
+      else reject(new Error(`${command} ${commandArgs.slice(0, 4).join(' ')} … exited with ${signal ?? `code ${code}`}`))
+    })
+  })
+}
+
+async function checkMuxAssets(manifest, log) {
+  const items = (manifest.mux?.items ?? []).filter((item) => item.assetId)
+  if (items.length === 0) return
+  if (!process.env.MUX_TOKEN_ID || !process.env.MUX_TOKEN_SECRET) {
+    log.info(`The snapshot references ${items.length} Mux assets. Set MUX_TOKEN_ID / MUX_TOKEN_SECRET to check that they still exist in Mux.`)
+    return
+  }
+  const client = new MuxClient({tokenId: process.env.MUX_TOKEN_ID, tokenSecret: process.env.MUX_TOKEN_SECRET})
+  let missing = 0
+  for (const item of items) {
+    const asset = await client.getAsset(item.assetId)
+    if (asset === null) {
+      missing++
+      log.warn(
+        `Mux asset ${item.assetId} (${item.documentIds.join(', ')}) no longer exists in Mux. ` +
+          (item.status === 'stored' ? `Its original is in the bucket at ${item.key}; see README.md "Videos" to re-upload it.` : 'No original was archived for it.'),
+      )
+    }
+  }
+  log.info(`Mux check: ${items.length - missing} of ${items.length} assets exist in Mux`)
+}
+
+async function main() {
+  const args = parseCli(process.argv.slice(2), {
+    snapshot: {type: 'string'},
+    latest: {type: 'boolean', default: false},
+    'from-dataset': {type: 'string'},
+    source: {type: 'string'},
+    bucket: {type: 'string'},
+    'local-dir': {type: 'string'},
+    dataset: {type: 'string'},
+    project: {type: 'string'},
+    replace: {type: 'boolean', default: false},
+    exact: {type: 'boolean', default: false},
+    'i-understand-production': {type: 'boolean', default: false},
+    verify: {type: 'boolean', default: false},
+    'allow-failing-assets': {type: 'boolean', default: false},
+    'sanity-cli': {type: 'string', default: 'sanity@latest'},
+    'build-only': {type: 'boolean', default: false},
+    output: {type: 'string'},
+    'work-dir': {type: 'string'},
+    'keep-work-dir': {type: 'boolean', default: false},
+    concurrency: {type: 'string'},
+  }, USAGE)
+  const log = createLogger()
+
+  if (args.source !== 'gcs' && args.source !== 'local') throw new UsageError(`--source must be gcs or local\n\n${USAGE}`)
+  if (args['from-dataset'] && !args.latest) throw new UsageError('--from-dataset only applies to --latest')
+  const buildOnly = args['build-only']
+  if (buildOnly && (args.exact || args.verify || args.replace)) throw new UsageError('--build-only cannot be combined with --replace, --exact or --verify')
+  let projectId
+  if (!buildOnly) {
+    if (!args.dataset) throw new UsageError(`--dataset is required\n\n${USAGE}`)
+    assertDatasetName(args.dataset)
+    projectId = args.project ?? process.env.SANITY_PROJECT_ID
+    assertProjectId(projectId)
+    if (args.exact && args.dataset === 'production' && !args['i-understand-production']) {
+      throw new UsageError('--exact deletes documents. Refusing to run it against "production" without --i-understand-production')
+    }
+  }
+  const token = process.env.SANITY_WRITE_TOKEN
+  if ((args.exact || args.verify) && !token) throw new UsageError('--exact and --verify need SANITY_WRITE_TOKEN (Editor role)')
+  const replace = args.replace || args.exact
+  const concurrency = parsePositiveInteger(args.concurrency, '--concurrency') ?? 4
+
+  const storage = await createStorage({kind: args.source, bucket: args.bucket ?? process.env.BACKUP_BUCKET, localDir: args['local-dir']})
+  const timestamp = await resolveSnapshot(storage, {snapshot: args.snapshot, latest: args.latest, fromDataset: args['from-dataset']})
+  log.info(`Restoring snapshot ${timestamp} from ${storage.describe()}`)
+
+  const workDir = await mkdtemp(path.join(args['work-dir'] ?? os.tmpdir(), 'sanity-restore-'))
+  const tarballPath = path.resolve(args.output ?? path.join(workDir, `snapshot-${timestamp}.tar.gz`))
+  let keepWorkDir = args['keep-work-dir'] || buildOnly
+  try {
+    const archive = await buildRestoreArchive({
+      storage,
+      timestamp,
+      workDir,
+      tarballPath,
+      allowFailingAssets: args['allow-failing-assets'],
+      concurrency,
+      log,
+    })
+    const {marker, manifest, prepared} = archive
+    log.info(
+      `Snapshot of ${marker.projectId}/${marker.dataset} taken ${marker.createdAt}: ${marker.documentCount} documents. ` +
+        `Import file: ${prepared.importDocuments.length} documents, ${archive.assetCount} asset binaries; ` +
+        `${prepared.droppedSystemIds.length} Sanity-managed system documents left out`,
+    )
+    log.info(`Import tarball: ${tarballPath}`)
+    await checkMuxAssets(manifest, log)
+    if (buildOnly) return
+
+    const allowDifferentDataset = needsAllowAssetsInDifferentDataset(prepared.otherAssetDocuments, {projectId, dataset: args.dataset})
+    const cliArgs = [
+      '--yes',
+      args['sanity-cli'],
+      'datasets',
+      'import',
+      tarballPath,
+      '--project',
+      projectId,
+      '--dataset',
+      args.dataset,
+      ...(replace ? ['--replace'] : []),
+      ...(allowDifferentDataset ? ['--allow-assets-in-different-dataset'] : []),
+      ...(args['allow-failing-assets'] ? ['--allow-failing-assets'] : []),
+    ]
+    const env = {...process.env}
+    if (token) env.SANITY_AUTH_TOKEN = token
+    log.info(`Running: npx ${cliArgs.join(' ')}`)
+    await runCommand('npx', cliArgs, {env})
+
+    if (args.exact) {
+      const targetDocuments = await exportDataset({projectId, dataset: args.dataset, token})
+      const plan = planExactDeletions({prepared, targetDocuments})
+      log.info(`--exact: deleting ${plan.deleteDocumentIds.length} documents and ${plan.deleteAssetIds.length} assets that are not in the snapshot`)
+      for (const id of plan.keptSystemIds) log.warn(`Release ${id} is not in the snapshot; archive it in the Studio if it should go`)
+      if (plan.deleteDocumentIds.length > 0) await deleteDocuments({projectId, dataset: args.dataset, token, ids: plan.deleteDocumentIds})
+      if (plan.deleteAssetIds.length > 0) await deleteDocuments({projectId, dataset: args.dataset, token, ids: plan.deleteAssetIds})
+    }
+
+    if (args.verify) {
+      const targetDocuments = await exportDataset({projectId, dataset: args.dataset, token})
+      const result = compareWithSnapshot({documents: archive.documents, prepared, targetDocuments})
+      const problems = result.missing.length + result.changed.length + result.missingAssets.length + (args.exact ? result.extra.length : 0)
+      log.info(
+        `Verify: ${result.missing.length} missing, ${result.changed.length} changed, ${result.missingAssets.length} missing assets, ` +
+          `${result.extra.length} extra documents in the target${args.exact ? '' : ' (allowed without --exact)'}`,
+      )
+      for (const id of result.missing.slice(0, 20)) log.warn(`Missing in target: ${id}`)
+      for (const {id, path: fieldPath} of result.changed.slice(0, 20)) log.warn(`Differs from snapshot: ${id} at ${fieldPath}`)
+      for (const id of result.missingAssets.slice(0, 20)) log.warn(`Asset missing in target: ${id}`)
+      for (const id of result.extra.slice(0, 20)) (args.exact ? log.warn : log.info)(`Not in snapshot: ${id}`)
+      if (problems > 0) {
+        keepWorkDir = true
+        throw new Error(`Verification failed with ${problems} problem(s); the work directory is kept at ${workDir}`)
+      }
+      log.info('Verification passed: the target matches the snapshot (ignoring _rev and _updatedAt)')
+    }
+    log.info(`Restore of ${timestamp} into ${projectId}/${args.dataset} finished (tarball ${formatBytes((await stat(tarballPath)).size)})`)
+  } finally {
+    if (keepWorkDir) log.info(`Work directory kept: ${workDir}`)
+    else await rm(workDir, {recursive: true, force: true})
+  }
+}
+
+main().catch((error) => {
+  if (error instanceof UsageError) {
+    console.error(error.message)
+  } else {
+    createLogger().error(error.stack ?? String(error))
+  }
+  process.exitCode = 1
+})

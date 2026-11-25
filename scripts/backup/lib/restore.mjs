@@ -1,0 +1,276 @@
+import {createHash} from 'node:crypto'
+import {createWriteStream} from 'node:fs'
+import {mkdir, mkdtemp, readFile, writeFile} from 'node:fs/promises'
+import path from 'node:path'
+import {pipeline} from 'node:stream/promises'
+import {createGzip, gunzipSync} from 'node:zlib'
+
+import {packTar} from 'modern-tar/fs'
+
+import {findLatestMarker, MANIFEST_FORMAT_VERSION} from './backup.mjs'
+import {isImportableSystemDocumentId, isSystemDocumentId, sortById, toNdjson} from './documents.mjs'
+import {computeFingerprint} from './fingerprint.mjs'
+import {isTimestamp, markerKey, MARKERS_PREFIX, snapshotDataKey, snapshotManifestKey} from './layout.mjs'
+import {describeAssetDocument, isAssetDocument, parseAssetId} from './sanity-assets.mjs'
+import {parseExportNdjson} from './sanity-export.mjs'
+import {runPool, sha256Hex} from './util.mjs'
+
+// Same exclusions as @sanity/export when it writes assets.json: these fields
+// describe the stored binary or its location and are recreated by the upload.
+const ASSET_MAP_EXCLUDED_FIELDS = new Set(['_id', '_type', 'assetId', 'extension', 'mimeType', 'path', 'uploadId', 'url'])
+const OTHER_ASSET_TYPE_PATTERN = /^sanity\.[a-zA-Z]+Asset$/
+
+// Rewrites every `{asset: {_ref: "image-…" | "file-…"}}` object into the
+// import directive `{_sanityAsset: "image@file://./images/<sha1>.<ext>"}`,
+// exactly like `sanity datasets export` does. `sanity datasets import`
+// resolves "./" against the folder holding data.ndjson, uploads the file (or
+// reuses an identical asset already in the target) and sets the reference.
+export function rewriteAssetReferences(value, referencedAssetIds = new Set()) {
+  if (Array.isArray(value)) return value.map((item) => rewriteAssetReferences(item, referencedAssetIds))
+  if (!value || typeof value !== 'object') return value
+  const ref = value.asset?._ref
+  const parsed = typeof ref === 'string' ? parseAssetId(ref) : null
+  if (parsed) {
+    referencedAssetIds.add(ref)
+    const {asset: _asset, ...rest} = value
+    const rewritten = {_sanityAsset: `${parsed.type}@file://./${parsed.kind}/${parsed.hash}.${parsed.extension}`}
+    for (const [key, child] of Object.entries(rest)) rewritten[key] = rewriteAssetReferences(child, referencedAssetIds)
+    return rewritten
+  }
+  const copy = {}
+  for (const [key, child] of Object.entries(value)) copy[key] = rewriteAssetReferences(child, referencedAssetIds)
+  return copy
+}
+
+// Splits a snapshot into what goes into data.ndjson and what does not:
+// - system documents other than release/variant definitions are dropped
+//   (Sanity manages them; the import would skip them anyway),
+// - sanity.imageAsset / sanity.fileAsset documents are dropped, because the
+//   import recreates them from the binaries in images/ and files/,
+// - every other document is kept, including drafts, release versions,
+//   mux.videoAsset documents and any other asset type, with asset
+//   references rewritten to _sanityAsset directives.
+export function prepareImportDocuments(documents) {
+  const importDocuments = []
+  const assetDocuments = []
+  const otherAssetDocuments = []
+  const droppedSystemIds = []
+  const referencedAssetIds = new Set()
+  for (const doc of sortById(documents)) {
+    if (isSystemDocumentId(doc._id) && !isImportableSystemDocumentId(doc._id)) {
+      droppedSystemIds.push(doc._id)
+      continue
+    }
+    if (isAssetDocument(doc)) {
+      assetDocuments.push(doc)
+      continue
+    }
+    if (OTHER_ASSET_TYPE_PATTERN.test(doc._type)) otherAssetDocuments.push(doc)
+    importDocuments.push(rewriteAssetReferences(doc, referencedAssetIds))
+  }
+  return {importDocuments, assetDocuments, otherAssetDocuments, droppedSystemIds, referencedAssetIds}
+}
+
+export function assetMapEntry(assetDoc) {
+  const entry = {}
+  for (const [key, value] of Object.entries(assetDoc)) {
+    if (!ASSET_MAP_EXCLUDED_FIELDS.has(key)) entry[key] = value
+  }
+  return entry
+}
+
+// `--allow-assets-in-different-dataset` is only needed when the import file
+// still contains asset documents (any sanity.*Asset type this tool does not
+// turn back into binaries) whose URL points at another project or dataset.
+export function needsAllowAssetsInDifferentDataset(otherAssetDocuments, {projectId, dataset}) {
+  return otherAssetDocuments.some((doc) => {
+    const location = String(doc.path || doc.url || '').replace(/^https:\/\/cdn\.sanity\.[a-z]+\//, '')
+    const [, assetProject, assetDataset] = location.split('/')
+    return assetProject !== projectId || assetDataset !== dataset
+  })
+}
+
+export async function resolveSnapshot(storage, {snapshot, latest, fromDataset}) {
+  if (snapshot && latest) throw new Error('Pass either --snapshot <ts> or --latest, not both')
+  if (!snapshot && !latest) throw new Error('Pass --snapshot <ts> or --latest')
+  if (snapshot) {
+    if (!isTimestamp(snapshot)) throw new Error(`--snapshot must look like 20261129T090000Z, got ${snapshot}`)
+    const exists = await storage.stat(markerKey(snapshot))
+    if (!exists) throw new Error(`No marker ${markerKey(snapshot)}: that snapshot does not exist or never completed`)
+    return snapshot
+  }
+  const keys = (await storage.list(MARKERS_PREFIX)).map((object) => object.key)
+  const found = await findLatestMarker(storage, keys, fromDataset ? {dataset: fromDataset} : {})
+  if (!found) throw new Error(`No completed snapshots${fromDataset ? ` of dataset ${fromDataset}` : ''} in ${storage.describe()}`)
+  return found.timestamp
+}
+
+function parseJson(buffer, label) {
+  try {
+    return JSON.parse(buffer.toString('utf8'))
+  } catch (error) {
+    throw new Error(`${label} is not valid JSON: ${error.message}`)
+  }
+}
+
+// Loads and verifies a snapshot: the marker must exist, the manifest and data
+// must match the hashes recorded in the marker, and the documents must
+// reproduce the marker's fingerprint.
+export async function loadSnapshot(storage, timestamp) {
+  const marker = parseJson(await storage.readBuffer(markerKey(timestamp)), markerKey(timestamp))
+  if (marker.formatVersion !== MANIFEST_FORMAT_VERSION) throw new Error(`Unsupported marker format ${marker.formatVersion}`)
+  const manifestBuffer = await storage.readBuffer(snapshotManifestKey(timestamp))
+  if (sha256Hex(manifestBuffer) !== marker.manifestSha256) throw new Error(`Manifest of ${timestamp} does not match the hash in its marker`)
+  const manifest = parseJson(manifestBuffer, snapshotManifestKey(timestamp))
+  const data = await storage.readBuffer(snapshotDataKey(timestamp))
+  if (sha256Hex(data) !== manifest.data.sha256 || manifest.data.sha256 !== marker.dataSha256) {
+    throw new Error(`data.ndjson.gz of ${timestamp} does not match the hash in its manifest`)
+  }
+  const documents = parseExportNdjson(gunzipSync(data).toString('utf8'))
+  const fingerprint = computeFingerprint(documents)
+  if (fingerprint !== marker.fingerprint) throw new Error(`Documents of ${timestamp} do not reproduce the marker fingerprint`)
+  return {marker, manifest, documents}
+}
+
+// Builds a standard Sanity import tarball from a snapshot:
+//   <dataset>-<ts>/data.ndjson, assets.json, images/<sha1>.<ext>, files/<sha1>.<ext>
+// Every asset document in the snapshot is included, referenced or not, the
+// way `sanity datasets export` includes them.
+export async function buildRestoreArchive({storage, timestamp, workDir, tarballPath, allowFailingAssets = false, concurrency = 4, log}) {
+  const {marker, manifest, documents} = await loadSnapshot(storage, timestamp)
+  const prepared = prepareImportDocuments(documents)
+  const rootName = `${marker.dataset}-${timestamp}`
+  // A fresh directory per build, so two builds in one work directory never mix files.
+  const archiveDir = await mkdtemp(path.join(workDir, 'archive-'))
+  const baseDir = path.join(archiveDir, rootName)
+  await mkdir(path.join(baseDir, 'images'), {recursive: true})
+  await mkdir(path.join(baseDir, 'files'), {recursive: true})
+
+  const assets = prepared.assetDocuments.map((doc) => ({doc, info: describeAssetDocument(doc)}))
+  const available = new Set()
+  const assetMap = {}
+  const sha1Mismatches = []
+  await runPool(assets, concurrency, async ({doc, info}) => {
+    const destPath = path.join(baseDir, info.kind, `${info.hash}.${info.extension}`)
+    const exists = await storage.stat(info.key)
+    if (!exists) {
+      if (allowFailingAssets) {
+        log.warn(`Asset ${info.id} is not in the bucket (${info.key}); the import will skip it (--allow-failing-assets)`)
+        return
+      }
+      throw new Error(`Asset ${info.id} is listed in the snapshot but ${info.key} is not in the bucket`)
+    }
+    await storage.downloadToFile(info.key, destPath)
+    const sha1 = createHash('sha1').update(await readFile(destPath)).digest('hex')
+    if (info.sha1hash && sha1 !== info.sha1hash) sha1Mismatches.push(info.id)
+    const entry = assetMapEntry(doc)
+    if (Object.keys(entry).length > 0) assetMap[`${info.type}-${sha1}`] = entry
+    available.add(info.id)
+  })
+  for (const id of sha1Mismatches) {
+    log.warn(`Asset ${id}: stored bytes differ from the document's sha1hash (Sanity rewrites some files, e.g. SVGs). The import uploads the stored bytes.`)
+  }
+
+  const missing = [...prepared.referencedAssetIds].filter((id) => !available.has(id)).sort()
+  if (missing.length > 0 && !allowFailingAssets) {
+    throw new Error(`Documents reference ${missing.length} assets that are not in the snapshot: ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? ', …' : ''}`)
+  }
+
+  await writeFile(path.join(baseDir, 'data.ndjson'), toNdjson(prepared.importDocuments))
+  await writeFile(path.join(baseDir, 'assets.json'), `${JSON.stringify(assetMap)}\n`)
+  await mkdir(path.dirname(tarballPath), {recursive: true})
+  await pipeline(packTar(archiveDir), createGzip(), createWriteStream(tarballPath, {flags: 'wx'}))
+
+  return {
+    marker,
+    manifest,
+    documents,
+    prepared,
+    rootName,
+    tarballPath,
+    assetCount: available.size,
+    missingAssetIds: missing,
+  }
+}
+
+// --exact: which target documents to delete so the target holds the same
+// documents as the snapshot. System documents (_.*) are never deleted: Sanity
+// manages them, and releases must be archived from the Studio.
+export function planExactDeletions({prepared, targetDocuments}) {
+  const expectedIds = new Set(prepared.importDocuments.map((doc) => doc._id))
+  const expectedAssetIds = new Set(prepared.assetDocuments.map((doc) => doc._id))
+  const expectedAssetHashes = new Set(prepared.assetDocuments.map((doc) => doc.sha1hash).filter(Boolean))
+  const deleteDocumentIds = []
+  const deleteAssetIds = []
+  const keptSystemIds = []
+  for (const doc of targetDocuments) {
+    if (isSystemDocumentId(doc._id)) {
+      if (!expectedIds.has(doc._id) && isImportableSystemDocumentId(doc._id)) keptSystemIds.push(doc._id)
+      continue
+    }
+    if (isAssetDocument(doc)) {
+      if (!expectedAssetIds.has(doc._id) && !expectedAssetHashes.has(doc.sha1hash)) deleteAssetIds.push(doc._id)
+      continue
+    }
+    if (!expectedIds.has(doc._id)) deleteDocumentIds.push(doc._id)
+  }
+  return {deleteDocumentIds: deleteDocumentIds.sort(), deleteAssetIds: deleteAssetIds.sort(), keptSystemIds: keptSystemIds.sort()}
+}
+
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical)
+  if (!value || typeof value !== 'object') return value
+  const out = {}
+  for (const key of Object.keys(value).sort()) out[key] = canonical(value[key])
+  return out
+}
+
+function withoutVolatileFields(doc) {
+  const {_rev, _updatedAt, ...rest} = doc
+  return rest
+}
+
+function firstDifference(a, b, pathSoFar = '') {
+  if (Object.is(a, b)) return null
+  if (typeof a !== typeof b || a === null || b === null || typeof a !== 'object' || Array.isArray(a) !== Array.isArray(b)) {
+    return pathSoFar || '(root)'
+  }
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)])
+  for (const key of [...keys].sort()) {
+    const childPath = Array.isArray(a) ? `${pathSoFar}[${key}]` : `${pathSoFar}${pathSoFar ? '.' : ''}${key}`
+    const diff = firstDifference(a[key], b[key], childPath)
+    if (diff) return diff
+  }
+  return null
+}
+
+// Compares the target dataset with the snapshot after an import. Documents are
+// compared field by field, ignoring only _rev and _updatedAt (plan §10).
+// Asset documents are compared by id and sha1hash, because their url and
+// path name the dataset they live in.
+export function compareWithSnapshot({documents, prepared, targetDocuments}) {
+  const target = new Map(targetDocuments.map((doc) => [doc._id, doc]))
+  const missing = []
+  const changed = []
+  const original = new Map(documents.map((doc) => [doc._id, doc]))
+  for (const doc of prepared.importDocuments) {
+    const actual = target.get(doc._id)
+    if (!actual) {
+      missing.push(doc._id)
+      continue
+    }
+    const expected = canonical(withoutVolatileFields(original.get(doc._id)))
+    const diff = firstDifference(expected, canonical(withoutVolatileFields(actual)))
+    if (diff) changed.push({id: doc._id, path: diff})
+  }
+  const targetHashes = new Set(targetDocuments.filter(isAssetDocument).map((doc) => doc.sha1hash))
+  const missingAssets = prepared.assetDocuments
+    .filter((doc) => !target.has(doc._id) && !targetHashes.has(doc.sha1hash))
+    .map((doc) => doc._id)
+  const expectedIds = new Set([...prepared.importDocuments, ...prepared.assetDocuments].map((doc) => doc._id))
+  const extra = targetDocuments
+    .filter((doc) => !expectedIds.has(doc._id) && !isSystemDocumentId(doc._id))
+    .filter((doc) => !(isAssetDocument(doc) && prepared.assetDocuments.some((asset) => asset.sha1hash === doc.sha1hash)))
+    .map((doc) => doc._id)
+  return {missing, changed, missingAssets, extra}
+}
