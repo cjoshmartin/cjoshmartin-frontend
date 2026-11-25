@@ -1,0 +1,28 @@
+{
+  "name": "cjoshmartin-wagtail-to-sanity",
+  "version": "1.0.0",
+  "private": true,
+  "description": "One-time migration of the cjoshmartin.com Wagtail export (pages, snippets, images, documents, videos) into Sanity.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "migrate": "tsx src/cli.ts",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@portabletext/block-tools": "^6.0.8",
+    "@sanity/client": "^8.17.0",
+    "@sanity/schema": "^6.25.0",
+    "jsdom": "^29.1.1"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^24.19.4",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3"
+  }
+}
