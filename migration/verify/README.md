@@ -46,6 +46,8 @@ filter (the first ones linked on the old `/projects`), `/screen`, `/ascii`, `/st
 
 `src/compare.mjs` only accepts a difference when a rule explains it, and every rule names its
 source: plan §7.1–7.3 (footer credit, `/about` and `/admin` redirects, bugs 1–6), WP4's documented
-deviations (flex titles and canonicals, Sanity og:image crops, image rounding) and WP3b's pending
-Mux videos (only as many missing videos as the page has video blocks without a Mux asset).
+deviations (flex titles and canonicals, Sanity og:image crops, image rounding), WP3b's pending
+Mux videos (only as many missing videos as the page has video blocks without a Mux asset) and the
+round-1 review fixes (a Wagtail redirect to a never-published page is a draft, so its path is a
+plain 404; see `docs/sanity-migration/reports/fixes.md`).
 Everything else is reported as unexpected.

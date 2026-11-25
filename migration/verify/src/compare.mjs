@@ -1,5 +1,6 @@
 // Compares the crawled old and new observations route by route and classifies every difference
 // as EXPECTED (with the reason and its source in the plan or a work-package note) or UNEXPECTED.
+import { LINK_HREF_FIXES } from '../../wagtail-to-sanity/src/content-fixes.ts'
 import { compareText } from './text-diff.mjs'
 
 export const SAME = 'same'
@@ -359,24 +360,42 @@ function comparePage(route, oldExtract, newExtract, doc) {
   const newLinks = newExtract.internalLinks
   const removed = missingFrom(oldLinks, newLinks)
   const added = missingFrom(newLinks, oldLinks)
-  if (!removed.length && !added.length) {
-    results.push(check('internal links', SAME, { count: newLinks.length, order: JSON.stringify(oldLinks) === JSON.stringify(newLinks) ? 'same order' : 'same set, different order' }))
-  } else {
-    results.push(check('internal links', UNEXPECTED, { removed, added }))
-  }
   const oldExternal = oldExtract.externalLinks.map(normalizeExternal)
   const newExternal = newExtract.externalLinks.map(normalizeExternal)
   const externalRemoved = missingFrom(oldExternal, newExternal)
   const externalAdded = missingFrom(newExternal, oldExternal)
+  // Review fixes R1-5: links the migration corrects (wagtail-to-sanity/src/content-fixes.ts). An
+  // href with a stray leading "#" was an in-page link on the old site and is a real link now. A fix
+  // only explains the difference when both halves are seen on this page.
+  const appliedFixes = LINK_HREF_FIXES.filter(
+    (fix) =>
+      fix.from.startsWith('#') &&
+      removed.includes(`${route.path}${fix.from}`) &&
+      externalAdded.includes(fix.to.replace(/^https?:\/\//, '')),
+  )
+  const fixReason = appliedFixes.length
+    ? `Review fixes R1-5: ${appliedFixes.map((fix) => `"${fix.from}" corrected to ${fix.to}`).join('; ')} (migration content fix).`
+    : undefined
+  const unexplainedRemoved = removed.filter((link) => !appliedFixes.some((fix) => link === `${route.path}${fix.from}`))
+  if (!removed.length && !added.length) {
+    results.push(check('internal links', SAME, { count: newLinks.length, order: JSON.stringify(oldLinks) === JSON.stringify(newLinks) ? 'same order' : 'same set, different order' }))
+  } else if (!unexplainedRemoved.length && !added.length) {
+    results.push(check('internal links', EXPECTED, { removed, added, reason: fixReason }))
+  } else {
+    results.push(check('internal links', UNEXPECTED, { removed, added }))
+  }
+  const unexplainedAdded = externalAdded.filter((link) => !appliedFixes.some((fix) => link === fix.to.replace(/^https?:\/\//, '')))
   const footerOnly =
     externalRemoved.every((link) => ['www.djangoproject.com/', 'wagtail.org/'].includes(link)) &&
-    externalAdded.every((link) => link === 'www.sanity.io/')
+    unexplainedAdded.every((link) => link === 'www.sanity.io/')
   results.push(
     externalRemoved.length || externalAdded.length
       ? check('external links', footerOnly ? EXPECTED : UNEXPECTED, {
           removed: externalRemoved,
           added: externalAdded,
-          reason: footerOnly ? 'Footer credit links: Django and Wagtail replaced by Sanity (plan §7.2).' : undefined,
+          reason: footerOnly
+            ? ['Footer credit links: Django and Wagtail replaced by Sanity (plan §7.2).', fixReason].filter(Boolean).join(' ')
+            : undefined,
         })
       : check('external links', SAME, { count: newExternal.length, note: 'GCS document/image URLs and cdn.sanity.io URLs are compared as "migrated-asset"' }),
   )
@@ -402,6 +421,9 @@ function comparePage(route, oldExtract, newExtract, doc) {
   return results
 }
 
+/** The resume's Charter stylesheet answered 404 (it did on the old site; review fixes R1-3). */
+const charterFontMissing = (log) => (log?.badResponses ?? []).some((response) => /\/charter-font\.css$/.test(response.url))
+
 function compareLayout(oldBrowser, newBrowser, doc) {
   const results = []
   const pending = doc?.pendingVideoBlocks ?? 0
@@ -421,6 +443,9 @@ function compareLayout(oldBrowser, newBrowser, doc) {
     const heights = { old: oldEntry.extract.pageHeight, new: newEntry.extract.pageHeight, delta }
     if (Math.abs(delta) <= 4) results.push(check(`${viewport} page height`, delta === 0 ? SAME : EXPECTED, { ...heights, reason: delta ? 'Within ±4 px (image rounding).' : undefined }))
     else if (pending > 0 && delta < 0) results.push(check(`${viewport} page height`, EXPECTED, { ...heights, reason: `${pending} pending Mux video(s) render nothing.` }))
+    else if (charterFontMissing(oldEntry.log) && !charterFontMissing(newEntry.log)) {
+      results.push(check(`${viewport} page height`, EXPECTED, { ...heights, reason: 'Review fixes R1-3: the Charter fonts load now (the old site requested a missing stylesheet and fell back to Times), so the text reflows.' }))
+    }
     else results.push(check(`${viewport} page height`, UNEXPECTED, heights))
     results.push(
       newEntry.screenshot?.file
@@ -486,9 +511,26 @@ function redirectTarget(site) {
   return url.pathname + url.search
 }
 
+/**
+ * A Wagtail redirect to a page that was never published: since the round-1 review fixes
+ * (docs/sanity-migration/reports/fixes.md, R1-2) the migration keeps it as a draft redirect, so
+ * the site serves no redirect and the path is a plain 404, until the page and the redirect are
+ * published together.
+ */
+function isDraftRedirect(route, reference) {
+  return (
+    route.kind === 'wagtail-redirect' &&
+    route.redirectPageId != null &&
+    !reference.pages.some((page) => page.wagtailId === route.redirectPageId) &&
+    !reference.redirects.some((item) => item.source === route.path)
+  )
+}
+
 function compareRedirect(route, oldSite, newSite, reference) {
   const oldTarget = redirectTarget(oldSite)
   const newTarget = redirectTarget(newSite)
+  const draftRedirect = isDraftRedirect(route, reference)
+  const draftRedirectReason = `Review fixes R1-2: the target (Wagtail page ${route.redirectPageId}) was never published, so the redirect is a draft in Sanity and the site serves no redirect; the old frontend ignored Wagtail redirects and showed its crash page.`
   const newHop = `${newSite.http.firstStatus}${newSite.http.firstLocation ? ` → ${newSite.http.firstLocation}` : ''}`
   const oldHop = `${oldSite.http.firstStatus}${oldSite.http.firstLocation ? ` → ${oldSite.http.firstLocation}` : ''}`
   const results = [
@@ -508,11 +550,19 @@ function compareRedirect(route, oldSite, newSite, reference) {
   results.push(exact('redirect target', oldTarget, newTarget, explain))
   if (route.kind === 'wagtail-redirect') {
     const finalStatus = newSite.http.final.status
-    results.push(
-      finalStatus === 200
-        ? check('redirect destination status', SAME, { new: `${newSite.http.final.url} ${finalStatus}` })
-        : check('redirect destination status', UNEXPECTED, { new: `${newSite.http.final.url} ${finalStatus}` }),
-    )
+    if (draftRedirect) {
+      results.push(
+        finalStatus === 404 && newSite.http.chain.length <= 1 && !newSite.http.firstLocation
+          ? check('redirect destination status', EXPECTED, { new: `${newSite.http.final.url} ${finalStatus}`, reason: draftRedirectReason })
+          : check('redirect destination status', UNEXPECTED, { new: `${newSite.http.final.url} ${finalStatus}`, reason: 'A draft redirect must not be served: expected a 404 without a redirect.' }),
+      )
+    } else {
+      results.push(
+        finalStatus === 200
+          ? check('redirect destination status', SAME, { new: `${newSite.http.final.url} ${finalStatus}` })
+          : check('redirect destination status', UNEXPECTED, { new: `${newSite.http.final.url} ${finalStatus}` }),
+      )
+    }
   }
   return results
 }
