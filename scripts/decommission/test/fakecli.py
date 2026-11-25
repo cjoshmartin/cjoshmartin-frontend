@@ -18,6 +18,7 @@ Layout:
   dokku/services/<svc>/links          linked apps, one per line
   dokku/services/<svc>/export.dump    what postgres:export prints
   site/<path>.html                    page bodies for https://cjoshmartin.com (index.html for /)
+  sanity/production.json              body of any query to the production dataset's public API
 """
 import base64
 import hashlib
@@ -374,6 +375,10 @@ def curl(argv):
         page = os.path.join(ROOT, "site", path + ".html")
         if os.path.exists(page):
             body, code = open(page, "rb").read(), 200
+    elif url.startswith("https://j3vdh6ti.api.sanity.io/v2025-02-19/data/query/production?query="):
+        answer = os.path.join(ROOT, "sanity", "production.json")
+        if os.path.exists(answer):
+            body, code = open(answer, "rb").read(), 200
     elif url.startswith("https://storage.googleapis.com/"):
         bucket = url.split("/")[3]
         meta = read_json(os.path.join(ROOT, "gcs", bucket, "meta.json"))

@@ -9,7 +9,7 @@ Scripts for the teardown in the migration plan (`docs/sanity-migration-plan.md`,
 | `02-push-backend-archive.sh` | Creates the private repo `cjoshmartin-com/cjoshmartin-backend-archive`, pushes the scrubbed clone, checks a fresh mirror clone (no `secrets.json` anywhere, gitleaks clean), then archives the repo. | Claude |
 | `03-dokku-teardown.sh destroy` | Asks Josh to type the app name, then runs `apps:destroy` and `postgres:destroy`, and checks both are gone. It refuses until the dump is in the bucket and the live site no longer uses the backend. | **Josh**, or Claude with permission |
 | GoDaddy | Deletes the `backend` A record ([steps below](#step-5-josh-delete-the-backend-dns-record-in-godaddy)). | **Josh** |
-| `04-gcs-lockdown.sh` | Removes the `allUsers` and `allAuthenticatedUsers` bindings from `gs://images-for-cms`, enforces public access prevention, and deletes the USER_MANAGED keys of `file-upload-2024@`. Nothing is deleted from the bucket. | Claude, after Josh's `gcloud auth login` |
+| `04-gcs-lockdown.sh` | Removes the `allUsers` and `allAuthenticatedUsers` bindings from `gs://images-for-cms`, enforces public access prevention, and deletes the USER_MANAGED keys of `file-upload-2024@`. Nothing is deleted from the bucket. It refuses while any Wagtail video is missing from Mux. | Claude, after Josh's `gcloud auth login` |
 | `05-verify.sh` | Runs the §12.I checks (tests 37–41, plus D10 and D11) and prints PASS or FAIL for each. It is read-only. | Josh (with `--ssh`), or Claude |
 
 ## How every script behaves
@@ -31,6 +31,15 @@ All of these must be true:
 2. Backups work. `scripts/backup/setup-gcp.sh` has run, which creates `gs://cjoshmartin-sanity-backups` with public access prevention enforced, and tests H (32–36) pass.
 3. Josh is logged in to gcloud as the `com-cjoshmartin` owner: `! gcloud auth login`, then `gcloud config set account <owner account>`. The account active tonight cannot list service-account keys. `01`, `04` and `05` print the active account.
 4. `gh auth status` shows an account that is an admin of `cjoshmartin-com`.
+5. **Every Wagtail video is on Mux** (only for step 6). When last checked (2026-11-25 23:07 UTC), Mux's free plan had accepted 10 of the 29 videos. The migration creates Mux assets from the public `images-for-cms` URLs, so the other 19 can only be migrated while the bucket is public. Upgrade the Mux environment from the free plan (it needs a billing method), then add the videos without touching anything edited in the Studio:
+
+   ```sh
+   cd migration/wagtail-to-sanity
+   npm run migrate -- --dataset staging --steps mux,videos
+   npm run migrate -- --dataset production --confirm-production --steps mux,videos
+   ```
+
+   `04-gcs-lockdown.sh` checks this itself: production must hold a ready `mux-video-<id>` document for each media item in the Wagtail export, and every video block of a published post or project must resolve.
 
 ## Morning order (§13 step 5)
 
@@ -163,7 +172,7 @@ scripts/decommission/04-gcs-lockdown.sh
 scripts/decommission/04-gcs-lockdown.sh --execute            # add --include-legacy-sa if Josh agrees (see below)
 ```
 
-It refuses to run until the live site no longer references `images-for-cms`, because afterwards every old image URL returns 403. Expected:
+It refuses to run until the live site no longer references `images-for-cms`, because afterwards every old image URL returns 403. It also refuses until every Wagtail video is on Mux (prerequisite 5 above), because afterwards the missing videos could not be ingested from the bucket. Expected:
 
 ```
 + gcloud storage buckets remove-iam-policy-binding gs://images-for-cms --member=allAuthenticatedUsers --role=roles/storage.admin --all
@@ -171,6 +180,8 @@ It refuses to run until the live site no longer references `images-for-cms`, bec
 + gcloud storage buckets remove-iam-policy-binding gs://images-for-cms --member=allUsers --role=roles/storage.objectViewer --all
 + gcloud storage buckets update gs://images-for-cms --public-access-prevention
 + gcloud iam service-accounts keys delete <key id> --iam-account file-upload-2024@com-cjoshmartin.iam.gserviceaccount.com --project com-cjoshmartin --quiet
+  [PASS] every Wagtail video is on Mux (production has a ready mux.videoAsset for each, and every video block resolves)
+  …
   [PASS] no IAM bindings for allUsers allAuthenticatedUsers
   [PASS] public access prevention is enforced
   [PASS] anonymous GET https://storage.googleapis.com/images-for-cms/original_images/… returns 403

@@ -211,6 +211,13 @@ site() { # old|new
   done
 }
 site old
+# videos READY BLOCKS UNRESOLVED: what the production dataset reports about Mux videos.
+mkdir -p "$FAKE_ROOT/sanity" "$MIGRATION_DIR/extracted"
+printf '{"format_version": 1, "media": [{"id": 1}, {"id": 2}, {"id": 3}]}\n' >"$MIGRATION_DIR/extracted/export.json"
+videos() {
+  printf '{"result": {"ready": %s, "blocks": %s, "unresolved": %s}}\n' "$1" "$2" "$3" >"$FAKE_ROOT/sanity/production.json"
+}
+videos 2 3 1
 touch "$FAKE_ROOT/dokku/apps/cjoshmartin-django" "$FAKE_ROOT/dokku/apps/other-app"
 echo "postgres:16.1" >"$FAKE_ROOT/dokku/services/cjoshmartin-db/image"
 echo "cjoshmartin-django" >"$FAKE_ROOT/dokku/services/cjoshmartin-db/links"
@@ -368,9 +375,22 @@ check "04 left public access prevention alone" grep -q '"inherited"' "$FAKE_ROOT
 check "04 deleted no keys" no_key_deletes
 
 site new
+calls_mark
+run "04 --execute refuses while a video is not on Mux" 1 "$SCRIPTS/04-gcs-lockdown.sh" --execute --include-legacy-sa
+check "04 names the missing videos" log_has "2 of 3 Wagtail videos have a ready mux.videoAsset in production, and 1 of 3 published video blocks do not resolve"
+check "04 refused before changing anything (videos)" no_mutating_calls
+videos 3 3 1
+calls_mark
+run "04 --execute refuses while a video block does not resolve" 1 "$SCRIPTS/04-gcs-lockdown.sh" --execute --include-legacy-sa
+check "04 refused before changing anything (video blocks)" no_mutating_calls
+rm "$FAKE_ROOT/sanity/production.json"
+run "04 --execute refuses when the dataset cannot be queried" 1 "$SCRIPTS/04-gcs-lockdown.sh" --execute --include-legacy-sa
+check "04 reports the failed query" log_has "could not query the production dataset"
+videos 3 3 0
 export FAKE_IGNORE_MANAGED_BY=1
 calls_mark
 run "04 --execute --include-legacy-sa" 0 "$SCRIPTS/04-gcs-lockdown.sh" --execute --include-legacy-sa
+check "04 checked the videos first" log_has "ok 3 videos, 3 published video blocks"
 unset FAKE_IGNORE_MANAGED_BY
 check "04 no public bindings left" sh -c "! grep -q -E 'allUsers|allAuthenticatedUsers' '$FAKE_ROOT/gcs/images-for-cms/iam.json'"
 check "04 kept project bindings" grep -q projectOwner "$FAKE_ROOT/gcs/images-for-cms/iam.json"

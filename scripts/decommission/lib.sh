@@ -235,6 +235,53 @@ decom_site_cut_over() {
   return 0
 }
 
+# The public (published) query endpoint of the production dataset.
+DECOM_SANITY_QUERY_URL="https://j3vdh6ti.api.sanity.io/v2025-02-19/data/query/production"
+
+# Succeeds when every Wagtail video is on Mux: production has a ready `mux-video-<id>` document
+# for each media item in the Wagtail export, and every video block of a published post or project
+# resolves to a video document. The migration's mux step creates Mux assets only from the public
+# images-for-cms URLs, so the bucket must stay public until this holds. On failure the reason is
+# printed and left in DECOM_MUX_REASON.
+DECOM_MUX_REASON=""
+decom_mux_videos_complete() {
+  local export_json="$DECOM_MIGRATION_DIR/extracted/export.json" expected query url body verdict
+  DECOM_MUX_REASON=""
+  if [ ! -s "$export_json" ]; then
+    DECOM_MUX_REASON="$export_json is missing; it gives the number of Wagtail videos"
+  elif ! expected="$(python3 -I -c 'import json, sys; print(len(json.load(open(sys.argv[1]))["media"]))' "$export_json")"; then
+    DECOM_MUX_REASON="cannot read the media list from $export_json"
+  else
+    query='{"ready": count(*[_type == "mux.videoAsset" && string::startsWith(_id, "mux-video-") && status == "ready"]), "blocks": math::sum(*[_type in ["blogPost", "project"]]{"n": count(body[_type == "video"])}.n), "unresolved": math::sum(*[_type in ["blogPost", "project"]]{"n": count(body[_type == "video" && !defined(asset.asset->_id)])}.n)}'
+    url="$DECOM_SANITY_QUERY_URL?query=$(python3 -I -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$query")&perspective=published"
+    printf '    + [read-only] %s\n' "$(decom_quote curl -fsS "$url")" >&2
+    if ! body="$(curl -fsS --max-time 30 "$url")"; then
+      DECOM_MUX_REASON="could not query the production dataset"
+    elif ! verdict="$(printf '%s' "$body" | python3 -I -c '
+import json, sys
+expected = int(sys.argv[1])
+r = json.load(sys.stdin)["result"]
+ready, blocks, unresolved = r["ready"], r["blocks"] or 0, r["unresolved"] or 0
+if ready != expected or unresolved:
+    print("%d of %d Wagtail videos have a ready mux.videoAsset in production, and %d of %d published video blocks do not resolve. Finish the videos first (migration/wagtail-to-sanity: --steps mux,videos)" % (ready, expected, unresolved, blocks))
+else:
+    print("ok %d videos, %d published video blocks" % (ready, blocks))
+' "$expected")"; then
+      DECOM_MUX_REASON="could not parse the production query result"
+    else
+      case "$verdict" in
+        ok\ *) decom_say "    $verdict" ;;
+        *) DECOM_MUX_REASON="$verdict" ;;
+      esac
+    fi
+  fi
+  if [ -n "$DECOM_MUX_REASON" ]; then
+    decom_say "    $DECOM_MUX_REASON"
+    return 1
+  fi
+  return 0
+}
+
 # Print the active gcloud account (informational; the owner of com-cjoshmartin is required).
 decom_show_gcloud_account() {
   local account=''
