@@ -103,6 +103,8 @@ Run the tests with `npm test`. They cover:
 
 They also include a contract test that feeds the restore tarball to `@sanity/import`, the library behind `sanity datasets import`, and checks that the backed-up documents come back unchanged.
 
+`npm run test:gcs-emulator` runs the GCS adapter and a full backup → no-change → restore-build cycle with the real `@google-cloud/storage` client against [fake-gcs-server](https://github.com/fsouza/fake-gcs-server). It is kept out of `npm test` because it needs Docker. The commands are at the top of `integration/gcs-emulator.test.mjs`.
+
 ## Restore
 
 **A restore is not a point-in-time reset.** `sanity datasets import --replace` overwrites documents that share an id with the snapshot. Everything else stays:

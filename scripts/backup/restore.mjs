@@ -162,7 +162,8 @@ async function main() {
         `${prepared.droppedSystemIds.length} Sanity-managed system documents left out`,
     )
     log.info(`Import tarball: ${tarballPath}`)
-    await checkMuxAssets(manifest, log)
+    // The Mux check is informational; a Mux API problem must not block a restore.
+    await checkMuxAssets(manifest, log).catch((error) => log.warn(`Could not check Mux assets: ${error.message}`))
     if (buildOnly) return
 
     const allowDifferentDataset = needsAllowAssetsInDifferentDataset(prepared.otherAssetDocuments, {projectId, dataset: args.dataset})
