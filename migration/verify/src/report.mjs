@@ -119,6 +119,31 @@ ${pairs}
   })
   .join('\n')
 
+// Interactive checks (src/interactive.mjs), when they have been run.
+const interactiveFile = path.join(args.dir, 'interactive-results.json')
+const interactive = fs.existsSync(interactiveFile) ? readJson(interactiveFile) : null
+const tally = (items, ok) => (items?.length ? `${items.filter(ok).length}/${items.length}` : '')
+const interactiveRows = (interactive?.results ?? [])
+  .map((entry) => {
+    const testimonial = entry.testimonial
+    const cells = [
+      tally(entry.videos, (video) => video.playing),
+      tally(entry.stl, (model) => model.rendered && model.animating),
+      tally(entry.youtube, (frame) => frame.loaded && !frame.playerError),
+      tally(entry.youtube, (frame) => frame.played?.currentTime > 0),
+      tally(entry.youtubeOldSite, (frame) => frame.played?.currentTime > 0),
+      testimonial ? `${testimonial.name}: art ${testimonial.artMatchesSanity && testimonial.artMatchesOldSite ? 'matches' : 'DIFFERS'}, reveal ${testimonial.revealWorks ? 'works' : 'FAILS'}${testimonial.rotation ? `, rotated to ${testimonial.rotation.after32s}` : ''}` : '',
+      entry.disqus ? (entry.disqus.same ? `same thread (t_i=${entry.disqus.new.identifier})` : 'DIFFERS') : '',
+    ]
+    return `<tr><td><code>${escape(entry.route)}</code></td><td>${entry.viewport}</td>${cells.map((cell) => `<td>${escape(cell)}</td>`).join('')}</tr>`
+  })
+  .join('\n')
+const interactiveSection = interactive
+  ? `<h2>Interactive checks (new site)</h2>
+<p class="muted">From <code>interactive-results.json</code> (${escape(interactive.generatedAt)}). YouTube "played" is after a click on the embed; "old site" is the same click on the old site.</p>
+<div class="wrap"><table><thead><tr><th>Route</th><th>Width</th><th>Mux videos playing</th><th>STL drawn and rotating</th><th>YouTube loaded</th><th>YouTube played</th><th>YouTube played (old site)</th><th>Testimonial</th><th>Disqus</th></tr></thead><tbody>${interactiveRows}</tbody></table></div>`
+  : '<p class="muted">Interactive checks have not been run (src/interactive.mjs).</p>'
+
 const index = results
   .map((result) => {
     const count = (verdict) => result.checks.filter((item) => item.verdict === verdict).length
@@ -168,6 +193,7 @@ figure { margin: 0; } figcaption { font-size: 12px; color: var(--muted); margin-
 <p class="muted">Old: <code>${escape(routesFile.old)}</code> · New: <code>${escape(routesFile.new)}</code> (dataset <code>${escape(args.dataset)}</code>) · generated ${escape(generatedAt)} · filters medium=<code>${escape(routesFile.filters.medium)}</code>, technologies=<code>${escape(routesFile.filters.technology)}</code></p>
 <p>${results.length} routes: <span class="badge b-same">${totals[SAME]} same</span> <span class="badge b-expected">${totals[EXPECTED]} expected only</span> <span class="badge b-unexpected">${totals[UNEXPECTED]} unexpected</span>. Checks marked <span class="badge b-info">info</span> are third-party noise or behaviour shared with the old site.</p>
 <div class="wrap"><table><thead><tr><th>Route</th><th>Kind</th><th>Verdict</th><th>Unexpected</th><th>Expected</th><th>Text similarity</th></tr></thead><tbody>${index}</tbody></table></div>
+${interactiveSection}
 ${sections}
 </main>
 <script>

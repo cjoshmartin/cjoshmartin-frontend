@@ -33,8 +33,9 @@ export const VIEWPORTS = {
 }
 
 /**
- * Chrome for Testing from the Playwright cache. It is used instead of the headless shell because
- * it ships the proprietary codecs (H.264/AAC) Mux HLS playback needs. CHROME_PATH overrides it.
+ * The newest Chrome for Testing in the Playwright cache (any revision, so no download is needed).
+ * Chrome for Testing has the proprietary codecs (H.264/AAC) that Mux HLS playback needs.
+ * CHROME_PATH overrides it.
  */
 export function chromeExecutable() {
   if (process.env.CHROME_PATH) {
