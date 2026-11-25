@@ -4,6 +4,8 @@ import { stegaClean } from '@sanity/client/stega'
 import { hasAsset, originalImageUrl } from '@/sanity/lib/image'
 import type { TestimonialData } from '@/sanity/lib/types'
 
+import { parseAsciiArt, type AsciiArt } from './asciiArt'
+
 /** What the client-side Testimonial component needs, prepared on the server. */
 export interface TestimonialView {
   key: string
@@ -15,10 +17,31 @@ export interface TestimonialView {
   link?: string
   /** Plain text of the rich-text body (the old site stripped the HTML the same way). */
   body: string
-  /** Generated `<span>` markup (testimonial-ascii-art Function / migration). */
-  asciiArt: string
+  /**
+   * The generated art (testimonial-ascii-art Function / migration), parsed from its stored
+   * `<span>` markup. Null when the field is empty or holds anything but that markup.
+   */
+  asciiArt: AsciiArt | null
   imageUrl?: string
   imageAlt: string
+}
+
+/**
+ * Parses a testimonial's stored art. Art that is not the generator's markup is not rendered; the
+ * reason is logged on the server so the bad value can be found and regenerated.
+ */
+function testimonialAsciiArt(testimonial: NonNullable<TestimonialData>): AsciiArt | null {
+  // Stega (Visual Editing) can append invisible characters to string fields in Draft Mode.
+  const stored = stegaClean(testimonial.asciiArt)
+  if (!stored) {
+    return null
+  }
+  const parsed = parseAsciiArt(stored)
+  if (!parsed.ok) {
+    console.error(`Testimonial ${testimonial._id}: asciiArt is not generated art markup, so it is not shown (${parsed.reason})`)
+    return null
+  }
+  return parsed.art
 }
 
 export function toTestimonialView(testimonial: NonNullable<TestimonialData>): TestimonialView {
@@ -31,7 +54,7 @@ export function toTestimonialView(testimonial: NonNullable<TestimonialData>): Te
     relationship: testimonial.relationship ?? '',
     link: stegaClean(testimonial.link) ?? undefined,
     body: testimonial.body ? toPlainText(testimonial.body) : '',
-    asciiArt: testimonial.asciiArt ?? '',
+    asciiArt: testimonialAsciiArt(testimonial),
     imageUrl: hasAsset(image) ? originalImageUrl(image) : undefined,
     imageAlt: stegaClean(image?.alt) ?? '',
   }

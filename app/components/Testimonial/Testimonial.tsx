@@ -1,17 +1,45 @@
 'use client'
 
 import styles from './Testimonial.module.css'
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { motion } from "framer-motion";
 import TestimonialProgress from "@/app/components/TestimonialProgress";
 import LoadingImage from "@/app/components/LoadingImage/LoadingImage";
 import type { TestimonialView } from "./testimonialView";
+import type { AsciiArt } from "./asciiArt";
 
 interface TestimonialProps {
   testimonial?: TestimonialView;
   title?: string,
   all?: TestimonialView[],
   shouldHideImage?: boolean
+}
+
+/**
+ * The parsed art as React elements: the same spans, line breaks and whitespace the stored markup
+ * describes, without ever injecting the markup itself.
+ */
+function AsciiArtContent({ art }: { art: AsciiArt }) {
+  const pieces = art.pieces.map((piece, index) => {
+    if (piece.type === "char") {
+      return (
+        <span key={index} style={{ color: piece.color }}>
+          {piece.text}
+        </span>
+      );
+    }
+    if (piece.type === "br") {
+      return <br key={index} />;
+    }
+    return <Fragment key={index}>{piece.text}</Fragment>;
+  });
+  return (
+    <>
+      {art.leading}
+      {art.wrapped ? <span>{pieces}</span> : pieces}
+      {art.trailing}
+    </>
+  );
 }
 
 export default function Testimonial({ testimonial, title, all, shouldHideImage }: TestimonialProps) {
@@ -61,10 +89,9 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
           <div
             className={styles.image}
             style={{ opacity: isRevealed ? 0 : 1 }}
-            dangerouslySetInnerHTML={{
-              __html: test.asciiArt,
-            }}
-          />
+          >
+            {test.asciiArt && <AsciiArtContent art={test.asciiArt} />}
+          </div>
           {test.imageUrl && (
             <LoadingImage
               className={styles.revealedImage}
