@@ -319,7 +319,7 @@ The README's restore section was updated, and it now notes that the first backup
 
 ## Open questions from WP5a, answered
 
-- **Real Mux master download.** It works on this Mux plan. All 10 masters were stored in one run, with no warnings. Each one takes roughly 10–30 s of polling after `PUT master-access`. Within 24 hours, a second run skips the PUT because master access is still `temporary`. The staging S1 run, which downloaded all 10 again, took 53 s in total.
+- **Real Mux master download.** It works on this Mux plan. All 10 masters were stored in one run, with no warnings and no timeouts. That whole first run, with 115 assets and 10 masters, took 3 min 36 s; the time per video was not measured. Within 24 hours, a second run skips the PUT because master access is still `temporary`: the staging S1 log has no "Requesting temporary master access" lines. That run, which downloaded all 10 again, took 53 s in total.
 - **Plain `delete` of `versions.*` ids.** The Mutate API accepts it. Tested for real in the release round trip.
 - **`_createdAt` after an import.** Documents the import creates keep the snapshot's value. Documents that already exist keep the target's. A re-created release gets the time of the import.
 - **Releases through the restore.** A release definition and its version are restored by `sanity datasets import`, and `--verify` compares the release document field by field.
