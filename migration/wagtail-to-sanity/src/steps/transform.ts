@@ -44,13 +44,26 @@ export function countByType(documents: SanityDocument[]): Record<string, {publis
   return Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)))
 }
 
-export async function transform(paths: DataPaths, dataset: Dataset): Promise<SanityDocument[]> {
+export async function transform(
+  paths: DataPaths,
+  dataset: Dataset,
+  options: {allowPendingVideos: boolean},
+): Promise<SanityDocument[]> {
+  const mux = readJson<MuxMap>(path.join(paths.state, 'mux-map.json'))
+  // The Mux map is shared by both datasets, so a map with pending videos may come from another
+  // run. Writing documents without those videos must be asked for on this run as well.
+  if (mux.pending.length && !options.allowPendingVideos) {
+    throw new Error(
+      `transform: ${mux.pending.length} videos are pending on Mux (media ${mux.pending.map((p) => p.mediaId).join(', ')}). ` +
+        'Run the mux step once Mux accepts them, or pass --allow-pending-videos to write everything else without them.',
+    )
+  }
   const data = loadExport(paths.exportJson)
   const result = buildDocuments({
     data,
     tagSlugs: loadTagSlugs(paths.dumpdataJson),
     assets: readJson<AssetMap>(path.join(paths.state, `assets-${dataset}.json`)),
-    mux: readJson<MuxMap>(path.join(paths.state, 'mux-map.json')),
+    mux,
     ascii: readJson<AsciiMap>(path.join(paths.state, `ascii-${dataset}.json`)),
     schema: await loadStudioSchema(),
   })

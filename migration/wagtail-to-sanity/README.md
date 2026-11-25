@@ -16,9 +16,18 @@ npm run migrate -- --dataset staging
 ```
 
 `--dataset production` also needs `--confirm-production`. Other options: `--steps a,b`,
-`--no-gcs-sync`, `--data-dir <path>`, and `--allow-pending-videos`. That last one is for staging
-only: when Mux refuses new assets because of the free plan's 10-asset limit, the run continues
-and the missing videos are recorded, but validation still fails until every video is on Mux.
+`--no-gcs-sync`, `--data-dir <path>`, and `--allow-pending-videos`. With that last one, when Mux
+refuses new assets because of the free plan's 10-asset limit, the run continues and the missing
+videos are recorded as pending in `state/mux-map.json`. Everything else is imported, and the video
+blocks keep their weak references to `mux-video-<id>`, so they resolve as soon as a later run
+creates those documents. Validation still fails until every video is on Mux. The transform
+refuses a Mux map with pending videos unless the flag is given on that run too, so
+`--steps transform,import` can't import without the videos by accident.
+
+Compare two datasets (document ids, counts, every document, Portable Text hashes and the two
+transform outputs) with `npm run compare -- --datasets staging,production`. It writes
+`reports/wp3/compare-staging-production.{json,md}` and exits non-zero on any difference. Assets
+may differ only in `uploadId` and in the dataset name inside `path` and `url`.
 
 Secrets come from the environment or from `~/cjoshmartin-migration/secrets.env`
 (`SANITY_WRITE_TOKEN`, `MUX_TOKEN_ID`, `MUX_TOKEN_SECRET`). They are never logged. The Sanity CLI

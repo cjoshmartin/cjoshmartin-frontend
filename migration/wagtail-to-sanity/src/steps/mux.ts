@@ -11,7 +11,7 @@
  */
 import path from 'node:path'
 
-import {gcsPublicUrl, MUX_PASSTHROUGH_PREFIX, type Dataset, type DataPaths, type Secrets} from '../config'
+import {gcsPublicUrl, MUX_PASSTHROUGH_PREFIX, type DataPaths, type Secrets} from '../config'
 import {log, readJson, sleep, writeJson} from '../util'
 import {loadExport} from '../wagtail'
 import type {Inventory} from './extract'
@@ -125,15 +125,17 @@ function publicPlaybackId(asset: MuxAsset): string {
   return id
 }
 
+/**
+ * Mux is one environment for both datasets, so this step does not depend on the dataset. With
+ * `allowPendingVideos`, a refusal because of the free plan's asset limit records the remaining
+ * videos as pending instead of failing (the CLI only accepts that for production together with
+ * --confirm-production); validation keeps failing until they are on Mux.
+ */
 export async function migrateVideos(
   paths: DataPaths,
-  dataset: Dataset,
   secrets: Secrets,
   options: {allowPendingVideos: boolean},
 ): Promise<MuxMap> {
-  if (options.allowPendingVideos && dataset === 'production') {
-    throw new Error('--allow-pending-videos is only allowed for staging; production needs every video on Mux')
-  }
   const data = loadExport(paths.exportJson)
   const inventory = readJson<Inventory>(path.join(paths.state, 'inventory.json'))
   const mux = new MuxClient(secrets)
@@ -190,7 +192,7 @@ export async function migrateVideos(
     throw new Error(
       `${limitError.message}\n${pending.length} of ${data.media.length} videos have no Mux asset ` +
         `(media ${pending.map((p) => p.mediaId).join(', ')}). Upgrade the Mux environment from the free plan, ` +
-        'then rerun. For a staging rehearsal without them, pass --allow-pending-videos.',
+        'then rerun. To import everything else without them, pass --allow-pending-videos.',
     )
   }
 

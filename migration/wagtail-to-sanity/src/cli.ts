@@ -23,9 +23,11 @@
  *   --steps a,b,c                    run only these steps (each still reads the state of the
  *                                    steps before it from state/)
  *   --no-gcs-sync                    reuse the local bucket mirror instead of running gsutil
- *   --allow-pending-videos           staging only: when Mux refuses new assets (free plan limit),
- *                                    record the videos as pending and run the remaining steps;
- *                                    validation still fails until every video is on Mux
+ *   --allow-pending-videos           when Mux refuses new assets (free plan limit), record the
+ *                                    videos as pending and run the remaining steps; validation
+ *                                    still fails until every video is on Mux. The transform refuses
+ *                                    pending videos without it. With production it also needs
+ *                                    --confirm-production.
  *   --data-dir <path>                migration data folder (default ~/cjoshmartin-migration)
  */
 import {parseArgs} from 'node:util'
@@ -83,7 +85,7 @@ async function main(): Promise<void> {
       }
       case 'mux': {
         const {migrateVideos} = await import('./steps/mux')
-        await migrateVideos(paths, target, loadSecrets(paths), {
+        await migrateVideos(paths, loadSecrets(paths), {
           allowPendingVideos: values['allow-pending-videos'],
         })
         break
@@ -95,7 +97,7 @@ async function main(): Promise<void> {
       }
       case 'transform': {
         const {transform} = await import('./steps/transform')
-        await transform(paths, target)
+        await transform(paths, target, {allowPendingVideos: values['allow-pending-videos']})
         break
       }
       case 'import': {

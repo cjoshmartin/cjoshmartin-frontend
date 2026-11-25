@@ -10,6 +10,7 @@
   },
   "scripts": {
     "migrate": "tsx src/cli.ts",
+    "compare": "tsx src/compare.ts",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

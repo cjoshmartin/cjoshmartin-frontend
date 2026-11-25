@@ -26,6 +26,8 @@ export interface StudioSchema {
   }
   /** Non-block member types of blockContent (imageBlock, youtube, code, ...). */
   blockObjects: string[]
+  /** Document type -> names of its top-level blockContent fields (e.g. blogPost -> ["body"]). */
+  portableTextFields: Record<string, string[]>
   /** Studio constants (stored codes and option lists). */
   constants: typeof import('../../../../studio/schemaTypes/constants')
   validation: typeof import('../../../../studio/schemaTypes/shared/validation')
@@ -85,6 +87,15 @@ async function compile(): Promise<StudioSchema> {
     | undefined
   const decorators = (span?.decorators ?? []).map((d) => d.value)
 
+  const portableTextFields: Record<string, string[]> = {}
+  for (const name of schema.getTypeNames()) {
+    const type = schema.get(name) as ObjectSchemaType | undefined
+    if (type?.type?.name !== 'document') continue
+    const fields = type.fields.filter((f) => f.type.name === 'blockContent').map((f) => f.name)
+    if (fields.length) portableTextFields[name] = fields
+  }
+  if (Object.keys(portableTextFields).length === 0) throw new Error('No document type has a blockContent field')
+
   const result: StudioSchema = {
     blockContent,
     block: {
@@ -94,6 +105,7 @@ async function compile(): Promise<StudioSchema> {
       annotations: marksField?.of.map((m) => m.name) ?? [],
     },
     blockObjects: blockContent.of.filter((m) => m.name !== 'block').map((m) => m.name),
+    portableTextFields,
     constants,
     validation,
   }
