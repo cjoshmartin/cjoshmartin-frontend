@@ -7,7 +7,7 @@ import {createGzip, gunzipSync} from 'node:zlib'
 
 import {packTar} from 'modern-tar/fs'
 
-import {findLatestMarker, MANIFEST_FORMAT_VERSION} from './backup.mjs'
+import {findLatestMarker, MANIFEST_FORMAT_VERSION, parseMarker} from './backup.mjs'
 import {isImportableSystemDocumentId, isSystemDocumentId, sortById, toNdjson} from './documents.mjs'
 import {computeFingerprint} from './fingerprint.mjs'
 import {isTimestamp, markerKey, MARKERS_PREFIX, snapshotDataKey, snapshotManifestKey} from './layout.mjs'
@@ -98,18 +98,37 @@ export function needsAllowAssetsInDifferentDataset(otherAssetDocuments, {project
   })
 }
 
-export async function resolveSnapshot(storage, {snapshot, latest, fromDataset}) {
+// Picks the snapshot to restore. `sourceDataset` is the dataset the snapshot
+// must have been taken of: restore.mjs passes --from-dataset, which defaults
+// to the target --dataset, so a snapshot of one dataset is only ever imported
+// into another when the command says so. --latest considers only that
+// dataset's snapshots (staging and production share one bucket), and
+// --snapshot is refused when its marker names another dataset. Only a
+// --build-only run of an explicit --snapshot may leave it undefined.
+export async function resolveSnapshot(storage, {snapshot, latest, sourceDataset}) {
   if (snapshot && latest) throw new Error('Pass either --snapshot <ts> or --latest, not both')
   if (!snapshot && !latest) throw new Error('Pass --snapshot <ts> or --latest')
   if (snapshot) {
     if (!isTimestamp(snapshot)) throw new Error(`--snapshot must look like 20261129T090000Z, got ${snapshot}`)
     const exists = await storage.stat(markerKey(snapshot))
     if (!exists) throw new Error(`No marker ${markerKey(snapshot)}: that snapshot does not exist or never completed`)
+    if (sourceDataset !== undefined) {
+      const marker = parseMarker(await storage.readBuffer(markerKey(snapshot)), markerKey(snapshot))
+      if (marker.dataset !== sourceDataset) {
+        throw new Error(
+          `Snapshot ${snapshot} is of dataset ${marker.dataset}, not ${sourceDataset}. ` +
+            `To restore it into another dataset on purpose, pass --from-dataset ${marker.dataset}`,
+        )
+      }
+    }
     return snapshot
   }
+  if (sourceDataset === undefined) {
+    throw new Error('--latest needs the dataset the snapshot was taken of: pass --from-dataset <name> (it defaults to --dataset)')
+  }
   const keys = (await storage.list(MARKERS_PREFIX)).map((object) => object.key)
-  const found = await findLatestMarker(storage, keys, fromDataset ? {dataset: fromDataset} : {})
-  if (!found) throw new Error(`No completed snapshots${fromDataset ? ` of dataset ${fromDataset}` : ''} in ${storage.describe()}`)
+  const found = await findLatestMarker(storage, keys, {dataset: sourceDataset})
+  if (!found) throw new Error(`No completed snapshots of dataset ${sourceDataset} in ${storage.describe()}`)
   return found.timestamp
 }
 

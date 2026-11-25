@@ -184,7 +184,7 @@ test('a referenced asset missing from the bucket stops the build unless allowed'
   assert.ok(log.messages.warn.some((message) => message.includes(fixture.assets.stl._id)))
 })
 
-test('--latest picks the newest marker, optionally of one source dataset; --snapshot needs a marker', async (t) => {
+test('--latest picks the newest marker of the source dataset; --snapshot needs a marker of that dataset', async (t) => {
   const {storage, fixture, clock, tmpDir} = await backedUp(t)
   const first = (await storage.list('markers/')).map((object) => object.key)
   const staging = await runBackup({
@@ -198,14 +198,61 @@ test('--latest picks the newest marker, optionally of one source dataset; --snap
     tmpDir,
     log: quietLog(),
   })
-  assert.equal(await resolveSnapshot(storage, {latest: true}), staging.timestamp)
   const productionTs = first[0].slice('markers/'.length, -'.json'.length)
-  assert.equal(await resolveSnapshot(storage, {latest: true, fromDataset: 'production'}), productionTs)
+  // The staging snapshot is the newest marker overall, but never the answer for production.
+  assert.ok(staging.timestamp > productionTs)
+  assert.equal(await resolveSnapshot(storage, {latest: true, sourceDataset: 'staging'}), staging.timestamp)
+  assert.equal(await resolveSnapshot(storage, {latest: true, sourceDataset: 'production'}), productionTs)
+  await assert.rejects(resolveSnapshot(storage, {latest: true}), /--latest needs the dataset the snapshot was taken of/)
+  assert.equal(await resolveSnapshot(storage, {snapshot: productionTs, sourceDataset: 'production'}), productionTs)
+  await assert.rejects(
+    resolveSnapshot(storage, {snapshot: staging.timestamp, sourceDataset: 'production'}),
+    /Snapshot \d{8}T\d{6}Z is of dataset staging, not production\. To restore it into another dataset on purpose, pass --from-dataset staging/,
+  )
+  // Only a --build-only run of an explicit snapshot names no dataset.
   assert.equal(await resolveSnapshot(storage, {snapshot: productionTs}), productionTs)
-  await assert.rejects(resolveSnapshot(storage, {snapshot: '20200101T000000Z'}), /does not exist or never completed/)
-  await assert.rejects(resolveSnapshot(storage, {latest: true, fromDataset: 'nope'}), /No completed snapshots of dataset nope/)
+  await assert.rejects(resolveSnapshot(storage, {snapshot: '20200101T000000Z', sourceDataset: 'production'}), /does not exist or never completed/)
+  await assert.rejects(resolveSnapshot(storage, {latest: true, sourceDataset: 'nope'}), /No completed snapshots of dataset nope/)
   await assert.rejects(resolveSnapshot(storage, {snapshot: 'yesterday'}), /must look like/)
   await assert.rejects(resolveSnapshot(storage, {}), /--snapshot <ts> or --latest/)
+})
+
+test('restore.mjs never takes another dataset\'s snapshot unless --from-dataset names it', async (t) => {
+  const {dir, result} = await backedUp(t, {dataset: 'staging'})
+  const env = {...process.env}
+  delete env.SANITY_WRITE_TOKEN
+  delete env.MUX_TOKEN_ID
+  delete env.MUX_TOKEN_SECRET
+  const restore = async (...args) =>
+    spawnSync(
+      process.execPath,
+      [
+        path.join(here, '..', 'restore.mjs'),
+        '--source', 'local',
+        '--local-dir', dir,
+        '--build-only',
+        '--work-dir', await makeTempDir(t),
+        '--output', path.join(await makeTempDir(t), 'r.tar.gz'),
+        ...args,
+      ],
+      {encoding: 'utf8', env},
+    )
+
+  const latestForProduction = await restore('--latest', '--dataset', 'production')
+  assert.equal(latestForProduction.status, 1)
+  assert.match(latestForProduction.stderr, /No completed snapshots of dataset production/)
+
+  const snapshotIntoProduction = await restore('--snapshot', result.timestamp, '--dataset', 'production')
+  assert.equal(snapshotIntoProduction.status, 1)
+  assert.match(snapshotIntoProduction.stderr, /is of dataset staging, not production/)
+
+  const noDataset = await restore('--latest')
+  assert.equal(noDataset.status, 1)
+  assert.match(noDataset.stderr, /--latest needs --dataset or --from-dataset/)
+
+  const explicit = await restore('--latest', '--from-dataset', 'staging', '--dataset', 'production')
+  assert.equal(explicit.status, 0, explicit.stderr)
+  assert.match(explicit.stdout, new RegExp(`Restoring snapshot ${result.timestamp}`))
 })
 
 test('--exact plans to delete only documents and assets that are not in the snapshot', () => {
@@ -390,6 +437,7 @@ test('restore.mjs --build-only writes a tarball from a local backup without touc
   const run = spawnSync(process.execPath, [
     path.join(here, '..', 'restore.mjs'),
     '--latest',
+    '--from-dataset', DATASET,
     '--source', 'local',
     '--local-dir', dir,
     '--build-only',

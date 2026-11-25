@@ -34,7 +34,7 @@ export class BucketTooLargeError extends Error {
   }
 }
 
-function parseMarker(buffer, key) {
+export function parseMarker(buffer, key) {
   let marker
   try {
     marker = JSON.parse(buffer.toString('utf8'))

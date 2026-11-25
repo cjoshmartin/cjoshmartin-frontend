@@ -25,8 +25,10 @@ const USAGE = `Usage: node restore.mjs (--snapshot <ts> | --latest) --dataset <t
 
 Snapshot selection:
   --snapshot <ts>              A completed snapshot, e.g. 20261129T090000Z
-  --latest                     The newest completed snapshot (newest marker name)
-  --from-dataset <name>        With --latest: only consider snapshots of this source dataset
+  --latest                     The newest completed snapshot of the source dataset (newest marker name)
+  --from-dataset <name>        The dataset the snapshot was taken of (default: --dataset). A snapshot
+                               of another dataset is refused unless this names it, so
+                               --latest --dataset production never picks a staging snapshot.
 
 Source:
   --source gcs|local           Where the backups are (required)
@@ -122,7 +124,6 @@ async function main() {
   const log = createLogger()
 
   if (args.source !== 'gcs' && args.source !== 'local') throw new UsageError(`--source must be gcs or local\n\n${USAGE}`)
-  if (args['from-dataset'] && !args.latest) throw new UsageError('--from-dataset only applies to --latest')
   const buildOnly = args['build-only']
   if (buildOnly && (args.exact || args.verify || args.replace)) throw new UsageError('--build-only cannot be combined with --replace, --exact or --verify')
   let projectId
@@ -140,9 +141,20 @@ async function main() {
   if ((replace || args.verify) && !token) throw new UsageError('--replace, --exact and --verify need SANITY_WRITE_TOKEN (Editor role)')
   const concurrency = parsePositiveInteger(args.concurrency, '--concurrency') ?? 4
 
+  // The dataset the snapshot must be of. Defaults to the target, so restoring one dataset's
+  // snapshot into another always needs --from-dataset.
+  const sourceDataset = args['from-dataset'] ?? args.dataset
+  if (sourceDataset !== undefined) assertDatasetName(sourceDataset)
+  if (args.latest && sourceDataset === undefined) {
+    throw new UsageError(`--latest needs --dataset or --from-dataset: the dataset whose newest snapshot to use\n\n${USAGE}`)
+  }
+
   const storage = await createStorage({kind: args.source, bucket: args.bucket ?? process.env.BACKUP_BUCKET, localDir: args['local-dir']})
-  const timestamp = await resolveSnapshot(storage, {snapshot: args.snapshot, latest: args.latest, fromDataset: args['from-dataset']})
+  const timestamp = await resolveSnapshot(storage, {snapshot: args.snapshot, latest: args.latest, sourceDataset})
   log.info(`Restoring snapshot ${timestamp} from ${storage.describe()}`)
+  if (!buildOnly && sourceDataset !== args.dataset) {
+    log.warn(`Restoring a snapshot of dataset ${sourceDataset} into dataset ${args.dataset} (--from-dataset)`)
+  }
 
   const workDir = await mkdtemp(path.join(args['work-dir'] ?? os.tmpdir(), 'sanity-restore-'))
   const tarballPath = path.resolve(args.output ?? path.join(workDir, `snapshot-${timestamp}.tar.gz`))

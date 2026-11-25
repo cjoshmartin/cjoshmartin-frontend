@@ -45,7 +45,7 @@ Any document, draft, release version, asset, or system document that is added, e
 
 ### What a snapshot contains
 
-`data.ndjson.gz` is the full raw export, documents only, drafts included. `sanity-plugin-mux-input` stores its Mux API token in a `secrets.mux` document once the token is entered in the Studio. If the backup token can read that document, the snapshot contains it too, and a restore brings it back. On 2026-11-26 neither dataset had that document yet, so whether a Viewer token can read it could not be checked. The bucket is private, and only the backup service account and project owners can read it. If the bucket is ever exposed, rotate the Mux token.
+`data.ndjson.gz` is the full raw export, documents only, drafts included. `sanity-plugin-mux-input` stores its Mux API token in a `secrets.mux` document once the token is entered in the Studio. The Viewer token can read such documents: on 2026-11-25 a temporary `secrets.wp8-viewer-check` document of type `mux.apiKey` (dummy values) in `staging` was returned to the Viewer token by both a raw-perspective query and the Export API, and not to an anonymous request; it was deleted afterwards. So once the Mux token is entered, every snapshot contains `secrets.mux`, and a restore brings it back. The bucket is private, and only the backup service account and project owners can read it. If the bucket is ever exposed, rotate the Mux token.
 
 ### Videos
 
@@ -120,7 +120,7 @@ They also include a contract test that feeds the restore tarball to `@sanity/imp
 
 What `restore.mjs` does:
 
-1. It picks the snapshot (`--snapshot <ts>`, or `--latest` with an optional `--from-dataset`). It only accepts snapshots that have a marker.
+1. It picks the snapshot (`--snapshot <ts>`, or `--latest`). It only accepts snapshots that have a marker, and only snapshots of the source dataset: `--from-dataset`, which defaults to the target `--dataset`. Staging and production share the bucket, so `--latest --dataset production` takes the newest *production* snapshot even when a staging snapshot is newer, and `--snapshot <ts>` is refused when that snapshot is of another dataset. Restoring one dataset's snapshot into another (for example production into staging) needs `--from-dataset <source>`; the restore then prints a warning naming both.
 2. It checks integrity: the manifest's hash against the marker, `data.ndjson.gz`'s hash against the manifest, and the documents' fingerprint against the marker.
 3. It builds a standard import tarball, the same layout `sanity datasets export` produces: `<dataset>-<ts>/data.ndjson`, `assets.json`, `images/`, `files/`.
    - Asset documents are left out. Every `{asset: {_ref: "image-…"}}` becomes `{_sanityAsset: "image@file://./images/<sha1>.<ext>"}`, and the binaries come from the bucket. The import uploads each binary (or reuses an identical one already in the target) and recreates the same content-addressed asset ids. `assets.json` restores asset metadata such as `originalFilename`. Every asset in the snapshot is included, referenced or not.
