@@ -1,0 +1,55 @@
+{
+  "name": "cjoshmartin-studio",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Standalone Sanity Studio for cjoshmartin.com",
+  "main": "package.json",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "sanity dev",
+    "build": "sanity build",
+    "preview": "sanity preview",
+    "deploy": "sanity deploy",
+    "schema:extract": "sanity schemas extract --workspace production --path schema.json --force",
+    "schema:validate": "sanity schemas validate --workspace production && sanity schemas validate --workspace staging",
+    "schema:deploy": "sanity schemas deploy",
+    "typegen": "npm run schema:extract && sanity typegen generate",
+    "validate": "sanity documents validate --workspace production --level error --yes",
+    "validate:staging": "sanity documents validate --workspace staging --level error --yes",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "keywords": [
+    "sanity"
+  ],
+  "dependencies": {
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/legacy-modes": "^6.5.5",
+    "@sanity/code-input": "^7.3.16",
+    "@sanity/icons": "^5.4.0",
+    "@sanity/vision": "^6.25.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "sanity": "^6.25.0",
+    "sanity-plugin-mux-input": "^5.4.0",
+    "styled-components": "^6.7.0"
+  },
+  "devDependencies": {
+    "@sanity/blueprints": "^0.34.1",
+    "@sanity/eslint-config-studio": "^7.0.0",
+    "@types/node": "^24.19.4",
+    "@types/react": "^19.3.3",
+    "eslint": "^10.15.0",
+    "prettier": "^3.10.1",
+    "typescript": "~6.0.3"
+  },
+  "prettier": {
+    "bracketSpacing": false,
+    "printWidth": 100,
+    "semi": false,
+    "singleQuote": true
+  }
+}
