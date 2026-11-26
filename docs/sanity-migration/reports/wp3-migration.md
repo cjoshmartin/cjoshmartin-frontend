@@ -357,3 +357,335 @@ generated `sanity.imageMetadata` type. I left staging as it is rather than strip
 2. **The `secrets.mux` document** is absent in both datasets. The Mux token still has to be saved
    once per dataset in the Studio's Videos tool (manual test 30). The migration never writes
    that document.
+
+
+## Videos as MP4 file assets, Mux removed (work package B, 2026-11-26)
+
+Owner decision: drop Mux. Every video is stored in Sanity as an MP4 file asset, converted with
+the fixed settings of [`studio/functions/video-to-mp4/settings.ts`](../../../studio/functions/video-to-mp4/settings.ts)
+(`h264-crf23-max1920-v1`), and the original upload stays in the dataset as a hidden reference
+that is never served. This section supersedes everything above about Mux, `--allow-pending-videos`,
+the `mux` and old `videos` steps and the "19 videos missing" blocker. All 29 videos are now in
+both datasets.
+
+### Result
+
+All 29 Wagtail videos are MP4 file assets in **both** `staging` and `production`, and Mux is
+gone:
+
+- **Validation:** 12 of 12 checks pass on `production` (06:15, 06:19 and 06:24 UTC, the last
+  with the final code) and on `staging` (06:08 and 06:27 UTC, the last with the final code); see
+  [Validation results](#validation-results).
+- **Documents:** each dataset has 96 migration documents: 76 published, 20 drafts. That is 106
+  minus the 10 `mux.videoAsset` documents the import pruned. No `mux.*` document, block or
+  `secrets.mux` is left.
+- **Assets:** each dataset gained 58 file assets: 29 originals and 29 MP4s, with the same
+  content-hash ids in both. In total there are 110 image and 63 file assets.
+- **Video blocks:** all 29 are contract v2 with `conversion.status` `ready`. The video-to-mp4
+  Function, deployed at 05:58 UTC before both imports, ran on none of them.
+- **CDN:** the 29 production MP4s, downloaded anonymously from the CDN, are byte-identical to
+  the checked local files and pass the same checks again.
+- **Mux:** the 10 `wagtail-media-*` assets are deleted from the Mux account. Listing returns 0
+  assets, and each id answers 404.
+- **Convergence:** reruns converge. A full rerun of each dataset (staging 06:09, production
+  06:22 UTC) converted nothing, uploaded nothing, patched nothing and pruned nothing. Both wrote
+  the same NDJSON as before (`ec2d67f00a25c801…`, byte-identical for both datasets).
+- **One open issue for the settings owner:** media 14 (`step_count.mp4`) loses 18 of its 31
+  frames under the v1 settings. It is listed as a deviation with its evidence; see
+  [Conversion](#conversion).
+
+### What changed in `migration/wagtail-to-sanity/` (commits `ab56788`, `220feac`, `25e2851`)
+
+| Path | Change |
+|---|---|
+| `src/steps/mux.ts` | Deleted (Mux client, asset creation, steady-state asset JSON). |
+| `src/steps/convert.ts` (new) | Step `convert`: converts each of the 29 originals in `gcs/media/` with `buildFfmpegArgs` (preset `medium`, with `-loglevel error` added before the settings' arguments) to `~/cjoshmartin-migration/video-mp4/media-<id>/<base name>.mp4`. It checks every output and writes `state/video-mp4.json` and `reports/wp3/video-mp4.{json,md}`. It does not depend on the dataset. A rerun reuses an MP4 whose original sha1, settings version, preset, ffmpeg arguments and output sha1 are unchanged, and checks it again. |
+| `src/video/ffmpeg.ts` (new) | ffprobe and ffmpeg helpers, and the MP4 checks (`verifyMp4`), each with a stable check id. ffmpeg runs asynchronously, never through a shell. |
+| `src/conversion-deviations.ts` (new) | The one known deviation (media 14, below). An entry matches only the exact original sha1, settings version, output sha1 and set of failing checks. An entry that no longer matches fails the step. |
+| `src/steps/videos.ts` | Rewritten. Step `videos`, now part of the default run, uploads each original and its MP4 per dataset. It reuses existing assets and protects metadata the same way as the `assets` step. Writes `state/videos-<dataset>.json`. |
+| `src/transform/documents.ts` | A Wagtail `media` block becomes a contract v2 `video` block (`videoBlock`). There are no `mux.videoAsset` documents any more, and `muxVideoDocument` and `withArrayKeys` (Mux only) are gone. |
+| `src/steps/validate.ts` | The new `videos` check (below) replaces `mux`. `assets` now covers the 29 originals. The Mux-pending branch of `references` and the expected `mux.videoAsset` count are gone. |
+| `src/transform/schema.ts` | No longer loads `sanity-plugin-mux-input`, which A1 removed from the Studio. |
+| `src/config.ts` | No `MUX_TOKEN_ID`/`MUX_TOKEN_SECRET` and no passthrough prefix. Adds `video-mp4/` and `mediaAssetSourceId`. Only `SANITY_WRITE_TOKEN` is read. |
+| `src/import-guard.ts`, `src/steps/import.ts` | `addToImportRecord`, used only by the old `videos` step, is gone. `mux-video-<id>` stays in `MIGRATION_ID_PATTERN` on purpose. The import records listed those 10 documents, so the import treats them as its own and prunes them (without the pattern they would count as deleted and block the import). |
+| `src/compare.ts`, `src/comparison.ts` | The `secrets.mux` special case is now general: `secrets.*` documents are never read, only their ids are listed. |
+| `src/cli.ts` | Steps `extract → assets → convert → videos → ascii → transform → import → validate` (`baseline` only with `--steps`). `--allow-pending-videos` is gone. |
+| `test/` | Mux tests removed. New `test/video.test.ts` covers the probe helpers, the MP4 box parser, the asset plan, the deviations and the metadata guard. `videoBlock` tests check the shape and that the Studio's `videoNeedsConversion` is false. New `test/ffmpeg.integration.ts` (`npm run test:ffmpeg`) uses the real ffmpeg: it converts a rotated clip with mono audio and a GPS tag and an odd-sized silent clip, and checks that bad files are rejected. |
+| `README.md`, `package.json` | Updated, with a new `test:ffmpeg` script. `package.json` never had a Mux dependency (the Mux client used `fetch`). |
+
+`npm test` 70 of 70, `npm run test:ffmpeg` 4 of 4, `npm run typecheck` clean.
+
+How to run: `npm run migrate -- --dataset staging` runs the whole pipeline (ffmpeg and ffprobe must
+be on the `PATH`). Production also needs `--confirm-production`. The runs here used
+`--steps assets,convert,videos,ascii,transform,import,validate`. They left out `extract`, which
+would have re-synced the bucket mirror (`gcs/`) and re-unzipped `extracted/`, two folders this
+package did not own today. Instead, `convert` checks every original's sha1 against
+`state/inventory.json`.
+
+### Conversion
+
+`ffmpeg version 9.0.1` and `ffprobe 9.0.1` (Homebrew, macOS arm64, 11 CPUs), preset `medium`.
+
+The 29 originals are 5 VP9 in `.mov`, 18 H.264 and 6 HEVC; 16 have audio, 3 are rotated by
+-90°, and 11 have a side longer than 1920 px. They shrank from 261.21 MiB to 86.00 MiB (33 %).
+Six MP4s are larger than their originals (media 2, 3, 5, 6, 8, 12). Their sources are
+low-bitrate VP9 or H.264, and CRF 23 is fixed.
+
+Checks on every output (`src/video/ffmpeg.ts`):
+
+- exactly one video stream, H.264 **High**, `yuv420p`;
+- both sides even, the longest side at most 1920, and the size equal to `expectedOutputSize` of
+  the displayed (rotation-corrected) input size, with no rotation left;
+- top-level boxes with `moov` before `mdat` (faststart);
+- one stereo AAC stream exactly when the input has audio, and no other streams;
+- no format or stream metadata except ffmpeg's own (`major_brand`, `minor_version`,
+  `compatible_brands`, `encoder`, `language`, `handler_name`, `vendor_id`);
+- video, audio and file durations each within 0.1 s of the input;
+- `ffprobe -count_frames` decodes as many frames as the header declares, and
+  `ffmpeg -xerror -err_detect explode -f null` decodes every stream without a message.
+
+Before/after sizes. Decoded frames are added because of the deviation below.
+
+| Media | Original | Video in | Audio in | MiB in | Size out | Audio out | MiB out | Frames in / out |
+|---|---|---|---|---|---|---|---|---|
+| 1 | `7415f78306d7420ca4a385f0c876247f_1.mov` | vp9 720x1280 | aac 2 ch | 0.92 | 720x1280 | AAC 2 ch | 0.82 | 123 / 123 |
+| 2 | `IMG_6810.MOV` | vp9 1440x1920 | aac 2 ch | 2.29 | 1440x1920 | AAC 2 ch | 2.37 | 103 / 103 |
+| 3 | `IMG_7386.MOV` | vp9 1440x1920 | aac 2 ch | 1.14 | 1440x1920 | AAC 2 ch | 1.21 | 84 / 84 |
+| 4 | `6be87f59f8274485a421101a6bc59034.mov` | vp9 720x1280 | aac 2 ch | 1.29 | 720x1280 | AAC 2 ch | 1.27 | 156 / 156 |
+| 5 | `1d06b6eff7cf4a318c3b8a927cb55d44.mov` | vp9 720x1280 | aac 2 ch | 1.05 | 720x1280 | AAC 2 ch | 1.13 | 151 / 151 |
+| 6 | `yt1s.com_-_Squid_Game_Red_Light_Green_Light_English_version.mp4.webm` | h264 640x320 | aac 2 ch | 9.07 | 640x320 | AAC 2 ch | 11.01 | 3938 / 3938 |
+| 7 | `IMG_3151.MOV` | hevc 1920x1080 rot -90 | aac 2 ch | 19.25 | 1080x1920 | AAC 2 ch | 5.74 | 470 / 470 |
+| 8 | `ca2338621e154538b9d3c582b6f2704b.mov` | h264 720x1280 | aac 2 ch | 2.14 | 720x1280 | AAC 2 ch | 3.01 | 345 / 345 |
+| 9 | `export_1711667273802.MOV` | hevc 576x1024 | aac 2 ch | 35.14 | 576x1024 | AAC 2 ch | 11.59 | 1767 / 1767 |
+| 10 | `IMG_3239.MOV` | h264 1920x1440 rot -90 | aac 1 ch | 37.84 | 1440x1920 | AAC 2 ch | 14.25 | 476 / 476 |
+| 11 | `Screen_Recording_2021-11-10_at_11.44.10_AM.mp4` | h264 1280x720 | none | 21.95 | 1280x720 | none | 2.04 | 3559 / 3559 |
+| 12 | `4db2f4c84bab42fba31f8e7e27f9d485.mov` | h264 720x1280 | aac 2 ch | 2.08 | 720x1280 | AAC 2 ch | 3.03 | 303 / 303 |
+| 13 | `IMG_3240.mp4` | h264 1280x720 | aac 1 ch | 9.69 | 1280x720 | AAC 2 ch | 7.67 | 764 / 764 |
+| 14 | `step_count.mp4` | h264 1004x2176 | none | 0.10 | 884x1920 | none | 0.04 | 31 / 13 |
+| 15 | `IMG_0169.MOV` | hevc 1920x1440 rot -90 | pcm_s16le 1 ch | 25.22 | 1440x1920 | AAC 2 ch | 8.76 | 594 / 594 |
+| 16 | `Untitled.mp4` | h264 1004x2176 | none | 2.34 | 884x1920 | none | 0.22 | 325 / 325 |
+| 17 | `Screen_Recording_2025-05-05_at_1.57.42PM.mov` | h264 942x1916 | none | 0.42 | 942x1916 | none | 0.09 | 325 / 325 |
+| 18 | `Screen_Recording_2025-05-05_at_2.19.49PM.mov` | h264 1008x2182 | none | 2.24 | 886x1920 | none | 0.26 | 548 / 548 |
+| 19 | `Screen_Recording_2025-05-05_at_2.28.21PM.mov` | h264 1008x2162 | none | 4.85 | 894x1920 | none | 0.58 | 1385 / 1385 |
+| 20 | `Screen_Recording_2025-05-05_at_2.38.07PM.mov` | h264 1008x2162 | none | 3.75 | 894x1920 | none | 0.43 | 892 / 892 |
+| 21 | `Screen_Recording_2025-05-05_at_2.48.07PM.mov` | h264 1008x2162 | none | 7.51 | 894x1920 | none | 1.00 | 1557 / 1557 |
+| 22 | `Screen_Recording_2025-05-05_at_2.55.11PM.mov` | h264 3420x2080 | none | 11.55 | 1920x1166 | none | 0.77 | 1834 / 1834 |
+| 23 | `Screen_Recording_2025-05-05_at_3.35.34PM.mov` | h264 918x2066 | none | 2.81 | 852x1920 | none | 0.44 | 478 / 478 |
+| 24 | `Screen_Recording_2025-05-05_at_3.34.49PM.mov` | h264 918x2066 | none | 3.83 | 852x1920 | none | 0.45 | 979 / 979 |
+| 25 | `Screen_Recording_2025-05-05_at_3.46.43PM.mov` | h264 918x2066 | none | 25.91 | 852x1920 | none | 3.88 | 2483 / 2483 |
+| 26 | `Screen_Recording_2025-05-05_at_3.53.38PM.mov` | h264 918x2066 | none | 4.44 | 852x1920 | none | 0.79 | 1503 / 1503 |
+| 27 | `ScreenRecording_07-22-2025_01-50-57_1.MP4` | hevc 886x1920 | aac 2 ch | 17.94 | 886x1920 | AAC 2 ch | 2.39 | 1433 / 1432 |
+| 28 | `deep_linking.MP4` | hevc 886x1920 | aac 2 ch | 1.69 | 886x1920 | AAC 2 ch | 0.31 | 398 / 398 |
+| 29 | `ScreenRecording_07-26-2025_20-39-27_1.MP4` | hevc 886x1920 | aac 2 ch | 2.78 | 886x1920 | AAC 2 ch | 0.47 | 282 / 282 |
+
+**28 of 29 pass every check. Media 14 passes only as a listed deviation.** It is an open issue for
+the owner of `settings.ts`:
+
+- `step_count.mp4` has a variable frame rate: 25 frames in its first 0.53 s, then 6 frames about
+  0.5 s apart.
+- With the v1 arguments, ffmpeg 9.0.1 uses 1/average frame rate (1/8.8 s) as the H.264 time base,
+  so frames that fall into the same tick are dropped. The MP4 keeps 13 of 31 frames and lasts
+  3.184 s instead of 3.4585 s (its last frame starts at 3.411 s instead of 3.446 s). Every other
+  check passes.
+- ffmpeg 6.0 (ffmpeg-static's macOS build) gives 34 frames and 3.866 s instead, with the same
+  arguments except `-autorotate`, which 6.0 rejected in that position (autorotation is on by
+  default). So how these arguments
+  handle a variable frame rate depends on the ffmpeg version, and the Function bundles 7.0.2.
+- Adding `-enc_time_base:v demux` kept all 31 frames with their original timestamps (tested with
+  9.0.1). That change belongs in `settings.ts` with a new `SETTINGS_VERSION`, which this package
+  does not own. After it, remove the entry in `src/conversion-deviations.ts` and rerun (see
+  "Open").
+
+Media 27 loses one frame (1432 of 1433) but stays within every check.
+
+Reproducibility: a second `convert` run reused all 29 MP4s and wrote an identical
+`state/video-mp4.json` (apart from `verifiedAt`). Converting media 14 again gave the same sha1
+(`e0714608ff35…`).
+
+### Assets per dataset
+
+For each media item:
+
+- **Original:** the bucket file, byte for byte, as a file asset. `originalFilename` is the bucket
+  name and `title` the Wagtail media title. `mimeType` is the type a browser reports for the
+  extension: `video/quicktime`, `video/mp4`, or `video/webm` for the `.mp4.webm` file (whose
+  content is MP4). `source` is `{name: "wagtail", id: "media-<id>", url: <public bucket URL>}`.
+- **MP4:** `originalFilename` comes from `convertedFilename` (`IMG_3151.MOV` → `IMG_3151.mp4`;
+  the `.mp4.webm` file becomes `….mp4.mp4`). `mimeType` is `video/mp4`, `title` the same, and
+  `source` is `{name: "video-to-mp4", id: <original asset _id>}`.
+
+Like every converter, the `videos` step first looks for an asset with that `video-to-mp4` source
+and reuses it. If its bytes differ from the local MP4 (because the Function made it), the step
+downloads it, runs the same checks on it, and reads its `settingsVersion` from the video blocks
+that already play it. If it fails a check, or no block (or more than one settings version) is
+recorded for it, the step fails. Neither dataset had such an asset, so all 29 MP4s
+are the local files. Asset ids are content hashes, so both datasets have the same 58 ids. Each
+dataset gains 261.21 MiB of originals and 86.00 MiB of MP4s.
+
+### Video blocks
+
+All 29 blocks are now in this shape: `project-6` 8, `project-7` 1, `project-8` 4, `project-23` 10,
+`blogPost-19` 3, `blogPost-39` 3. No draft has a video.
+
+```json
+{"_type": "video", "_key": "<Wagtail block id>",
+ "file": {"_type": "file", "asset": {"_type": "reference", "_ref": "file-<mp4 sha1>-mp4"}},
+ "original": {"_type": "file", "asset": {"_type": "reference", "_ref": "file-<original sha1>-<ext>"}},
+ "conversion": {"status": "ready", "sourceAssetId": "<original id>", "outputAssetId": "<mp4 id>",
+                "settingsVersion": "h264-crf23-max1920-v1", "updatedAt": "<conversion time>"}}
+```
+
+`conversion` has no `_type` (it is an inline object) and no `message`. `updatedAt` is the time the
+local conversion finished, so reruns write the same bytes. The old `asset` key is gone.
+
+### Validation
+
+`videos` replaces `mux`. For every video block in the dataset, published or draft, it checks:
+
+- the block matches a Wagtail media block, and has only `_type`, `_key`, `file`, `original` and
+  `conversion`;
+- `file` is a `video/mp4` file asset with extension `mp4` and
+  `source {name: "video-to-mp4", id: <original>}`, and its sha1 is the checked MP4;
+- `original` is the Wagtail upload: source `media-<id>`, the bucket sha1 and the expected MIME
+  type;
+- `conversion` is `ready`, with `sourceAssetId` = original, `outputAssetId` = file,
+  `settingsVersion` = the current `SETTINGS_VERSION` and a valid `updatedAt`;
+- the Studio's own `videoNeedsConversion` is false.
+
+It then checks that:
+
+- each migrated original has exactly one `video-to-mp4` asset (Function conversions of Studio
+  uploads are not counted);
+- every MP4 answers `HEAD` on the CDN with 200, `video/mp4` and its size;
+- no `mux.*` document, `secrets.mux` document or `mux.*` object is left anywhere.
+
+Known conversion deviations are listed as explained.
+
+#### Validation results
+
+`reports/validation-<dataset>.{json,md}` (outside git):
+
+| Check | `staging` (06:08 and 06:27 UTC) | `production` (06:15, 06:19 and 06:24 UTC) |
+|---|---|---|
+| counts | pass: 96 of 96 | pass: 96 of 96 |
+| assets | pass: 145 bucket files (29 videos) → 144 assets; 110 image + 34 file assets from `wagtail` | same |
+| hashes | pass: 111 equal, 5 explained | same |
+| references | pass: 279, 0 unresolved | same |
+| keys | pass: 764 arrays | same |
+| portableText | pass: 581 blocks, 729 spans | same |
+| textParity | pass: 291 values | same |
+| fieldParity | pass: 938 fields | same |
+| videos | pass: 29 of 29 ready MP4s, 29 of 29 served by the CDN, 0 Mux documents; media 14 explained | same |
+| asciiArt | pass: 9 of 9 | same |
+| convergence | pass: 96 documents | same |
+| studioValidation | pass: 0 errors | same |
+
+With `--level warning`, the Studio reports only the 2 known SEO descriptions over 160 characters.
+The 46 Mux "unknown field" warnings are gone.
+
+**Other agent's test data in staging.** Between 06:01 and about 06:22 UTC, the Function package
+(A2) ran its live check in staging. It used `blogPost-video-function-check`, its draft, its own
+uploads and the MP4s the Function made from them, and has since deleted all of it.
+
+- A staging validation at 06:19 UTC failed only because of that data: 16 failures (counts +1
+  published and +1 draft `blogPost`, 31 instead of 29 video blocks, convergence, and 10 Studio
+  "Required" errors), all on that document.
+- A comparison at 06:17 UTC reported 9 differences, again all that document, its 4 assets and
+  the counts and digest they change.
+- Every check was run again after the cleanup: staging passes 12 of 12 at 06:27 UTC.
+
+**Comparison** (`npm run compare -- --datasets staging,production`, 06:27 UTC): **identical**.
+
+- 96 documents and 173 assets in each dataset;
+- 269 of 269 shared ids identical (documents and assets);
+- Portable Text: 40 fields, 762 blocks, digest `93b706605bf50450…` in both datasets and in both
+  NDJSON files;
+- the NDJSON is byte-identical (`ec2d67f00a25c801…`);
+- no `secrets.*` documents.
+
+**CDN check.** All 29 MP4s of each dataset were downloaded anonymously from `cdn.sanity.io`. Each
+is HTTP 200 `video/mp4`, its sha1 equals both its asset id and the checked local file, and it passes
+`verifyMp4` again (media 14 with exactly its listed deviation).
+
+**Fixes made along the way:**
+
+- `sanity documents validate` exits 1 when it finds errors. The import's NDJSON check and the
+  `studioValidation` check then stopped with a bare `EEXIT: 1` and listed no errors. Both now
+  accept exit 1 only together with JSON that lists errors, and report each one (commit
+  `220feac`).
+- The first production convergence rerun (06:21 UTC) imported correctly, but then failed while
+  writing the import record: 25 documents "differ from the expected document". A read-only diff
+  right afterwards found 0 of 96 different. The cause: `sanity datasets import` writes references
+  weak and strengthens them in a second pass, and the query that builds the record lagged behind
+  that pass. This was a pre-existing race in `src/steps/import.ts`. The read-back after an import
+  (missing ids, stale ids, the record) now retries every 2 s until the dataset reads back as
+  imported. It fails with the last difference after 60 s, so a real difference still stops the
+  run (commit `25e2851`). The rerun after the fix (06:22 to 06:24 UTC) imported, recorded and validated
+  without needing a retry. The earlier record stayed valid, because the Studio-edit check
+  also accepts an unchanged content hash.
+
+### Mux cleanup
+
+- **Documents:** the import pruned `mux-video-1` to `mux-video-10` from both datasets
+  (staging 06:08:17 UTC, production 06:14:42 UTC). Neither dataset ever had a `secrets.mux`
+  document; validation checks that none appears.
+- **Mux account:** a one-off script outside the repo (it reads the token from `secrets.env` and
+  never prints it) first listed the account: 10 assets, all `ready`, passthrough
+  `wagtail-media-1` to `-10`. It then deleted each one (10 × `204`, 06:15 UTC). The listing right
+  after the deletes still showed 8, because Mux's list is eventually consistent. A new listing
+  returned **0 assets**, and `GET` of each of the 10 ids returns **404**.
+- **Code:** the migration package has no Mux code, configuration or token left. The only Mux
+  mentions are the retired `mux-video-<id>` id pattern (explained above) and the checks that no
+  Mux data is left.
+- **State:** `state/mux-map.json` described assets that no longer exist. It was moved to
+  `reports/wp3/package-b/mux-map-before-mux-removal.json` as a record, not deleted.
+
+### video-to-mp4 Function
+
+Another package deployed `video-to-mp4` to stack `ST-jc4gwa3c4t` at 05:58 UTC (10 GB, 900 s), before
+both imports. Its filter only matches blocks with `file.asset._ref != conversion.outputAssetId`,
+and the migrated blocks have them equal.
+
+There were 6 imports with v2 blocks: staging at 06:08, 06:11 and 06:26 UTC, production at 06:14,
+06:21 and 06:24 UTC. The Function's logs up to the last entry at 06:20:13 UTC (57 entries) are
+about only one document, `drafts.blogPost-video-function-check`, the other package's test in
+staging. None of the 58 migration asset ids appears in them, so no conversion ran on these
+imports. The
+`testimonial-ascii-art` Function's last entry is from 2026-11-25 22:47 UTC, so the imports did
+not trigger it either.
+
+### Open
+
+1. **Media 14 and variable frame rates (owner of `settings.ts`, high for future uploads).** The v1
+   arguments drop frames from bursty variable-frame-rate input, and the result depends on the
+   ffmpeg version. The Function converts Studio uploads with the same arguments, and iPhone
+   screen recordings are often like this.
+   - Tested fix: add `-enc_time_base:v demux` and bump `SETTINGS_VERSION`.
+   - Then remove the entry in `src/conversion-deviations.ts`. The `convert` step fails while the
+     entry is stale, so it can't be forgotten.
+   - Contract v2 does not yet say how an existing conversion is redone after a settings change.
+     The reuse rule looks only at `source.id` (the original), and a `ready` block never needs
+     conversion. So the old MP4 would be reused, and the `videos` step would record its old
+     `settingsVersion`, which validation then reports.
+   - Before redoing media 14 (or any video), delete its old `video-to-mp4` asset, or add the
+     settings version to the reuse lookup.
+2. **`scripts/decommission` (another package).** `lib.sh` `decom_mux_videos_complete` still
+   requires a ready `mux.videoAsset` per Wagtail video, so `04-gcs-lockdown.sh` now always
+   refuses. It should check the v2 blocks instead: every `video` block's
+   `file.asset->mimeType == "video/mp4"` with `conversion.status == "ready"` and
+   `defined(original.asset->_id)`. The originals are now copied into both datasets, so the bucket
+   no longer has to stay public for the videos.
+3. **Other documents still describe Mux** (owned by other packages): the morning report, the plan
+   (§2 D7, §9, §10, test 30), `scripts/decommission/README.md` and the earlier sections of this
+   report.
+4. **HDR (owner of `settings.ts`, already raised by the spike).** The MP4 of media 7
+   (`IMG_3151.MOV`) is 8-bit H.264 still tagged HLG (`arib-std-b67`). It passes every contract
+   check.
+
+Logs, scripts and state from this package are outside git:
+
+- `~/cjoshmartin-migration/reports/wp3/package-b/`: run logs, Function logs, CDN check, Mux
+  listings and the one-off scripts;
+- `reports/wp3/video-mp4.{json,md}`;
+- `state/video-mp4.json`, `state/videos-<dataset>.json`;
+- `video-mp4/media-<id>/`, with the 29 MP4s (86 MiB).
