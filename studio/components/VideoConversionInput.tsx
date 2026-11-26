@@ -2,10 +2,10 @@ import {useToast} from '@sanity/ui/toast'
 import {useEffect, useRef} from 'react'
 import {useClient, useFormValue, type ObjectInputProps} from 'sanity'
 
-import {RETRY_DELAY_SECONDS} from '../functions/video-to-mp4/trigger'
 import {API_VERSION} from '../lib/constants'
 import {
   nudgedConversion,
+  RETRY_DELAY_SECONDS,
   videoConversionNudge,
   type VideoValue,
 } from '../schemaTypes/shared/video-conversion'

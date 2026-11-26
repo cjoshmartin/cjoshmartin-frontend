@@ -3,16 +3,19 @@
  * "needs conversion" rule and the status line the Studio preview shows.
  */
 import assert from 'node:assert/strict'
+import {readFileSync} from 'node:fs'
 import {describe, it} from 'node:test'
 
 import {evaluate, parse} from 'groq-js'
 
 import {
-  RETRY_DELAY_SECONDS,
-  STALE_PROCESSING_SECONDS,
+  RETRY_DELAY_SECONDS as FUNCTION_RETRY_DELAY_SECONDS,
+  STALE_PROCESSING_SECONDS as FUNCTION_STALE_PROCESSING_SECONDS,
   VIDEO_TO_MP4_FILTER,
 } from '../functions/video-to-mp4/trigger'
 import {
+  RETRY_DELAY_SECONDS,
+  STALE_PROCESSING_SECONDS,
   nudgedConversion,
   videoConversionLabel,
   videoConversionNudge,
@@ -26,6 +29,23 @@ const MP4 = 'file-2222222222222222222222222222222222222222-mp4'
 const REPLACEMENT = 'file-3333333333333333333333333333333333333333-webm'
 
 const file = (ref: string) => ({_type: 'file', asset: {_type: 'reference', _ref: ref}})
+
+describe('the module itself', () => {
+  it('has only type imports, so Node can load it with its own type stripping (migration/verify)', () => {
+    const source = readFileSync(
+      new URL('../schemaTypes/shared/video-conversion.ts', import.meta.url),
+      'utf8',
+    )
+    const imports = source.split('\n').filter((line) => /^import\b/.test(line))
+    assert.ok(imports.length > 0)
+    for (const line of imports) assert.match(line, /^import type /, line)
+  })
+
+  it("uses the Function's timing", () => {
+    assert.equal(STALE_PROCESSING_SECONDS, FUNCTION_STALE_PROCESSING_SECONDS)
+    assert.equal(RETRY_DELAY_SECONDS, FUNCTION_RETRY_DELAY_SECONDS)
+  })
+})
 
 describe('videoNeedsConversion', () => {
   it('is false without a file', () => {

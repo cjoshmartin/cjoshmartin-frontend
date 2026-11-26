@@ -1,9 +1,22 @@
 /**
  * Pure helpers for the `video` object (video contract v2 in docs/sanity-migration/schema-contract.md).
  * No Studio dependencies, so they run in validation, previews, tests and `sanity documents validate`.
+ * Only type imports: migration/verify loads this file with Node's own type stripping, which cannot
+ * resolve extensionless imports.
  */
-import {RETRY_DELAY_SECONDS, STALE_PROCESSING_SECONDS} from '../../functions/video-to-mp4/trigger'
 import type {VideoConversionStatus} from '../constants'
+
+/**
+ * How old a `processing` mark must be before the video-to-mp4 Function treats it as a dead run.
+ * Equal to STALE_PROCESSING_SECONDS in functions/video-to-mp4/trigger.ts (a test checks it).
+ */
+export const STALE_PROCESSING_SECONDS = 20 * 60
+
+/**
+ * How long a retryable `pending` waits before the Function tries again. Equal to
+ * RETRY_DELAY_SECONDS in functions/video-to-mp4/trigger.ts (a test checks it).
+ */
+export const RETRY_DELAY_SECONDS = 10 * 60
 
 export interface VideoConversionValue {
   status?: VideoConversionStatus | string
