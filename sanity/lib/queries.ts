@@ -38,8 +38,14 @@ const portableTextItemProjection = /* groq */ `{
   _type == "video" => {
     _type,
     _key,
-    "url": file.asset->url,
-    "mimeType": file.asset->mimeType,
+    "hasFile": defined(file.asset._ref),
+    "status": conversion.status,
+    // Only the converted MP4 is ever played (video contract v2). While a block waits for its
+    // conversion, or after the conversion failed, file is the original upload, which the site
+    // never serves, so url is null.
+    "url": select(
+      defined(file.asset._ref) && file.asset._ref == conversion.outputAssetId && conversion.status == "ready" && file.asset->mimeType == "video/mp4" => file.asset->url
+    ),
     "filename": file.asset->originalFilename
   }
 }`

@@ -157,29 +157,33 @@ const MP4_MIME_TYPE = 'video/mp4'
 
 /**
  * Same behaviour as the old `<video autoPlay loop playsInline controls muted>`, playing the block's
- * file from the Sanity CDN. After conversion that file is the MP4. A block that is not converted
- * yet (or whose conversion failed) still plays its current file, so a new upload never disappears
- * from the page while it is being converted.
+ * converted MP4 from the Sanity CDN. The query only gives a URL for a block whose `file` is its
+ * converted MP4 (video contract v2), so a block that is still being converted, or whose
+ * conversion failed, renders nothing: its `file` is then the original upload, which the site never
+ * serves. The Studio shows the editor where each video stands, and a failed conversion blocks
+ * publishing.
  */
 function VideoBlock({ value: video }: { value: Extract<BodyItem, { _type: 'video' }> }) {
   const url = stegaClean(video.url)
   if (!url) {
-    // Validation requires a file, but a draft can be saved without one, and the asset can be deleted.
-    console.error(`PortableTextBody: video block ${video._key} has no video file`)
+    const status = stegaClean(video.status)
+    if (!video.hasFile) {
+      // Validation requires a file, but a draft can be saved without one, and the asset can be deleted.
+      console.error(`PortableTextBody: video block ${video._key} has no video file`)
+    } else if (status === 'failed') {
+      console.error(`PortableTextBody: video block ${video._key} is not shown: its MP4 conversion failed`)
+    } else {
+      // A new upload: the video-to-mp4 Function is converting it, and SanityLive shows it when done.
+      console.warn(`PortableTextBody: video block ${video._key} is not shown until its MP4 conversion is ready`)
+    }
     return null
   }
-  const mimeType = stegaClean(video.mimeType)
   const filename = stegaClean(video.filename) ?? 'the video'
   return (
     // Keyed by the URL: a <source> change does not reload a <video>, so when a conversion finishes
     // (and SanityLive re-renders the page with the MP4) React mounts a new element instead.
     <video key={url} autoPlay loop muted playsInline controls preload="metadata">
-      {/*
-        The type is only a hint for skipping sources a browser can't play. It is set for MP4s. An
-        unconverted upload's own type (video/quicktime for a .mov) would make Chrome skip a file it
-        can often play, so it is left out and the browser decides from the file itself.
-      */}
-      <source src={url} type={mimeType === MP4_MIME_TYPE ? MP4_MIME_TYPE : undefined} />
+      <source src={url} type={MP4_MIME_TYPE} />
       <a href={url}>Download {filename}</a>
     </video>
   )
