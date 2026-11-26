@@ -19,7 +19,7 @@ import {markerKey} from '../lib/layout.mjs'
 import {buildRestoreArchive} from '../lib/restore.mjs'
 import {ObjectExistsError} from '../lib/storage/errors.mjs'
 import {GcsStorage} from '../lib/storage/gcs.mjs'
-import {buildDataset, DATASET, fakeAssetDownloader, fakeMuxArchiver, makeTempDir, PROJECT_ID, quietLog, steppingClock} from '../test/helpers.mjs'
+import {buildDataset, DATASET, fakeAssetDownloader, makeTempDir, PROJECT_ID, quietLog, sha1, steppingClock} from '../test/helpers.mjs'
 
 // Not STORAGE_EMULATOR_HOST: @google-cloud/storage reads that variable itself
 // and then uses it verbatim as the JSON API base URL, without /storage/v1.
@@ -55,21 +55,23 @@ test('create-only writes, listing, stat and downloads work with the real client'
   await gcs.createFromFile('assets/images/small.jpg', small, {contentType: 'image/jpeg', metadata: {sha1: 'x'}})
   await assert.rejects(gcs.createFromFile('assets/images/small.jpg', small), ObjectExistsError)
 
-  // Above the 8 MiB threshold the upload uses a resumable session.
+  // Above the 8 MiB threshold the upload uses a resumable session. Video
+  // files (the MP4s and the kept originals) are the assets that cross it.
   const big = path.join(dir, 'big.mp4')
   const bigBytes = randomBytes(9 * 1024 * 1024 + 17)
   await writeFile(big, bigBytes)
-  await gcs.createFromFile('assets/mux/Big1.mp4', big, {contentType: 'video/mp4'})
-  await assert.rejects(gcs.createFromFile('assets/mux/Big1.mp4', big), ObjectExistsError)
+  const bigKey = `assets/files/${sha1(bigBytes)}.mp4`
+  await gcs.createFromFile(bigKey, big, {contentType: 'video/mp4'})
+  await assert.rejects(gcs.createFromFile(bigKey, big), ObjectExistsError)
 
   assert.deepEqual(await gcs.list('assets/'), [
+    {key: bigKey, size: bigBytes.length},
     {key: 'assets/images/small.jpg', size: 1024},
-    {key: 'assets/mux/Big1.mp4', size: bigBytes.length},
   ])
-  assert.deepEqual(await gcs.stat('assets/mux/Big1.mp4'), {size: bigBytes.length})
-  assert.equal(await gcs.stat('assets/mux/missing.mp4'), null)
+  assert.deepEqual(await gcs.stat(bigKey), {size: bigBytes.length})
+  assert.equal(await gcs.stat(`assets/files/${'0'.repeat(40)}.mp4`), null)
   const downloaded = path.join(dir, 'downloaded.mp4')
-  await gcs.downloadToFile('assets/mux/Big1.mp4', downloaded)
+  await gcs.downloadToFile(bigKey, downloaded)
   assert.ok(Buffer.compare(await readFile(downloaded), bigBytes) === 0)
 })
 
@@ -83,7 +85,6 @@ test('a backup, a no-change run and a restore build work end to end on GCS', asy
       storage: gcs,
       exportDocuments: async () => fixture.documents,
       downloadAsset: fakeAssetDownloader(fixture.binaries),
-      muxArchiver: fakeMuxArchiver(),
       now: clock,
       tmpDir: work,
       log: quietLog(),
@@ -96,6 +97,11 @@ test('a backup, a no-change run and a restore build work end to end on GCS', asy
   const second = await run()
   assert.equal(second.status, 'no-change')
 
+  const {clipMp4, clipOriginal} = fixture.assets
+  assert.equal(sha1(await gcs.readBuffer(`assets/files/${clipMp4.sha1hash}.mp4`)), clipMp4.sha1hash)
+  assert.equal(sha1(await gcs.readBuffer(`assets/files/${clipOriginal.sha1hash}.mov`)), clipOriginal.sha1hash)
+
   const archive = await buildRestoreArchive({storage: gcs, timestamp: first.timestamp, workDir: work, tarballPath: path.join(work, 'r.tar.gz'), log: quietLog()})
-  assert.equal(archive.assetCount, 4)
+  assert.equal(archive.assetCount, 6)
+  assert.deepEqual(archive.missingAssetIds, [])
 })

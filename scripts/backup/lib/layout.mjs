@@ -1,10 +1,12 @@
-// Object names used in the backup bucket. Plan §10 defines this layout:
+// Object names used in the backup bucket. Plan §10 defines this layout, except
+// that its assets/mux/ prefix is gone: Mux was dropped, and every video is now an
+// ordinary Sanity file asset.
 //
 //   snapshots/<ts>/data.ndjson.gz   full raw export, documents only
-//   snapshots/<ts>/manifest.json    fingerprint, counts, asset list, Mux list
+//   snapshots/<ts>/manifest.json    fingerprint, counts, asset list
 //   assets/images/<sha1>.<ext>      each Sanity image, stored once
-//   assets/files/<sha1>.<ext>       each Sanity file, stored once
-//   assets/mux/<muxAssetId>.<ext>   original of each mux.videoAsset, stored once
+//   assets/files/<sha1>.<ext>       each Sanity file, stored once (videos included:
+//                                   the converted MP4 and the kept original alike)
 //   markers/<ts>.json               written last; the newest name is the latest snapshot
 //
 // <ts> is an ISO 8601 basic-format UTC timestamp (20261129T090000Z). It sorts
@@ -13,7 +15,6 @@
 export const SNAPSHOTS_PREFIX = 'snapshots/'
 export const MARKERS_PREFIX = 'markers/'
 export const ASSETS_PREFIX = 'assets/'
-export const MUX_PREFIX = 'assets/mux/'
 
 const TIMESTAMP_PATTERN = /^\d{8}T\d{6}Z$/
 
@@ -67,11 +68,4 @@ export function sanityAssetKey(kind, hash, extension) {
   if (!/^[a-f0-9]{40}$/.test(hash)) throw new Error(`Not a sha1 hex digest: ${hash}`)
   if (!/^[a-z0-9]+$/i.test(extension)) throw new Error(`Unsafe file extension: ${extension}`)
   return `${ASSETS_PREFIX}${kind}/${hash}.${extension}`
-}
-
-export function muxAssetKey(muxAssetId, extension) {
-  // Mux asset ids are alphanumeric. Refuse anything that could escape the prefix.
-  if (!/^[A-Za-z0-9]+$/.test(muxAssetId)) throw new Error(`Unexpected Mux asset id: ${muxAssetId}`)
-  if (!/^[a-z0-9]+$/.test(extension)) throw new Error(`Unsafe file extension: ${extension}`)
-  return `${MUX_PREFIX}${muxAssetId}.${extension}`
 }

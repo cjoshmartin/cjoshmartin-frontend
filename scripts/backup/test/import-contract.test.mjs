@@ -16,7 +16,6 @@ import {
   buildDataset,
   DATASET,
   fakeAssetDownloader,
-  fakeMuxArchiver,
   makeTempDir,
   newLocalStorage,
   PROJECT_ID,
@@ -149,7 +148,6 @@ test('@sanity/import turns the restore tarball back into the backed-up documents
     storage,
     exportDocuments: async () => fixture.documents,
     downloadAsset: fakeAssetDownloader(fixture.binaries),
-    muxArchiver: fakeMuxArchiver(),
     now: steppingClock(),
     tmpDir: await makeTempDir(t),
     log: quietLog(),
@@ -196,13 +194,36 @@ test('@sanity/import turns the restore tarball back into the backed-up documents
   const heroId = fixture.assets.hero._id
   assert.deepEqual(fake.docs.get(heroId).metadata, fixture.assets.hero.metadata)
 
+  // The video's MP4 and its kept original were each uploaded once, as files,
+  // with their own names. The MP4 gets its source back, so the converter can
+  // still find it by the original's id and never converts the video again.
+  const {clipMp4, clipOriginal} = fixture.assets
+  assert.deepEqual(
+    fake.uploads.filter((upload) => upload.id === clipMp4._id || upload.id === clipOriginal._id).map(({type, id, filename, size}) => ({type, id, filename, size})).sort((a, b) => (a.id < b.id ? -1 : 1)),
+    [
+      {type: 'file', id: clipMp4._id, filename: 'IMG_3151.mp4', size: clipMp4.size},
+      {type: 'file', id: clipOriginal._id, filename: 'IMG_3151.MOV', size: clipOriginal.size},
+    ].sort((a, b) => (a.id < b.id ? -1 : 1)),
+  )
+  assert.deepEqual(fake.docs.get(clipMp4._id).source, {name: 'video-to-mp4', id: clipOriginal._id})
+  assert.equal(fake.docs.get(clipMp4._id).originalFilename, 'IMG_3151.mp4')
+  // After the import the block plays the same MP4 its conversion record names,
+  // so the restored block does not need conversion.
+  for (const id of ['blogPost-7', 'drafts.blogPost-7']) {
+    const block = fake.docs.get(id).body.find((member) => member._type === 'video')
+    assert.equal(block.file.asset._ref, clipMp4._id)
+    assert.equal(block.original.asset._ref, clipOriginal._id)
+    assert.equal(block.conversion.outputAssetId, block.file.asset._ref)
+    assert.equal(block.conversion.sourceAssetId, block.original.asset._ref)
+  }
+
   // The release definition went through the release import action.
   assert.deepEqual(fake.actions.map((action) => [action.actionType, action.releaseId, action.ifExists]), [['sanity.action.release.import', 'rSpring', 'replace']])
 
   // Every other document comes back exactly as it was backed up.
   const original = new Map(fixture.documents.map((doc) => [doc._id, doc]))
   const restoredIds = archive.prepared.importDocuments.map((doc) => doc._id).filter((id) => !id.startsWith('_.'))
-  assert.deepEqual(restoredIds.sort(), ['blogPost-7', 'drafts.blogPost-7', 'mux-video-12', 'person-1', 'versions.rSpring.blogPost-7'])
+  assert.deepEqual(restoredIds.sort(), ['blogPost-7', 'drafts.blogPost-7', 'person-1', 'versions.rSpring.blogPost-7'])
   for (const id of restoredIds) {
     const restored = fake.docs.get(id)
     assert.ok(restored, `${id} was imported`)

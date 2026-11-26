@@ -24,12 +24,14 @@ import {
   restorableAssetFields,
   rewriteAssetReferences,
 } from '../lib/restore.mjs'
+import {describeAssetDocument} from '../lib/sanity-assets.mjs'
 import {deleteDocuments, patchDocuments} from '../lib/sanity-mutate.mjs'
 import {
   buildDataset,
   DATASET,
   fakeAssetDownloader,
-  fakeMuxArchiver,
+  fileAsset,
+  fileRef,
   imageAsset,
   makeTempDir,
   newLocalStorage,
@@ -52,7 +54,6 @@ async function backedUp(t, {dataset = DATASET, documents} = {}) {
     storage,
     exportDocuments: async () => documents ?? fixture.documents,
     downloadAsset: fakeAssetDownloader(fixture.binaries),
-    muxArchiver: fakeMuxArchiver(),
     now: clock,
     tmpDir,
     log: quietLog(),
@@ -84,12 +85,30 @@ test('asset references become _sanityAsset directives; everything else is untouc
     alt: 'Inline',
     layout: 'left',
   })
-  // A Mux video reference is a document reference, not an asset: unchanged.
-  assert.deepEqual(rewritten.body[2], post.body[2])
+  // A video block's MP4 and its kept original are file assets like any other;
+  // the conversion record is plain data and stays as it is.
+  assert.deepEqual(rewritten.body[2], {
+    _key: 'vid1',
+    _type: 'video',
+    file: {_sanityAsset: `file@file://./files/${assets.clipMp4.sha1hash}.mp4`, _type: 'file'},
+    original: {_sanityAsset: `file@file://./files/${assets.clipOriginal.sha1hash}.mov`, _type: 'file'},
+    conversion: post.body[2].conversion,
+  })
   assert.deepEqual(rewritten.author, post.author)
-  assert.deepEqual([...referenced].sort(), [assets.hero._id, assets.stl._id].sort())
+  assert.deepEqual([...referenced].sort(), [assets.hero._id, assets.stl._id, assets.clipMp4._id, assets.clipOriginal._id].sort())
   // The input is not mutated.
   assert.equal(post.heroMedia[0].asset._ref, assets.hero._id)
+})
+
+test('a file asset id with an upper-case extension is rewritten to the same file name the archive uses', () => {
+  const original = fileAsset(Buffer.from('an iPhone movie'), {extension: 'MOV', mimeType: 'video/quicktime', originalFilename: 'IMG_0169.MOV'})
+  const block = {_key: 'v', _type: 'video', file: fileRef(original), original: fileRef(original)}
+  const referenced = new Set()
+  const rewritten = rewriteAssetReferences(block, referenced)
+  assert.deepEqual(rewritten.file, {_sanityAsset: `file@file://./files/${original.sha1hash}.MOV`, _type: 'file'})
+  assert.deepEqual(rewritten.original, rewritten.file)
+  assert.deepEqual([...referenced], [original._id])
+  assert.equal(describeAssetDocument(original).key, `assets/files/${original.sha1hash}.MOV`)
 })
 
 test('hotspot and crop survive the rewrite', () => {
@@ -109,15 +128,11 @@ test('the import set drops Sanity-managed system documents and asset documents, 
     '_.releases.rSpring',
     'blogPost-7',
     'drafts.blogPost-7',
-    'mux-video-12',
     'person-1',
     'versions.rSpring.blogPost-7',
   ])
-  assert.equal(prepared.assetDocuments.length, 4)
+  assert.equal(prepared.assetDocuments.length, 6)
   assert.deepEqual(prepared.otherAssetDocuments, [])
-  const mux = prepared.importDocuments.find((doc) => doc._id === 'mux-video-12')
-  assert.equal(mux._type, 'mux.videoAsset')
-  assert.equal(mux.assetId, 'MuxAsset12abc')
 })
 
 test('the restore tarball is a standard import archive', async (t) => {
@@ -125,7 +140,7 @@ test('the restore tarball is a standard import archive', async (t) => {
   const work = await makeTempDir(t, 'restore-build-')
   const tarballPath = path.join(work, 'out', 'restore.tar.gz')
   const archive = await buildRestoreArchive({storage, timestamp: result.timestamp, workDir: work, tarballPath, log: quietLog()})
-  assert.equal(archive.assetCount, 4)
+  assert.equal(archive.assetCount, 6)
   assert.deepEqual(archive.missingAssetIds, [])
 
   const extracted = await makeTempDir(t, 'restore-extract-')
@@ -133,9 +148,12 @@ test('the restore tarball is a standard import archive', async (t) => {
   const root = path.join(extracted, `${DATASET}-${result.timestamp}`)
   assert.deepEqual((await readdir(root)).sort(), ['assets.json', 'data.ndjson', 'files', 'images'])
 
-  const {hero, avatar, unused, stl} = fixture.assets
+  const {hero, avatar, unused, stl, clipOriginal, clipMp4} = fixture.assets
   assert.deepEqual((await readdir(path.join(root, 'images'))).sort(), [`${avatar.sha1hash}.png`, `${hero.sha1hash}.jpg`, `${unused.sha1hash}.webp`].sort())
-  assert.deepEqual(await readdir(path.join(root, 'files')), [`${stl.sha1hash}.stl`])
+  assert.deepEqual(
+    (await readdir(path.join(root, 'files'))).sort(),
+    [`${stl.sha1hash}.stl`, `${clipOriginal.sha1hash}.mov`, `${clipMp4.sha1hash}.mp4`].sort(),
+  )
   assert.equal(sha1(await readFile(path.join(root, 'images', `${hero.sha1hash}.jpg`))), hero.sha1hash)
 
   const lines = (await readFile(path.join(root, 'data.ndjson'), 'utf8')).trimEnd().split('\n').map((line) => JSON.parse(line))
@@ -160,6 +178,47 @@ test('the restore tarball is a standard import archive', async (t) => {
       assert.equal(entry[excluded], undefined, `${excluded} is not in assets.json`)
     }
   }
+})
+
+test('a video block\'s MP4 and kept original come back from the bucket as file uploads, with the conversion record intact', async (t) => {
+  const {storage, fixture, result} = await backedUp(t)
+  const {clipOriginal, clipMp4} = fixture.assets
+  const work = await makeTempDir(t, 'restore-build-')
+  const tarballPath = path.join(work, 'restore.tar.gz')
+  await buildRestoreArchive({storage, timestamp: result.timestamp, workDir: work, tarballPath, log: quietLog()})
+  const extracted = await makeTempDir(t, 'restore-extract-')
+  await pipeline(createReadStream(tarballPath), createGunzip(), unpackTar(extracted))
+  const root = path.join(extracted, `${DATASET}-${result.timestamp}`)
+
+  // Each file is in the archive once, byte-identical to the asset that was backed up.
+  assert.equal(sha1(await readFile(path.join(root, 'files', `${clipMp4.sha1hash}.mp4`))), clipMp4.sha1hash)
+  assert.equal(sha1(await readFile(path.join(root, 'files', `${clipOriginal.sha1hash}.mov`))), clipOriginal.sha1hash)
+
+  // Both the published post and its draft point at them through import directives.
+  const lines = (await readFile(path.join(root, 'data.ndjson'), 'utf8')).trimEnd().split('\n').map((line) => JSON.parse(line))
+  const original = new Map(fixture.documents.map((doc) => [doc._id, doc]))
+  for (const id of ['blogPost-7', 'drafts.blogPost-7']) {
+    const block = lines.find((doc) => doc._id === id).body.find((member) => member._type === 'video')
+    const sourceBlock = original.get(id).body.find((member) => member._type === 'video')
+    assert.deepEqual(block.file, {_type: 'file', _sanityAsset: `file@file://./files/${clipMp4.sha1hash}.mp4`}, `${id} plays the MP4`)
+    assert.deepEqual(block.original, {_type: 'file', _sanityAsset: `file@file://./files/${clipOriginal.sha1hash}.mov`}, `${id} keeps the original`)
+    assert.deepEqual(block.conversion, sourceBlock.conversion, `${id} keeps its conversion record`)
+  }
+
+  // assets.json gives the re-uploaded files their names back, and the MP4 its
+  // source, which the converter looks up to reuse an MP4 instead of converting again.
+  const assetMap = JSON.parse(await readFile(path.join(root, 'assets.json'), 'utf8'))
+  assert.deepEqual(assetMap[`file-${clipMp4.sha1hash}`], {
+    _createdAt: clipMp4._createdAt,
+    _rev: clipMp4._rev,
+    _updatedAt: clipMp4._updatedAt,
+    originalFilename: 'IMG_3151.mp4',
+    sha1hash: clipMp4.sha1hash,
+    size: clipMp4.size,
+    source: {name: 'video-to-mp4', id: clipOriginal._id},
+  })
+  assert.equal(assetMap[`file-${clipOriginal.sha1hash}`].originalFilename, 'IMG_3151.MOV')
+  assert.equal(assetMap[`file-${clipOriginal.sha1hash}`].source, undefined)
 })
 
 test('a snapshot whose data does not match its manifest is rejected', async (t) => {
@@ -193,7 +252,6 @@ test('--latest picks the newest marker of the source dataset; --snapshot needs a
     storage,
     exportDocuments: async () => fixture.documents,
     downloadAsset: fakeAssetDownloader(fixture.binaries),
-    muxArchiver: fakeMuxArchiver(),
     now: clock,
     tmpDir,
     log: quietLog(),
@@ -221,8 +279,6 @@ test('restore.mjs never takes another dataset\'s snapshot unless --from-dataset 
   const {dir, result} = await backedUp(t, {dataset: 'staging'})
   const env = {...process.env}
   delete env.SANITY_WRITE_TOKEN
-  delete env.MUX_TOKEN_ID
-  delete env.MUX_TOKEN_SECRET
   const restore = async (...args) =>
     spawnSync(
       process.execPath,
@@ -432,8 +488,6 @@ test('restore.mjs --build-only writes a tarball from a local backup without touc
   const out = path.join(await makeTempDir(t), 'restore.tar.gz')
   const env = {...process.env}
   delete env.SANITY_WRITE_TOKEN
-  delete env.MUX_TOKEN_ID
-  delete env.MUX_TOKEN_SECRET
   const run = spawnSync(process.execPath, [
     path.join(here, '..', 'restore.mjs'),
     '--latest',

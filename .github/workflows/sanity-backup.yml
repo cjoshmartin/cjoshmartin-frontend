@@ -70,8 +70,6 @@ jobs:
         env:
           SANITY_PROJECT_ID: ${{ vars.SANITY_PROJECT_ID }}
           SANITY_READ_TOKEN: ${{ secrets.SANITY_BACKUP_TOKEN }}
-          MUX_TOKEN_ID: ${{ secrets.MUX_TOKEN_ID }}
-          MUX_TOKEN_SECRET: ${{ secrets.MUX_TOKEN_SECRET }}
           BACKUP_BUCKET: ${{ vars.BACKUP_BUCKET }}
           DATASET: ${{ inputs.dataset || 'production' }}
           DRY_RUN: ${{ inputs.dry_run || false }}

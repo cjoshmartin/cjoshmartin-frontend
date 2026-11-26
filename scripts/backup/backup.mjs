@@ -4,7 +4,6 @@ import os from 'node:os'
 
 import {BucketTooLargeError, DEFAULT_MAX_BUCKET_BYTES, runBackup} from './lib/backup.mjs'
 import {createLogger, parseCli, parsePositiveInteger, readToolInfo, UsageError, writeStepSummary} from './lib/cli.mjs'
-import {createMuxArchiver, MuxClient} from './lib/mux.mjs'
 import {downloadSanityAsset} from './lib/sanity-assets.mjs'
 import {assertDatasetName, assertProjectId, exportDataset} from './lib/sanity-export.mjs'
 import {createStorage} from './lib/storage/index.mjs'
@@ -21,22 +20,20 @@ Options:
   --dry-run                    Fingerprint, compare and list what would be written; write nothing
   --max-bucket-bytes <n>       Fail when the bucket holds more than this (default: ${DEFAULT_MAX_BUCKET_BYTES}, 4 GiB)
   --concurrency <n>            Parallel asset downloads/uploads (default: 4)
-  --mux-timeout-minutes <n>    Per-video limit for Mux to prepare a master (default: 20)
   -h, --help                   Show this help
 
 Environment:
   SANITY_PROJECT_ID            Sanity project id
   SANITY_READ_TOKEN            Sanity token with the Viewer role (reads drafts); required
-  MUX_TOKEN_ID, MUX_TOKEN_SECRET
-                               Mux token (Video read + write); required when a Mux original
-                               is not in the bucket yet
   BACKUP_BUCKET                Default for --bucket
   GOOGLE_APPLICATION_CREDENTIALS
                                Set by google-github-actions/auth in CI; locally use
                                gcloud auth application-default login
 
-Exit codes: 0 snapshot written, no changes, or dry run; 1 failure;
-            3 snapshot written with warnings (see the manifest's "warnings").`
+Videos are Sanity file assets (the MP4 each video block plays and the original
+it keeps), so they are backed up with the other files under assets/files/.
+
+Exit codes: 0 snapshot written, no changes, or dry run; 1 failure.`
 
 async function main() {
   const args = parseCli(process.argv.slice(2), {
@@ -48,7 +45,6 @@ async function main() {
     'dry-run': {type: 'boolean', default: false},
     'max-bucket-bytes': {type: 'string'},
     concurrency: {type: 'string'},
-    'mux-timeout-minutes': {type: 'string'},
   }, USAGE)
 
   if (!args.dataset) throw new UsageError(`--dataset is required\n\n${USAGE}`)
@@ -60,7 +56,6 @@ async function main() {
   if (!token) throw new UsageError('SANITY_READ_TOKEN is not set (a Viewer token; it must be able to read drafts)')
   const maxBucketBytes = parsePositiveInteger(args['max-bucket-bytes'], '--max-bucket-bytes') ?? DEFAULT_MAX_BUCKET_BYTES
   const concurrency = parsePositiveInteger(args.concurrency, '--concurrency') ?? 4
-  const muxTimeoutMinutes = parsePositiveInteger(args['mux-timeout-minutes'], '--mux-timeout-minutes') ?? 20
 
   const log = createLogger()
   const storage = await createStorage({
@@ -69,22 +64,12 @@ async function main() {
     localDir: args['local-dir'],
   })
 
-  const muxArchiver =
-    process.env.MUX_TOKEN_ID && process.env.MUX_TOKEN_SECRET
-      ? createMuxArchiver({
-          client: new MuxClient({tokenId: process.env.MUX_TOKEN_ID, tokenSecret: process.env.MUX_TOKEN_SECRET}),
-          timeoutMs: muxTimeoutMinutes * 60_000,
-          log: log.info,
-        })
-      : null
-
   const result = await runBackup({
     projectId,
     dataset: args.dataset,
     storage,
     exportDocuments: () => exportDataset({projectId, dataset: args.dataset, token}),
     downloadAsset: (asset, destPath) => downloadSanityAsset({asset, token, destPath}),
-    muxArchiver,
     tmpDir: process.env.RUNNER_TEMP || os.tmpdir(),
     log,
     dryRun: args['dry-run'],
@@ -101,16 +86,10 @@ async function main() {
     `- Fingerprint: \`${result.fingerprint}\``,
     `- Previous snapshot: ${result.previousTimestamp ?? 'none'}`,
     `- Bucket size: ${formatBytes(result.bucketBytes)}`,
-    ...(result.status === 'snapshot' ? [`- Written this run: ${formatBytes(result.writtenBytes)} (${result.storedAssets} assets, ${result.storedMux} Mux originals)`] : []),
+    ...(result.status === 'snapshot' ? [`- Written this run: ${formatBytes(result.writtenBytes)} (${result.storedAssets} assets)`] : []),
     ...(result.plan ? [`- Dry run: would write ${result.plan.writes.length} objects`] : []),
-    ...result.warnings.map((warning) => `- Warning: ${warning}`),
   ].join('\n')
   await writeStepSummary(summary)
-
-  if (result.status === 'snapshot' && result.warnings.length > 0) {
-    log.error(`Snapshot ${result.timestamp} was written, but with ${result.warnings.length} warning(s); see above and the manifest`)
-    process.exitCode = 3
-  }
 }
 
 main().catch((error) => {

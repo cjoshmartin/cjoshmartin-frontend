@@ -1,9 +1,17 @@
 import {createHash} from 'node:crypto'
+import {createReadStream} from 'node:fs'
 
 import {ObjectExistsError} from './storage/errors.mjs'
 
 export function sha256Hex(buffer) {
   return createHash('sha256').update(buffer).digest('hex')
+}
+
+// Streams the file through sha1, so a large video never has to fit in memory.
+export async function sha1OfFile(filePath) {
+  const hash = createHash('sha1')
+  for await (const chunk of createReadStream(filePath)) hash.update(chunk)
+  return hash.digest('hex')
 }
 
 export function formatBytes(bytes) {

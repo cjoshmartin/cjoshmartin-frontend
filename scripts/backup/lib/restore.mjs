@@ -1,6 +1,5 @@
-import {createHash} from 'node:crypto'
 import {createWriteStream} from 'node:fs'
-import {mkdir, mkdtemp, readFile, writeFile} from 'node:fs/promises'
+import {mkdir, mkdtemp, writeFile} from 'node:fs/promises'
 import path from 'node:path'
 import {pipeline} from 'node:stream/promises'
 import {createGzip, gunzipSync} from 'node:zlib'
@@ -13,7 +12,7 @@ import {computeFingerprint} from './fingerprint.mjs'
 import {isTimestamp, markerKey, MARKERS_PREFIX, snapshotDataKey, snapshotManifestKey} from './layout.mjs'
 import {describeAssetDocument, isAssetDocument, parseAssetId} from './sanity-assets.mjs'
 import {parseExportNdjson} from './sanity-export.mjs'
-import {runPool, sha256Hex} from './util.mjs'
+import {runPool, sha1OfFile, sha256Hex} from './util.mjs'
 
 // Same exclusions as @sanity/export when it writes assets.json: these fields
 // describe the stored binary or its location and are recreated by the upload.
@@ -188,7 +187,7 @@ export async function buildRestoreArchive({storage, timestamp, workDir, tarballP
       throw new Error(`Asset ${info.id} is listed in the snapshot but ${info.key} is not in the bucket`)
     }
     await storage.downloadToFile(info.key, destPath)
-    const sha1 = createHash('sha1').update(await readFile(destPath)).digest('hex')
+    const sha1 = await sha1OfFile(destPath)
     if (info.sha1hash && sha1 !== info.sha1hash) sha1Mismatches.push(info.id)
     const entry = assetMapEntry(doc)
     if (Object.keys(entry).length > 0) assetMap[`${info.type}-${sha1}`] = entry

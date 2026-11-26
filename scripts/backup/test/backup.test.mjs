@@ -9,12 +9,11 @@ import {computeFingerprint} from '../lib/fingerprint.mjs'
 import {markerKey, snapshotDataKey, snapshotManifestKey} from '../lib/layout.mjs'
 import {ObjectExistsError} from '../lib/storage/errors.mjs'
 import {describeAssetDocument} from '../lib/sanity-assets.mjs'
-import {createBufferOnce, createFileOnce} from '../lib/util.mjs'
+import {createBufferOnce, createFileOnce, formatBytes} from '../lib/util.mjs'
 import {
   buildDataset,
   DATASET,
   fakeAssetDownloader,
-  fakeMuxArchiver,
   imageAsset,
   makeTempDir,
   newLocalStorage,
@@ -32,7 +31,6 @@ async function setup(t, overrides = {}) {
   const dataset = buildDataset()
   const state = {documents: dataset.documents, exportCalls: 0}
   const downloadAsset = fakeAssetDownloader(dataset.binaries)
-  const muxArchiver = overrides.muxArchiver === undefined ? fakeMuxArchiver() : overrides.muxArchiver
   const log = quietLog()
   const clock = steppingClock()
   const run = (options = {}) =>
@@ -45,16 +43,15 @@ async function setup(t, overrides = {}) {
         return state.documents
       },
       downloadAsset,
-      muxArchiver,
       now: clock,
       tmpDir,
       log,
       ...options,
     })
-  return {storage, local, dir, tmpDir, dataset, state, downloadAsset, muxArchiver, log, run}
+  return {storage, local, dir, tmpDir, dataset, state, downloadAsset, log, run}
 }
 
-test('first run stores every asset, the Mux original, the snapshot, and writes the marker last', async (t) => {
+test('first run stores every asset, the snapshot, and writes the marker last', async (t) => {
   const ctx = await setup(t)
   const result = await ctx.run()
 
@@ -64,13 +61,14 @@ test('first run stores every asset, the Mux original, the snapshot, and writes t
   const writes = ctx.storage.writes
   assert.equal(writes.at(-1), markerKey(ts), 'the marker is the last object written')
   assert.deepEqual(writes.slice(-3), [snapshotDataKey(ts), snapshotManifestKey(ts), markerKey(ts)])
-  const {hero, avatar, unused, stl} = ctx.dataset.assets
+  const {hero, avatar, unused, stl, clipOriginal, clipMp4} = ctx.dataset.assets
   const expectedAssetKeys = [
     `assets/images/${hero.sha1hash}.jpg`,
     `assets/images/${avatar.sha1hash}.png`,
     `assets/images/${unused.sha1hash}.webp`,
     `assets/files/${stl.sha1hash}.stl`,
-    'assets/mux/MuxAsset12abc.mp4',
+    `assets/files/${clipOriginal.sha1hash}.mov`,
+    `assets/files/${clipMp4.sha1hash}.mp4`,
   ].sort()
   assert.deepEqual(writes.slice(0, -3).sort(), expectedAssetKeys)
 
@@ -89,18 +87,19 @@ test('first run stores every asset, the Mux original, the snapshot, and writes t
   assert.equal(manifest.fingerprint.value, computeFingerprint(ctx.dataset.documents))
   assert.deepEqual(
     {published: manifest.documents.published, drafts: manifest.documents.drafts, versions: manifest.documents.versions, system: manifest.documents.system},
-    {published: 7, drafts: 1, versions: 1, system: 3},
+    {published: 8, drafts: 1, versions: 1, system: 3},
   )
-  assert.equal(manifest.assets.length, 4)
+  assert.equal(manifest.assets.length, 6)
   assert.ok(manifest.assets.every((asset) => asset.storedThisRun === true))
-  assert.equal(manifest.mux.method, 'master-access')
-  assert.deepEqual(manifest.mux.items.map((item) => [item.assetId, item.status, item.key]), [['MuxAsset12abc', 'stored', 'assets/mux/MuxAsset12abc.mp4']])
+  assert.equal(manifest.mux, undefined, 'Mux is gone: there is no Mux section any more')
+  assert.equal(manifest.warnings, undefined)
 
   const marker = JSON.parse(await ctx.local.readBuffer(markerKey(ts)))
   assert.equal(marker.fingerprint, manifest.fingerprint.value)
   assert.equal(marker.dataset, DATASET)
   assert.equal(marker.projectId, PROJECT_ID)
   assert.equal(marker.snapshot, `snapshots/${ts}/`)
+  assert.equal(marker.warningCount, undefined)
 })
 
 test('a run with no changes writes nothing and reports no-change', async (t) => {
@@ -140,10 +139,9 @@ test('a changed run writes a new snapshot and marker last, and does not upload s
   const newWrites = ctx.storage.writes.slice(firstWrites)
   assert.deepEqual(newWrites, [snapshotDataKey(second.timestamp), snapshotManifestKey(second.timestamp), markerKey(second.timestamp)])
   assert.equal(second.storedAssets, 0)
-  assert.equal(second.storedMux, 0)
 
   const manifest = JSON.parse(await ctx.local.readBuffer(snapshotManifestKey(second.timestamp)))
-  assert.equal(manifest.assets.length, 4, 'the manifest still lists every asset')
+  assert.equal(manifest.assets.length, 6, 'the manifest still lists every asset')
   assert.ok(manifest.assets.every((asset) => asset.storedThisRun === false))
   assert.equal(manifest.previousTimestamp, first.timestamp)
   // The first snapshot is untouched.
@@ -199,9 +197,8 @@ test('a dry run writes nothing and lists what it would write', async (t) => {
   assert.equal(result.status, 'dry-run')
   assert.equal(ctx.storage.writes.length, 0)
   assert.equal(ctx.downloadAsset.calls.length, 0)
-  assert.deepEqual(ctx.muxArchiver.calls, ['inspect:MuxAsset12abc'], 'a dry run only inspects Mux, read-only')
   assert.equal(result.plan.writes.at(-1), markerKey(result.plan.timestamp))
-  assert.equal(result.plan.writes.length, 8)
+  assert.equal(result.plan.writes.length, 9, '6 assets, then data, manifest and marker')
   assert.deepEqual(await ctx.local.list(''), [])
 })
 
@@ -216,24 +213,54 @@ test('markers of other datasets are ignored when comparing', async (t) => {
   assert.equal(productionAgain.previousTimestamp, production.timestamp)
 })
 
-test('an unavailable Mux original is recorded as a warning and the snapshot is still written', async (t) => {
-  const ctx = await setup(t, {muxArchiver: fakeMuxArchiver({unavailable: new Map([['MuxAsset12abc', 'Mux asset not found (HTTP 404)']])})})
-  const result = await ctx.run()
-  assert.equal(result.status, 'snapshot')
-  assert.equal(result.warnings.length, 1)
-  assert.match(result.warnings[0], /MuxAsset12abc/)
-  const manifest = JSON.parse(await ctx.local.readBuffer(snapshotManifestKey(result.timestamp)))
-  assert.equal(manifest.mux.items[0].status, 'unavailable')
-  assert.equal(manifest.warnings.length, 1)
-  const marker = JSON.parse(await ctx.local.readBuffer(markerKey(result.timestamp)))
-  assert.equal(marker.warningCount, 1)
-  assert.equal(await ctx.local.stat('assets/mux/MuxAsset12abc.mp4'), null)
-})
+test('a video\'s MP4 and its kept original are file assets, each stored once however often they are referenced', async (t) => {
+  const ctx = await setup(t)
+  const {clipOriginal, clipMp4} = ctx.dataset.assets
+  const mp4Key = `assets/files/${clipMp4.sha1hash}.mp4`
+  const originalKey = `assets/files/${clipOriginal.sha1hash}.mov`
+  // The published post and its draft hold the same converted video block, so
+  // each of the two assets is referenced twice (`file` and `original`).
+  const videoBlocks = ctx.state.documents.flatMap((doc) => doc.body ?? []).filter((block) => block._type === 'video')
+  assert.equal(videoBlocks.length, 2)
+  const videoIds = [clipMp4._id, clipOriginal._id].sort()
 
-test('missing Mux credentials fail the run before anything is written', async (t) => {
-  const ctx = await setup(t, {muxArchiver: null})
-  await assert.rejects(ctx.run(), /MUX_TOKEN_ID and MUX_TOKEN_SECRET/)
-  assert.equal(ctx.storage.writes.length, 0)
+  const first = await ctx.run()
+  assert.equal(first.status, 'snapshot')
+  assert.equal(ctx.storage.writes.filter((key) => key === mp4Key).length, 1)
+  assert.equal(ctx.storage.writes.filter((key) => key === originalKey).length, 1)
+  assert.deepEqual(ctx.downloadAsset.calls.filter((id) => videoIds.includes(id)).sort(), videoIds)
+  assert.equal(sha1(await ctx.local.readBuffer(mp4Key)), clipMp4.sha1hash, 'the stored MP4 is byte-identical to the asset')
+  assert.equal(sha1(await ctx.local.readBuffer(originalKey)), clipOriginal.sha1hash, 'the stored original is byte-identical to the asset')
+  const assetBytes = Object.values(ctx.dataset.assets).reduce((sum, asset) => sum + asset.size, 0)
+  assert.ok(ctx.log.messages.info.includes(`Assets: 6 in the dataset (2 of them videos), 6 not yet in the bucket (about ${formatBytes(assetBytes)})`))
+
+  const manifest = JSON.parse(await ctx.local.readBuffer(snapshotManifestKey(first.timestamp)))
+  const videos = manifest.assets.filter((asset) => asset.mimeType?.startsWith('video/'))
+  assert.deepEqual(
+    videos.map(({ids, key, mimeType, sha1hash, size, storedThisRun}) => ({ids, key, mimeType, sha1hash, size, storedThisRun})),
+    [
+      {ids: [clipMp4._id], key: mp4Key, mimeType: 'video/mp4', sha1hash: clipMp4.sha1hash, size: clipMp4.size, storedThisRun: true},
+      {ids: [clipOriginal._id], key: originalKey, mimeType: 'video/quicktime', sha1hash: clipOriginal.sha1hash, size: clipOriginal.size, storedThisRun: true},
+    ].sort((a, b) => (a.key < b.key ? -1 : 1)),
+  )
+
+  // A later snapshot of this dataset, and a first snapshot of another dataset
+  // in the same bucket, store neither file again and download neither again.
+  ctx.state.documents = ctx.state.documents.map((doc) => (doc._id === 'drafts.blogPost-7' ? {...doc, _rev: 'b3', title: 'Edited'} : doc))
+  const second = await ctx.run()
+  const staging = await ctx.run({dataset: 'staging'})
+  assert.equal(second.status, 'snapshot')
+  assert.equal(staging.status, 'snapshot')
+  assert.equal(second.storedAssets, 0)
+  assert.equal(staging.storedAssets, 0)
+  assert.equal(ctx.storage.writes.filter((key) => key === mp4Key || key === originalKey).length, 2)
+  assert.equal(ctx.downloadAsset.calls.filter((id) => videoIds.includes(id)).length, 2)
+  for (const timestamp of [second.timestamp, staging.timestamp]) {
+    const later = JSON.parse(await ctx.local.readBuffer(snapshotManifestKey(timestamp)))
+    const laterVideos = later.assets.filter((asset) => asset.mimeType?.startsWith('video/'))
+    assert.deepEqual(laterVideos.map((asset) => [asset.key, asset.storedThisRun]).sort(), [[mp4Key, false], [originalKey, false]].sort())
+  }
+  assert.deepEqual((await ctx.local.list('assets/files/')).map((object) => object.key), [`assets/files/${ctx.dataset.assets.stl.sha1hash}.stl`, mp4Key, originalKey].sort())
 })
 
 test('a failed asset download leaves no marker, and the next run resumes without re-uploading', async (t) => {
@@ -249,7 +276,7 @@ test('a failed asset download leaves no marker, and the next run resumes without
   const storedBefore = (await ctx.local.list('assets/')).map((object) => object.key)
   assert.ok(storedBefore.length > 0, 'assets uploaded before the failure stay in the bucket')
 
-  assert.equal(storedBefore.length, 3)
+  assert.equal(storedBefore.length, 5)
   assert.ok(!storedBefore.includes(describeAssetDocument(failing).key))
 
   ctx.dataset.binaries.set(failing.url, failingBytes)

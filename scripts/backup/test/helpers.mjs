@@ -39,7 +39,10 @@ export function imageAsset(bytes, {width = 4, height = 3, extension = 'png', dat
   }
 }
 
-export function fileAsset(bytes, {extension = 'stl', mimeType = 'model/stl', dataset = DATASET, rev = 'r1'} = {}) {
+export function fileAsset(
+  bytes,
+  {extension = 'stl', mimeType = 'model/stl', originalFilename = `model.${extension}`, source, dataset = DATASET, rev = 'r1'} = {},
+) {
   const hash = sha1(bytes)
   return {
     _id: `file-${hash}-${extension}`,
@@ -50,12 +53,13 @@ export function fileAsset(bytes, {extension = 'stl', mimeType = 'model/stl', dat
     assetId: hash,
     extension,
     mimeType,
-    originalFilename: `model.${extension}`,
+    originalFilename,
     path: `files/${PROJECT_ID}/${dataset}/${hash}.${extension}`,
     url: `https://cdn.sanity.io/files/${PROJECT_ID}/${dataset}/${hash}.${extension}`,
     sha1hash: hash,
     size: bytes.length,
     uploadId: `upload-${hash.slice(0, 8)}`,
+    ...(source ? {source} : {}),
   }
 }
 
@@ -63,20 +67,61 @@ export function imageRef(asset, extra = {}) {
   return {_type: 'image', asset: {_type: 'reference', _ref: asset._id}, ...extra}
 }
 
+export function fileRef(asset) {
+  return {_type: 'file', asset: {_type: 'reference', _ref: asset._id}}
+}
+
+// A Portable Text "video" block after its upload was converted (video contract
+// v2): `file` is the MP4 the site plays, `original` the upload as it was, kept
+// and never served, and `conversion` records the two asset ids.
+export function convertedVideoBlock(key, {mp4, original}) {
+  return {
+    _key: key,
+    _type: 'video',
+    file: fileRef(mp4),
+    original: fileRef(original),
+    conversion: {
+      status: 'ready',
+      message: 'Converted to MP4',
+      sourceAssetId: original._id,
+      outputAssetId: mp4._id,
+      settingsVersion: 'h264-crf23-max1920-v1',
+      updatedAt: '2026-11-26T12:00:00Z',
+    },
+  }
+}
+
 // A small dataset that exercises every kind of document the backup sees:
 // system documents, a release with a version, published documents, drafts,
-// image and file assets (one unreferenced), and a Mux video document.
+// image and file assets (one unreferenced), and a converted video: its MP4 and
+// its original are two file assets, referenced from a post and from its draft.
 export function buildDataset() {
   const binaries = new Map()
   const heroBytes = Buffer.from('hero image bytes')
   const avatarBytes = Buffer.from('avatar image bytes')
   const unusedBytes = Buffer.from('unreferenced image bytes')
   const stlBytes = Buffer.from('solid cube\nendsolid cube\n')
+  const clipOriginalBytes = Buffer.from('the clip exactly as it was uploaded, a QuickTime movie')
+  const clipMp4Bytes = Buffer.from('the clip converted to H.264 in an MP4 container')
   const hero = imageAsset(heroBytes, {width: 1200, height: 800, extension: 'jpg'})
   const avatar = imageAsset(avatarBytes)
   const unused = imageAsset(unusedBytes, {extension: 'webp'})
   const stl = fileAsset(stlBytes)
-  for (const [asset, bytes] of [[hero, heroBytes], [avatar, avatarBytes], [unused, unusedBytes], [stl, stlBytes]]) {
+  const clipOriginal = fileAsset(clipOriginalBytes, {extension: 'mov', mimeType: 'video/quicktime', originalFilename: 'IMG_3151.MOV'})
+  const clipMp4 = fileAsset(clipMp4Bytes, {
+    extension: 'mp4',
+    mimeType: 'video/mp4',
+    originalFilename: 'IMG_3151.mp4',
+    source: {name: 'video-to-mp4', id: clipOriginal._id},
+  })
+  for (const [asset, bytes] of [
+    [hero, heroBytes],
+    [avatar, avatarBytes],
+    [unused, unusedBytes],
+    [stl, stlBytes],
+    [clipOriginal, clipOriginalBytes],
+    [clipMp4, clipMp4Bytes],
+  ]) {
     binaries.set(asset.url, bytes)
   }
 
@@ -100,27 +145,27 @@ export function buildDataset() {
           markDefs: [{_key: 'fl1', _type: 'fileLink', file: {_type: 'file', asset: {_type: 'reference', _ref: stl._id}}}],
         },
         {_key: 'img1', ...imageRef(hero, {_type: 'imageBlock', alt: 'Inline', layout: 'left'})},
-        {_key: 'vid1', _type: 'video', asset: {_type: 'mux.video', asset: {_type: 'reference', _weak: true, _ref: 'mux-video-12'}}},
+        convertedVideoBlock('vid1', {mp4: clipMp4, original: clipOriginal}),
       ],
       legacy: {wagtailId: 7},
     },
-    {_id: 'drafts.blogPost-7', _type: 'blogPost', _rev: 'b2', title: 'Hello (draft)', heroMedia: [{_key: 'h1', ...imageRef(avatar, {_type: 'imageWithAlt'})}]},
-    {_id: 'versions.rSpring.blogPost-7', _type: 'blogPost', _rev: 'v1', title: 'Hello (spring release)'},
     {
-      _id: 'mux-video-12',
-      _type: 'mux.videoAsset',
-      _rev: 'm1',
-      assetId: 'MuxAsset12abc',
-      playbackId: 'Playback12',
-      status: 'ready',
-      filename: 'clip.mov',
+      _id: 'drafts.blogPost-7',
+      _type: 'blogPost',
+      _rev: 'b2',
+      title: 'Hello (draft)',
+      heroMedia: [{_key: 'h1', ...imageRef(avatar, {_type: 'imageWithAlt'})}],
+      body: [convertedVideoBlock('vid1', {mp4: clipMp4, original: clipOriginal})],
     },
+    {_id: 'versions.rSpring.blogPost-7', _type: 'blogPost', _rev: 'v1', title: 'Hello (spring release)'},
     hero,
     avatar,
     unused,
     stl,
+    clipOriginal,
+    clipMp4,
   ]
-  return {documents, binaries, assets: {hero, avatar, unused, stl}}
+  return {documents, binaries, assets: {hero, avatar, unused, stl, clipOriginal, clipMp4}}
 }
 
 // A downloader that serves binaries from memory and records every call.
@@ -136,33 +181,6 @@ export function fakeAssetDownloader(binaries) {
   }
   download.calls = calls
   return download
-}
-
-export function fakeMuxArchiver({unavailable = new Map()} = {}) {
-  const calls = []
-  return {
-    calls,
-    async inspect(assetId) {
-      calls.push(`inspect:${assetId}`)
-      if (unavailable.has(assetId)) return {available: false, reason: unavailable.get(assetId)}
-      return {available: true, status: 'ready', masterAccess: 'none'}
-    },
-    async downloadOriginal(assetId, destPath) {
-      calls.push(`download:${assetId}`)
-      if (unavailable.has(assetId)) return {status: 'unavailable', reason: unavailable.get(assetId)}
-      const bytes = Buffer.from(`mp4 master of ${assetId}`)
-      await mkdir(path.dirname(destPath), {recursive: true})
-      await writeFile(destPath, bytes, {flag: 'wx'})
-      return {
-        status: 'downloaded',
-        size: bytes.length,
-        sha256: createHash('sha256').update(bytes).digest('hex'),
-        extension: 'mp4',
-        method: 'master-access',
-        details: {durationSeconds: 12.5, resolutionTier: '1080p', maxResolutionTier: '1080p', videoQuality: 'basic'},
-      }
-    },
-  }
 }
 
 // Wraps a storage adapter and records every create call in order.

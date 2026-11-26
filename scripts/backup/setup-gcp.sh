@@ -7,7 +7,7 @@
 #   - service account sanity-backup with roles/storage.objectCreator and
 #     roles/storage.objectViewer on that bucket only (no delete permission)
 #   - Workload Identity pool + GitHub OIDC provider that only admits
-#     cjoshmartin-com/cjoshmartin-frontend on refs/heads/main
+#     cjoshmartin/cjoshmartin-frontend (repository id 737918690) on refs/heads/main
 #   - roles/iam.workloadIdentityUser for that repository on the service account
 #
 # Then prints the gh commands that set the GitHub variables and secrets.
@@ -28,7 +28,11 @@ readonly SA_NAME="sanity-backup"
 readonly SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 readonly POOL_ID="github-actions"
 readonly PROVIDER_ID="cjoshmartin-frontend"
-readonly GITHUB_REPO="cjoshmartin-com/cjoshmartin-frontend"
+# The repository's canonical name. It moved from the cjoshmartin-com
+# organization to the cjoshmartin user account; the old name only redirects,
+# and GitHub's OIDC token carries the canonical owner/name, so the provider
+# condition and the principalSet must use this one.
+readonly GITHUB_REPO="cjoshmartin/cjoshmartin-frontend"
 # The numeric id survives renames and cannot be reused by a new repository
 # with the same name, so the provider checks it as well as the name.
 readonly GITHUB_REPO_ID="737918690"
@@ -232,12 +236,10 @@ print_command gh variable set GCP_WORKLOAD_IDENTITY_PROVIDER --repo "$GITHUB_REP
 print_command gh variable set GCP_BACKUP_SERVICE_ACCOUNT --repo "$GITHUB_REPO" --body "$SA_EMAIL"
 print_command gh variable set BACKUP_BUCKET --repo "$GITHUB_REPO" --body "$BUCKET"
 print_command gh variable set SANITY_PROJECT_ID --repo "$GITHUB_REPO" --body "$SANITY_PROJECT_ID"
-for pair in SANITY_BACKUP_TOKEN:SANITY_READ_TOKEN MUX_TOKEN_ID:MUX_TOKEN_ID MUX_TOKEN_SECRET:MUX_TOKEN_SECRET; do
-  secret=${pair%%:*}
-  source_var=${pair##*:}
-  printf '(set -a; . ~/cjoshmartin-migration/secrets.env; set +a; printf %%s "$%s" | gh secret set %s --repo %s)\n' \
-    "$source_var" "$secret" "$GITHUB_REPO"
-done
+# The only secret is the Viewer token, stored as SANITY_BACKUP_TOKEN. Videos are
+# Sanity file assets now, so the backup needs no Mux token.
+printf '(set -a; . ~/cjoshmartin-migration/secrets.env; set +a; printf %%s "$%s" | gh secret set %s --repo %s)\n' \
+  SANITY_READ_TOKEN SANITY_BACKUP_TOKEN "$GITHUB_REPO"
 
 if [[ $PRINT_ONLY == true ]]; then
   echo

@@ -7,7 +7,6 @@ import os from 'node:os'
 import path from 'node:path'
 
 import {createLogger, parseCli, parsePositiveInteger, UsageError} from './lib/cli.mjs'
-import {MuxClient} from './lib/mux.mjs'
 import {
   buildRestoreArchive,
   compareWithSnapshot,
@@ -61,8 +60,6 @@ Environment:
                                --replace, --exact and --verify. Without it a plain import uses
                                your \`sanity login\` session.
   BACKUP_BUCKET                Default for --bucket
-  MUX_TOKEN_ID, MUX_TOKEN_SECRET
-                               Optional: check that every Mux asset in the snapshot still exists
 
 A restore is not a point-in-time reset: see README.md.`
 
@@ -75,28 +72,6 @@ function runCommand(command, commandArgs, {env}) {
       else reject(new Error(`${command} ${commandArgs.slice(0, 4).join(' ')} … exited with ${signal ?? `code ${code}`}`))
     })
   })
-}
-
-async function checkMuxAssets(manifest, log) {
-  const items = (manifest.mux?.items ?? []).filter((item) => item.assetId)
-  if (items.length === 0) return
-  if (!process.env.MUX_TOKEN_ID || !process.env.MUX_TOKEN_SECRET) {
-    log.info(`The snapshot references ${items.length} Mux assets. Set MUX_TOKEN_ID / MUX_TOKEN_SECRET to check that they still exist in Mux.`)
-    return
-  }
-  const client = new MuxClient({tokenId: process.env.MUX_TOKEN_ID, tokenSecret: process.env.MUX_TOKEN_SECRET})
-  let missing = 0
-  for (const item of items) {
-    const asset = await client.getAsset(item.assetId)
-    if (asset === null) {
-      missing++
-      log.warn(
-        `Mux asset ${item.assetId} (${item.documentIds.join(', ')}) no longer exists in Mux. ` +
-          (item.status === 'stored' ? `Its original is in the bucket at ${item.key}; see README.md "Videos" to re-upload it.` : 'No original was archived for it.'),
-      )
-    }
-  }
-  log.info(`Mux check: ${items.length - missing} of ${items.length} assets exist in Mux`)
 }
 
 async function main() {
@@ -170,15 +145,13 @@ async function main() {
       concurrency,
       log,
     })
-    const {marker, manifest, prepared} = archive
+    const {marker, prepared} = archive
     log.info(
       `Snapshot of ${marker.projectId}/${marker.dataset} taken ${marker.createdAt}: ${marker.documentCount} documents. ` +
         `Import file: ${prepared.importDocuments.length} documents, ${archive.assetCount} asset binaries; ` +
         `${prepared.droppedSystemIds.length} Sanity-managed system documents left out`,
     )
     log.info(`Import tarball: ${tarballPath}`)
-    // The Mux check is informational; a Mux API problem must not block a restore.
-    await checkMuxAssets(manifest, log).catch((error) => log.warn(`Could not check Mux assets: ${error.message}`))
     if (buildOnly) return
 
     const allowDifferentDataset = needsAllowAssetsInDifferentDataset(prepared.otherAssetDocuments, {projectId, dataset: args.dataset})

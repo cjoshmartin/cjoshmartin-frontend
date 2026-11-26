@@ -7,22 +7,19 @@ import {computeFingerprint, FINGERPRINT_ALGORITHM} from './fingerprint.mjs'
 import {
   formatTimestamp,
   markerKey,
-  muxAssetKey,
   snapshotDataKey,
   snapshotManifestKey,
   snapshotPrefix,
   timestampFromMarkerKey,
   timestampToIso,
 } from './layout.mjs'
-import {MUX_METHOD, MUX_ORIGINAL_EXTENSION} from './mux.mjs'
-import {describeAssetDocument, isAssetDocument} from './sanity-assets.mjs'
+import {describeAssetDocument, isAssetDocument, isVideoAsset} from './sanity-assets.mjs'
 import {createBufferOnce, createFileOnce, formatBytes, runPool, sha256Hex} from './util.mjs'
 
 export const MANIFEST_FORMAT_VERSION = 1
 // "Fail if the bucket is larger than 4 GB" (plan §10). GCS bills in binary
 // gigabytes, and the free tier is 5 GB-months, so the limit is 4 GiB.
 export const DEFAULT_MAX_BUCKET_BYTES = 4 * 1024 ** 3
-export const MUX_VIDEO_ASSET_TYPE = 'mux.videoAsset'
 
 export class BucketTooLargeError extends Error {
   constructor(bytes, limit, when) {
@@ -78,45 +75,13 @@ function planAssets(documents, existing) {
   return [...byKey.values()].sort((a, b) => (a.key < b.key ? -1 : 1))
 }
 
-function planMux(documents, existing) {
-  const byAssetId = new Map()
-  const unavailable = []
-  for (const doc of documents) {
-    if (doc._type !== MUX_VIDEO_ASSET_TYPE) continue
-    const assetId = typeof doc.assetId === 'string' && doc.assetId !== '' ? doc.assetId : null
-    if (!assetId) {
-      unavailable.push({
-        documentIds: [doc._id],
-        assetId: null,
-        playbackId: doc.playbackId ?? null,
-        key: null,
-        status: 'unavailable',
-        reason: 'The document has no Mux assetId (the upload never finished)',
-      })
-      continue
-    }
-    const known = byAssetId.get(assetId)
-    if (known) {
-      known.documentIds.push(doc._id)
-      continue
-    }
-    const key = muxAssetKey(assetId, MUX_ORIGINAL_EXTENSION)
-    byAssetId.set(assetId, {
-      documentIds: [doc._id],
-      assetId,
-      playbackId: doc.playbackId ?? null,
-      key,
-      present: existing.has(key),
-    })
-  }
-  const items = [...byAssetId.values()].sort((a, b) => (a.assetId < b.assetId ? -1 : 1))
-  return {items, unavailable}
-}
-
 // One backup run (plan §10, "Run logic"):
 //   1. fingerprint the export, 2. compare with the newest marker and stop if it
-//   matches, 3. upload missing assets and Mux originals, then the snapshot
-//   files, then the marker, 4. check the bucket size.
+//   matches, 3. upload missing assets, then the snapshot files, then the
+//   marker, 4. check the bucket size.
+// Videos need nothing of their own: the MP4 a video block plays and the
+// original it keeps are both sanity.fileAsset documents, so they are stored
+// under assets/files/ like any other file.
 // Every write is create-only. Nothing is ever deleted or replaced.
 export async function runBackup({
   projectId,
@@ -124,7 +89,6 @@ export async function runBackup({
   storage,
   exportDocuments,
   downloadAsset,
-  muxArchiver,
   now = () => new Date(),
   tmpDir,
   log,
@@ -133,12 +97,6 @@ export async function runBackup({
   concurrency = 4,
   tool = {name: 'cjoshmartin-sanity-backup', version: 'unknown'},
 }) {
-  const warnings = []
-  const warn = (message) => {
-    warnings.push(message)
-    log.warn(message)
-  }
-
   log.info(`Backing up ${projectId}/${dataset} to ${storage.describe()}${dryRun ? ' (dry run: nothing is written)' : ''}`)
   const listing = await storage.list('')
   const existing = new Map(listing.map((object) => [object.key, object.size]))
@@ -168,7 +126,7 @@ export async function runBackup({
 
   if (previous && previous.marker.fingerprint === fingerprint) {
     log.info(`No changes since snapshot ${previous.timestamp}; nothing written`)
-    return {status: 'no-change', fingerprint, previousTimestamp: previous.timestamp, counts, bucketBytes: startBytes, warnings}
+    return {status: 'no-change', fingerprint, previousTimestamp: previous.timestamp, counts, bucketBytes: startBytes}
   }
 
   const timestamp = formatTimestamp(now())
@@ -182,44 +140,26 @@ export async function runBackup({
 
   const assets = planAssets(documents, existing)
   const assetsToStore = assets.filter((asset) => !asset.present)
-  const mux = planMux(documents, existing)
-  const muxToStore = mux.items.filter((item) => !item.present)
-  for (const item of mux.unavailable) warn(`Mux video ${item.documentIds.join(', ')}: ${item.reason}`)
+  const videoCount = assets.filter(isVideoAsset).length
 
   const assetBytesEstimate = assetsToStore.reduce((sum, asset) => sum + (asset.size ?? 0), 0)
   log.info(
-    `Assets: ${assets.length} in the dataset, ${assetsToStore.length} not yet in the bucket (about ${formatBytes(assetBytesEstimate)}); ` +
-      `Mux videos: ${mux.items.length}, ${muxToStore.length} originals not yet in the bucket`,
+    `Assets: ${assets.length} in the dataset (${videoCount} of them videos), ${assetsToStore.length} not yet in the bucket ` +
+      `(about ${formatBytes(assetBytesEstimate)})`,
   )
 
   if (dryRun) {
-    const muxPlan = []
-    for (const item of muxToStore) {
-      if (!muxArchiver) {
-        muxPlan.push({assetId: item.assetId, key: item.key, check: 'skipped: MUX_TOKEN_ID / MUX_TOKEN_SECRET not set'})
-        continue
-      }
-      const inspection = await muxArchiver.inspect(item.assetId)
-      if (!inspection.available) warn(`Mux asset ${item.assetId}: ${inspection.reason}`)
-      muxPlan.push({assetId: item.assetId, key: item.key, check: inspection.available ? `status ${inspection.status}` : inspection.reason})
-    }
     const plan = {
       timestamp,
       writes: [
         ...assetsToStore.map((asset) => asset.key),
-        ...muxToStore.map((item) => item.key),
         snapshotDataKey(timestamp),
         snapshotManifestKey(timestamp),
         markerKey(timestamp),
       ],
-      mux: muxPlan,
     }
     log.info(`Dry run: a real run would write ${plan.writes.length} objects, ending with ${markerKey(timestamp)}`)
-    return {status: 'dry-run', fingerprint, previousTimestamp: previous?.timestamp ?? null, counts, bucketBytes: startBytes, plan, warnings}
-  }
-
-  if (muxToStore.length > 0 && !muxArchiver) {
-    throw new Error(`${muxToStore.length} Mux video originals are not in the bucket yet; set MUX_TOKEN_ID and MUX_TOKEN_SECRET`)
+    return {status: 'dry-run', fingerprint, previousTimestamp: previous?.timestamp ?? null, counts, bucketBytes: startBytes, plan}
   }
 
   const workDir = await mkdtemp(path.join(tmpDir, 'sanity-backup-'))
@@ -240,32 +180,6 @@ export async function runBackup({
       await rm(localPath)
       log.info(`${created ? 'Stored' : 'Already present'}: ${asset.key} (${formatBytes(downloaded.size)})`)
     })
-
-    for (const item of mux.items) {
-      if (item.present) {
-        item.status = 'stored'
-        item.size = existing.get(item.key)
-        item.storedThisRun = false
-        continue
-      }
-      const localPath = path.join(workDir, 'mux', `${item.assetId}.${MUX_ORIGINAL_EXTENSION}`)
-      log.info(`Archiving the Mux original of ${item.assetId} (${item.documentIds.join(', ')})`)
-      const result = await muxArchiver.downloadOriginal(item.assetId, localPath)
-      if (result.status === 'unavailable') {
-        item.status = 'unavailable'
-        item.reason = result.reason
-        warn(`Mux asset ${item.assetId} (${item.documentIds.join(', ')}): ${result.reason}`)
-        continue
-      }
-      const created = await createFileOnce(storage, item.key, localPath, result.size, {
-        contentType: 'video/mp4',
-        metadata: {muxAssetId: item.assetId, sha256: result.sha256},
-      })
-      if (created) writtenBytes += result.size
-      Object.assign(item, {status: 'stored', storedThisRun: created, size: result.size, sha256: result.sha256, details: result.details})
-      await rm(localPath)
-      log.info(`${created ? 'Stored' : 'Already present'}: ${item.key} (${formatBytes(result.size)})`)
-    }
 
     const ndjson = Buffer.from(toNdjson(sortById(documents)), 'utf8')
     const data = gzipSync(ndjson, {level: 9})
@@ -291,15 +205,6 @@ export async function runBackup({
         storedThisRun: asset.present ? false : asset.storedThisRun,
         ...(asset.verifiedBy ? {verifiedBy: asset.verifiedBy} : {}),
       })),
-      mux: {
-        method: MUX_METHOD,
-        extension: MUX_ORIGINAL_EXTENSION,
-        items: [
-          ...mux.items.map(({present, ...item}) => item),
-          ...mux.unavailable,
-        ],
-      },
-      warnings,
       tool: {...tool, node: process.version},
     }
     const manifestBuffer = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
@@ -314,7 +219,6 @@ export async function runBackup({
       snapshot: snapshotPrefix(timestamp),
       dataSha256: manifest.data.sha256,
       manifestSha256: sha256Hex(manifestBuffer),
-      warningCount: warnings.length,
     }
     const markerBuffer = Buffer.from(`${JSON.stringify(marker, null, 2)}\n`, 'utf8')
 
@@ -337,8 +241,6 @@ export async function runBackup({
       bucketBytes,
       writtenBytes,
       storedAssets: assets.filter((asset) => asset.storedThisRun).length,
-      storedMux: mux.items.filter((item) => item.storedThisRun).length,
-      warnings,
     }
   } finally {
     await rm(workDir, {recursive: true, force: true})

@@ -4,11 +4,27 @@ import {sanityAssetKey} from './layout.mjs'
 // Sanity asset document ids are content-addressed:
 //   image-<sha1>-<width>x<height>-<ext>   (sanity.imageAsset)
 //   file-<sha1>-<ext>                     (sanity.fileAsset)
+// A file's extension comes from its upload's file name. Every id seen so far is
+// lowercase, but videos are often named IMG_0169.MOV or clip.MP4 and Sanity's
+// docs do not say the extension is lowercased, so file ids accept either case:
+// an id this parser rejected would fail every backup and break the restore.
 const IMAGE_ID_PATTERN = /^image-([a-f0-9]{40})-(\d+x\d+)-([a-z0-9]+)$/
-const FILE_ID_PATTERN = /^file-([a-f0-9]{40})-([a-z0-9]+)$/
+const FILE_ID_PATTERN = /^file-([a-f0-9]{40})-([A-Za-z0-9]+)$/
 
 export const IMAGE_ASSET_TYPE = 'sanity.imageAsset'
 export const FILE_ASSET_TYPE = 'sanity.fileAsset'
+
+// A download, body included, must finish within this time: 5 minutes plus one
+// second per 512 KiB of the asset's size, so a large video file still gets
+// through on a slow connection (a 40 MB original gets 6 min 17 s, a 1 GiB
+// file 39 min 8 s). The workflow's own limit is 90 minutes.
+export const BASE_DOWNLOAD_TIMEOUT_MS = 5 * 60_000
+const MIN_DOWNLOAD_BYTES_PER_SECOND = 512 * 1024
+
+export function downloadTimeoutMs(size) {
+  const extraSeconds = Number.isFinite(size) && size > 0 ? Math.ceil(size / MIN_DOWNLOAD_BYTES_PER_SECOND) : 0
+  return BASE_DOWNLOAD_TIMEOUT_MS + extraSeconds * 1000
+}
 
 export function isAssetDocument(doc) {
   return doc?._type === IMAGE_ASSET_TYPE || doc?._type === FILE_ASSET_TYPE
@@ -57,6 +73,13 @@ export function describeAssetDocument(doc) {
   }
 }
 
+// True for a described video file asset: the MP4 a video block plays, or the
+// original upload it keeps. Videos are backed up like every other file; this
+// only feeds the counts in the log.
+export function isVideoAsset(asset) {
+  return asset.type === 'file' && typeof asset.mimeType === 'string' && asset.mimeType.startsWith('video/')
+}
+
 // Images on cdn.sanity.io are requested with dlRaw=true and the token, the
 // same way @sanity/export downloads them, so the original bytes come back
 // rather than a processed rendition.
@@ -76,7 +99,7 @@ export function assetDownloadRequest(asset, token) {
 // x-sanity-sha1 / x-sanity-md5 headers vouch for them (Sanity rewrites some
 // files after hashing, for example SVG sanitization). Anything else throws,
 // because a snapshot must never contain a corrupt or truncated asset.
-export async function downloadSanityAsset({asset, token, destPath, fetchImpl, timeoutMs = 5 * 60_000}) {
+export async function downloadSanityAsset({asset, token, destPath, fetchImpl, timeoutMs = downloadTimeoutMs(asset.size)}) {
   const {url, headers} = assetDownloadRequest(asset, token)
   let response
   try {

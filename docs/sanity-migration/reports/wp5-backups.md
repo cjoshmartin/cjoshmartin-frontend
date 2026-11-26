@@ -330,3 +330,103 @@ The README's restore section was updated, and it now notes that the first backup
 - In the real bucket, production and staging snapshots share `assets/` and `assets/mux/`, so a staging run never stores what a production run already has.
 - The local test backups are 231 MB (`backup-test/production`) and 232 MB (`backup-test/staging-changes`), outside git. Both can be deleted once this report is reviewed. WP5a's `tmp/wp5-local-bucket` is still there.
 - Manual test H34 ("edit a document, run it again, expect a new snapshot with no re-uploaded assets") matches S3 above. Expect exactly 3 new objects.
+
+---
+
+# WP D: Mux removed from the backups, repository name fixed
+
+Status: **done**, 2026-11-26. This follows the owner's decision to drop Mux: every video is now stored in Sanity as file assets (video contract v2: a `video` block's `file` is the MP4 the site plays, `original` is the upload as it was, kept and never served). Nothing in the real backup bucket had to change, because the bucket does not exist yet: `gcloud storage buckets describe gs://cjoshmartin-sanity-backups` answered 404 on 2026-11-26, so no `assets/mux/` object was ever written to it.
+
+## What changed
+
+| Path | Change |
+|---|---|
+| `scripts/backup/lib/mux.mjs` | Deleted (the Mux master-access archiver). |
+| `scripts/backup/lib/backup.mjs` | No Mux planning, downloads, manifest section or `muxArchiver` input. The warnings channel is gone too: its only source was a Mux original that could not be fetched. The log now reads `Assets: N in the dataset (V of them videos), …`. |
+| `scripts/backup/lib/layout.mjs` | `MUX_PREFIX` and `muxAssetKey` removed; the layout comment says why plan §10's `assets/mux/` is gone. |
+| `scripts/backup/lib/sanity-assets.mjs` | `isVideoAsset` (counts only). `downloadTimeoutMs(size)`: a download may take 5 minutes plus 1 s per 512 KiB, instead of a flat 5 minutes, because the Mux path had its own 30-minute limit and the large files now go through the normal asset path. File asset ids also accept an upper-case extension (see below). |
+| `scripts/backup/lib/restore.mjs`, `lib/util.mjs` | The restore hashes each archived file by streaming it (`sha1OfFile`) instead of reading it into memory, so four large videos in parallel never have to fit in RAM. |
+| `scripts/backup/backup.mjs` | No `--mux-timeout-minutes`, no `MUX_TOKEN_*`, no exit code 3. `--help` says where videos go. |
+| `scripts/backup/restore.mjs` | No Mux existence check and no `MUX_TOKEN_*`. |
+| `scripts/backup/package.json`, `package-lock.json` | Version 2.0.0, so `manifest.tool.version` tells Mux-free snapshots apart. |
+| `scripts/backup/test/*`, `integration/gcs-emulator.test.mjs` | The fixture's `mux.videoAsset` document is replaced by a converted contract-v2 video block (an MP4 with `source: {name: "video-to-mp4", id: <original id>}` plus a `.mov` original), used by a post and its draft. Mux tests removed; video tests added (below). |
+| `scripts/backup/setup-gcp.sh` | `GITHUB_REPO="cjoshmartin/cjoshmartin-frontend"`, which sets the provider condition and the `principalSet`. The `repository_id == '737918690'` check is unchanged. It prints only the `SANITY_BACKUP_TOKEN` secret command. |
+| `scripts/backup/README.md` | Bucket layout, run steps, a new **Videos** section, exit codes, tests, restore steps (no Mux check; the video Function should convert nothing after a restore), morning setup (new repository name, one secret), costs (no Mux; video storage estimate). |
+| `.github/workflows/sanity-backup.yml` | `MUX_TOKEN_ID` / `MUX_TOKEN_SECRET` removed from the backup step. The repository name never appeared in the workflow (it uses `github.repository`). |
+
+### Decisions
+
+- **Videos have no code path of their own.** Both the MP4 and the kept original are `sanity.fileAsset` documents. They are downloaded, verified by `sha1hash` and stored once at `assets/files/<sha1>.<ext>` like the STL and PDF files, and the restore re-uploads them through `_sanityAsset` directives. Their content-addressed ids come back unchanged, so `file`, `original`, `conversion.sourceAssetId` and `conversion.outputAssetId` still agree after a restore. `assets.json`, and with `--replace` the asset metadata patches, restore the MP4's `source`, which the converter uses to find an existing MP4 instead of converting again.
+- **`MANIFEST_FORMAT_VERSION` stays 1.** The restore reads only the marker's `formatVersion`, `fingerprint`, `dataset`, `projectId`, `manifestSha256` and `dataSha256`, and the manifest's `data`. The removed fields (`manifest.mux`, `manifest.warnings`, `marker.warningCount`) were never read, so older snapshots, such as the WP5b test backups, still load and restore. Their `mux.videoAsset` documents come back as plain documents.
+- **Upper-case file extensions.** The Wagtail originals include `.MOV` and `.MP4` names. Every file asset id in both datasets today is lower case, and `@sanity/asset-utils` only parses lower case, which suggests the asset service lowercases the extension. Sanity's docs do not say so, and no video had been uploaded yet to check. An id the parser rejected would fail every backup (`does not have a standard content-addressed id`) and leave restore references unrewritten. So file ids now accept either case, and the key and archive name keep the id's own spelling. Image ids stay lower case, because their extension comes from the detected format.
+- **Exit code 3 is gone.** Its only trigger was an unavailable Mux original. Every remaining problem fails the run with exit 1.
+
+### Repository name
+
+`gh api repos/cjoshmartin/cjoshmartin-frontend` on 2026-11-26: `full_name` `cjoshmartin/cjoshmartin-frontend`, id `737918690`, owner `cjoshmartin` (type User), public, default branch `main`. `repos/cjoshmartin-com/cjoshmartin-frontend` redirects to the same repository. `gh secret list` and `gh variable list` on the repository are both empty, so there are no `MUX_*` Actions secrets to delete, and nothing else in GitHub was changed.
+
+## `setup-gcp.sh --print-only` output (2026-11-26, after the move)
+
+Run with `PATH=/usr/bin:/bin`, so `gcloud` was not reachable. It exited 0, and the generated script passes `bash -n` under macOS's bash 3.2.
+
+```bash
+#!/usr/bin/env bash
+# Generated by scripts/backup/setup-gcp.sh --print-only. A real run checks each
+# resource first, skips what already exists, and updates settings that differ.
+set -euo pipefail
+PROJECT_NUMBER="$(gcloud projects describe com-cjoshmartin --format='value(projectNumber)')"
+
+# APIs needed for Workload Identity Federation and Cloud Storage
+gcloud services enable iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com storage.googleapis.com --project=com-cjoshmartin
+
+# Bucket gs://cjoshmartin-sanity-backups
+gcloud storage buckets create gs://cjoshmartin-sanity-backups --project=com-cjoshmartin --location=us-central1 --default-storage-class=STANDARD --uniform-bucket-level-access --public-access-prevention
+
+# Service account sanity-backup@com-cjoshmartin.iam.gserviceaccount.com
+gcloud iam service-accounts create sanity-backup --project=com-cjoshmartin '--display-name=Sanity backup (GitHub Actions)' '--description=Writes weekly Sanity backups to gs://cjoshmartin-sanity-backups. Create and read only; no delete.'
+
+# Bucket roles for the service account: create and read objects, nothing else
+gcloud storage buckets add-iam-policy-binding gs://cjoshmartin-sanity-backups --member=serviceAccount:sanity-backup@com-cjoshmartin.iam.gserviceaccount.com --role=roles/storage.objectCreator
+gcloud storage buckets add-iam-policy-binding gs://cjoshmartin-sanity-backups --member=serviceAccount:sanity-backup@com-cjoshmartin.iam.gserviceaccount.com --role=roles/storage.objectViewer
+
+# Workload Identity pool github-actions
+gcloud iam workload-identity-pools create github-actions --project=com-cjoshmartin --location=global '--display-name=GitHub Actions'
+
+# GitHub OIDC provider cjoshmartin-frontend: only cjoshmartin/cjoshmartin-frontend on refs/heads/main
+gcloud iam workload-identity-pools providers create-oidc cjoshmartin-frontend --project=com-cjoshmartin --location=global --workload-identity-pool=github-actions '--display-name=cjoshmartin-frontend main' --issuer-uri=https://token.actions.githubusercontent.com --attribute-mapping=google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.repository_id=assertion.repository_id,attribute.ref=assertion.ref "--attribute-condition=assertion.repository == 'cjoshmartin/cjoshmartin-frontend' && assertion.repository_id == '737918690' && assertion.ref == 'refs/heads/main'"
+
+# Let cjoshmartin/cjoshmartin-frontend impersonate the service account
+gcloud iam service-accounts add-iam-policy-binding sanity-backup@com-cjoshmartin.iam.gserviceaccount.com --project=com-cjoshmartin --role=roles/iam.workloadIdentityUser "--member=principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-actions/attribute.repository/cjoshmartin/cjoshmartin-frontend"
+
+# GitHub configuration. Variables are not secret. Secrets are read from secrets.env and piped on stdin, so they never appear in shell history or the process list.
+gh variable set GCP_WORKLOAD_IDENTITY_PROVIDER --repo cjoshmartin/cjoshmartin-frontend --body "projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-actions/providers/cjoshmartin-frontend"
+gh variable set GCP_BACKUP_SERVICE_ACCOUNT --repo cjoshmartin/cjoshmartin-frontend --body sanity-backup@com-cjoshmartin.iam.gserviceaccount.com
+gh variable set BACKUP_BUCKET --repo cjoshmartin/cjoshmartin-frontend --body cjoshmartin-sanity-backups
+gh variable set SANITY_PROJECT_ID --repo cjoshmartin/cjoshmartin-frontend --body j3vdh6ti
+(set -a; . ~/cjoshmartin-migration/secrets.env; set +a; printf %s "$SANITY_READ_TOKEN" | gh secret set SANITY_BACKUP_TOKEN --repo cjoshmartin/cjoshmartin-frontend)
+
+# --print-only: nothing was run.
+```
+
+Compared with the WP5a output above, only the repository name changed (provider condition, `principalSet`, every `--repo`), and the two `MUX_*` secret commands are gone. `setup-gcp.sh` was **not** run for real.
+
+## Verification
+
+| Check | Result |
+|---|---|
+| `npm test`, Node 26.4.0 | 57/57 pass (58 before: 6 Mux tests removed, 5 tests added) |
+| `npm test`, Node 24.22.3 (`npx node@24`, the CI version) | 57/57 pass |
+| `npm run test:gcs-emulator` (fake-gcs-server 1.56.1, real `@google-cloud/storage` 8.4.0) | 2/2 pass. The resumable-upload case now writes a 9 MiB `assets/files/<sha1>.mp4`. The end-to-end case checks the fixture's MP4 and original byte for byte in the emulated bucket and builds a restore archive with all 6 assets. The `MaxListenersExceededWarning` it prints comes from the storage client's resumable upload and is printed by the committed version of the test as well. |
+| New tests | **Backup:** an MP4 and its original, referenced from a post and its draft, are each downloaded and stored once, byte-identical, and listed in the manifest with their `mimeType`; a later snapshot and another dataset's first snapshot in the same bucket store and download neither again. **Restore:** the archive holds both files once; both blocks point at them through directives; `conversion` is unchanged; `assets.json` carries the file names and the MP4's `source`. **Contract with `@sanity/import` 7.1.1:** each video file is uploaded once with its name; the MP4's `source` is restored; after the import every block's `conversion.outputAssetId` equals `file.asset._ref` and `conversion.sourceAssetId` equals `original.asset._ref`. **Other:** upper-case extension ids parse and rewrite consistently; video files download without `dlRaw` or a token; the download time limit grows with size. |
+| Mutation check (scratch copy) | Dropping `source` from the restored asset metadata fails 3 tests, including both new video restore tests. Making video assets never count as already stored fails 4 tests, including the new video backup test. |
+| Live dry run, Mux variables unset | `node backup.mjs --dataset staging\|production --target local --dry-run`: both exit 0. Each has 233 documents and 115 assets, `0 of them videos` (no video had been uploaded yet), and would write 118 objects. The local directory stayed empty. |
+| ESLint, repo config (`--no-ignore`) on `scripts/backup` sources and tests | clean, `--max-warnings=0` |
+| actionlint 1.7.12 (with shellcheck) on `.github/workflows/sanity-backup.yml` | clean |
+| shellcheck 0.11.0 on `setup-gcp.sh` | clean (the secrets loop over one item became one `printf`, which keeps SC2043 away; the printed output is unchanged) |
+
+## Not done here, and notes
+
+- `docs/sanity-migration-plan.md` §2 and §10 still name `assets/mux/` and `cjoshmartin-com/cjoshmartin-frontend`, and the morning report's blocker 2 and steps 3, 4 and 6 still mention the old name and the Mux secrets. Those files belong to other packages. For the backups, blocker 2 is fixed by this change: run `scripts/backup/setup-gcp.sh` as it is now.
+- The WP5b local test backups (`~/cjoshmartin-migration/backup-test/…`) contain `assets/mux/` and Mux masters. Nothing reads them, and they can still be deleted as the morning report says.
+- `scripts/decommission/04-gcs-lockdown.sh` and `lib.sh` still require every video to be on Mux. That is another package's code.
+- The first real backup of the converted videos will show the actual video storage. The README's estimate: 274 MB of originals (655 s of video), plus at most about 655 MB of MP4s at 8 Mbit/s. That stays far under the 4 GiB limit.

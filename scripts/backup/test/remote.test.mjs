@@ -1,4 +1,4 @@
-// Tests for the code that talks to Sanity and Mux, using fake fetch functions.
+// Tests for the code that talks to Sanity, using fake fetch functions.
 import assert from 'node:assert/strict'
 import {createHash} from 'node:crypto'
 import {readFile} from 'node:fs/promises'
@@ -6,8 +6,15 @@ import path from 'node:path'
 import {test} from 'node:test'
 
 import {fetchWithRetry, HttpError} from '../lib/http.mjs'
-import {createMuxArchiver, MuxClient} from '../lib/mux.mjs'
-import {assetDownloadRequest, describeAssetDocument, downloadSanityAsset, parseAssetId} from '../lib/sanity-assets.mjs'
+import {
+  assetDownloadRequest,
+  BASE_DOWNLOAD_TIMEOUT_MS,
+  describeAssetDocument,
+  downloadSanityAsset,
+  downloadTimeoutMs,
+  isVideoAsset,
+  parseAssetId,
+} from '../lib/sanity-assets.mjs'
 import {exportDataset, parseExportNdjson} from '../lib/sanity-export.mjs'
 import {fileAsset, imageAsset, makeTempDir} from './helpers.mjs'
 
@@ -80,7 +87,7 @@ test('asset ids parse into kind, hash and extension; images use dlRaw with the t
   const file = fileAsset(Buffer.from('f'), {extension: 'mp3'})
   assert.deepEqual(parseAssetId(image._id), {type: 'image', kind: 'images', hash: image.sha1hash, extension: 'jpg'})
   assert.deepEqual(parseAssetId(file._id), {type: 'file', kind: 'files', hash: file.sha1hash, extension: 'mp3'})
-  assert.equal(parseAssetId('mux-video-12'), null)
+  assert.equal(parseAssetId('blogPost-7'), null)
   assert.equal(describeAssetDocument(file).key, `assets/files/${file.sha1hash}.mp3`)
   assert.throws(() => describeAssetDocument({...image, url: undefined}), /has no url/)
   assert.throws(() => describeAssetDocument({...image, _type: 'sanity.fileAsset'}), /expected sanity.imageAsset/)
@@ -126,102 +133,36 @@ test('asset downloads are verified against sha1hash, CDN hash headers, and Conte
   )
 })
 
-// A fake Mux API: the asset starts with master access off, the PUT turns it
-// on, and the master becomes ready after `pollsUntilReady` GETs.
-function fakeMux({status = 'ready', pollsUntilReady = 2, masterBytes = Buffer.from('MP4 master'), exists = true, masterStatus = 'ready'} = {}) {
-  const log = []
-  let masterAccess = 'none'
-  let pollsSinceEnable = 0
-  const asset = () => ({
-    id: 'Abc123',
-    status,
-    duration: 12.5,
-    resolution_tier: '1080p',
-    max_resolution_tier: '1080p',
-    video_quality: 'basic',
-    master_access: masterAccess,
-    ...(masterAccess === 'temporary'
-      ? {master: pollsSinceEnable >= pollsUntilReady ? {status: masterStatus, ...(masterStatus === 'ready' ? {url: 'https://mezzanine.mux.example/Abc123/mezzanine.mp4?signature=s'} : {})} : {status: 'preparing'}}
-      : {}),
-  })
-  const fetchImpl = async (url, init = {}) => {
-    const method = init.method ?? 'GET'
-    log.push(`${method} ${url.split('?')[0]}`)
-    if (url.startsWith('https://mezzanine.mux.example/')) return respond(masterBytes)
-    assert.match(init.headers.Authorization, /^Basic /)
-    if (!exists) return respond('{"error":{"type":"not_found"}}', {status: 404})
-    if (method === 'PUT') {
-      assert.deepEqual(JSON.parse(init.body), {master_access: 'temporary'})
-      masterAccess = 'temporary'
-      return respond(JSON.stringify({data: asset()}))
-    }
-    if (masterAccess === 'temporary') pollsSinceEnable++
-    return respond(JSON.stringify({data: asset()}))
-  }
-  return {fetchImpl, log}
-}
+test('video files are plain file assets: parsed, keyed under assets/files/ and downloaded without dlRaw or a token', () => {
+  const mp4 = fileAsset(Buffer.from('mp4'), {extension: 'mp4', mimeType: 'video/mp4'})
+  const original = fileAsset(Buffer.from('mov'), {extension: 'mov', mimeType: 'video/quicktime'})
+  const webm = fileAsset(Buffer.from('webm'), {extension: 'webm', mimeType: 'video/webm'})
+  assert.deepEqual(parseAssetId(mp4._id), {type: 'file', kind: 'files', hash: mp4.sha1hash, extension: 'mp4'})
+  assert.equal(describeAssetDocument(original).key, `assets/files/${original.sha1hash}.mov`)
+  assert.equal(describeAssetDocument(webm).key, `assets/files/${webm.sha1hash}.webm`)
+  // An upper-case extension from a file name like IMG_0169.MOV is kept as it is.
+  const upper = fileAsset(Buffer.from('MOV'), {extension: 'MOV', mimeType: 'video/quicktime'})
+  assert.deepEqual(parseAssetId(upper._id), {type: 'file', kind: 'files', hash: upper.sha1hash, extension: 'MOV'})
+  assert.equal(describeAssetDocument(upper).key, `assets/files/${upper.sha1hash}.MOV`)
+  assert.equal(parseAssetId(`file-${upper.sha1hash}-M.OV`), null)
+  assert.equal(parseAssetId(`image-${upper.sha1hash}-4x3-PNG`), null, 'image extensions come from the detected format and are lowercase')
+  const request = assetDownloadRequest(describeAssetDocument(mp4), 'tok')
+  assert.equal(request.url, mp4.url)
+  assert.equal(request.headers.Authorization, undefined)
 
-function archiverFor(fake, options = {}) {
-  let clock = 0
-  const sleeps = []
-  const archiver = createMuxArchiver({
-    client: new MuxClient({tokenId: 'id', tokenSecret: 'secret', fetchImpl: fake.fetchImpl, sleep: noSleep}),
-    fetchImpl: fake.fetchImpl,
-    sleep: async (ms) => {
-      sleeps.push(ms)
-      clock += ms
-    },
-    now: () => clock,
-    pollIntervalMs: 5_000,
-    timeoutMs: 60_000,
-    ...options,
-  })
-  return {archiver, sleeps}
-}
-
-test('Mux originals: enable temporary master access, poll until ready, download the MP4', async (t) => {
-  const dir = await makeTempDir(t)
-  const fake = fakeMux()
-  const {archiver, sleeps} = archiverFor(fake)
-  const result = await archiver.downloadOriginal('Abc123', path.join(dir, 'Abc123.mp4'))
-  assert.equal(result.status, 'downloaded')
-  assert.equal(result.method, 'master-access')
-  assert.equal(result.extension, 'mp4')
-  assert.equal(result.sha256, createHash('sha256').update('MP4 master').digest('hex'))
-  assert.deepEqual(result.details, {durationSeconds: 12.5, resolutionTier: '1080p', maxResolutionTier: '1080p', videoQuality: 'basic'})
-  assert.equal(await readFile(path.join(dir, 'Abc123.mp4'), 'utf8'), 'MP4 master')
-  assert.deepEqual(fake.log, [
-    'GET https://api.mux.com/video/v1/assets/Abc123',
-    'PUT https://api.mux.com/video/v1/assets/Abc123/master-access',
-    'GET https://api.mux.com/video/v1/assets/Abc123',
-    'GET https://api.mux.com/video/v1/assets/Abc123',
-    'GET https://mezzanine.mux.example/Abc123/mezzanine.mp4',
-  ])
-  assert.deepEqual(sleeps, [5_000])
+  assert.equal(isVideoAsset(describeAssetDocument(mp4)), true)
+  assert.equal(isVideoAsset(describeAssetDocument(original)), true)
+  assert.equal(isVideoAsset(describeAssetDocument(fileAsset(Buffer.from('stl')))), false)
+  assert.equal(isVideoAsset(describeAssetDocument(imageAsset(Buffer.from('gif'), {extension: 'gif'}))), false)
+  assert.equal(isVideoAsset({...describeAssetDocument(mp4), mimeType: null}), false)
 })
 
-test('Mux originals: a master that never becomes ready times out', async (t) => {
-  const dir = await makeTempDir(t)
-  const {archiver} = archiverFor(fakeMux({pollsUntilReady: Number.POSITIVE_INFINITY}), {timeoutMs: 30_000})
-  await assert.rejects(archiver.downloadOriginal('Abc123', path.join(dir, 'x.mp4')), /Timed out after 30 s waiting for the master file/)
-})
-
-test('Mux originals: errored masters fail; deleted or errored assets are reported unavailable', async (t) => {
-  const dir = await makeTempDir(t)
-  await assert.rejects(
-    archiverFor(fakeMux({masterStatus: 'errored', pollsUntilReady: 1})).archiver.downloadOriginal('Abc123', path.join(dir, 'a.mp4')),
-    /could not prepare the master/,
-  )
-  const missing = await archiverFor(fakeMux({exists: false})).archiver.downloadOriginal('Abc123', path.join(dir, 'b.mp4'))
-  assert.deepEqual(missing, {status: 'unavailable', reason: 'Mux asset not found (HTTP 404)'})
-  const errored = await archiverFor(fakeMux({status: 'errored'})).archiver.downloadOriginal('Abc123', path.join(dir, 'c.mp4'))
-  assert.equal(errored.status, 'unavailable')
-  assert.match(errored.reason, /errored/)
-})
-
-test('Mux inspect is read-only', async () => {
-  const fake = fakeMux()
-  const result = await archiverFor(fake).archiver.inspect('Abc123')
-  assert.deepEqual(result, {available: true, status: 'ready', masterAccess: 'none'})
-  assert.deepEqual(fake.log, ['GET https://api.mux.com/video/v1/assets/Abc123'])
+test('the download time limit grows with the asset size, so large videos are not cut off', () => {
+  assert.equal(BASE_DOWNLOAD_TIMEOUT_MS, 5 * 60_000)
+  assert.equal(downloadTimeoutMs(null), BASE_DOWNLOAD_TIMEOUT_MS)
+  assert.equal(downloadTimeoutMs(0), BASE_DOWNLOAD_TIMEOUT_MS)
+  assert.equal(downloadTimeoutMs(1), BASE_DOWNLOAD_TIMEOUT_MS + 1000)
+  // The largest Wagtail original, 39,675,901 bytes: 76 s on top of the base.
+  assert.equal(downloadTimeoutMs(39_675_901), BASE_DOWNLOAD_TIMEOUT_MS + 76_000)
+  assert.equal(downloadTimeoutMs(1024 ** 3), BASE_DOWNLOAD_TIMEOUT_MS + 2048_000)
 })

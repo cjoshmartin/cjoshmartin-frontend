@@ -1,6 +1,6 @@
 {
   "name": "cjoshmartin-sanity-backup",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "description": "Weekly change-only backups of the cjoshmartin.com Sanity dataset to a private GCS bucket, and restores from them.",
   "license": "UNLICENSED",
