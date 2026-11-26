@@ -58,6 +58,20 @@
           },
           "optional": true
         },
+        "originalStripped": {
+          "type": "objectAttribute",
+          "value": {
+            "type": "boolean"
+          },
+          "optional": true
+        },
+        "stripVersion": {
+          "type": "objectAttribute",
+          "value": {
+            "type": "string"
+          },
+          "optional": true
+        },
         "updatedAt": {
           "type": "objectAttribute",
           "value": {

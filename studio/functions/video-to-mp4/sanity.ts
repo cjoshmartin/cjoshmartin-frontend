@@ -10,14 +10,17 @@ import os from 'node:os'
 
 import {ClientError, type SanityClient} from '@sanity/client'
 
+import {PRIVACY_FIELD, VIDEO_ORIGINAL_SOURCE_NAME, VIDEO_STRIP_VERSION} from '../privacy/constants'
 import {convertToMp4, removeStaleWorkDirs, type ConvertOptions} from './convert'
 import {
   RetryableConversionError,
   type AssetDocument,
   type ContentStore,
   type Converter,
+  type DeleteOutcome,
   type StoredDocument,
 } from './orchestrator'
+import {stripOriginal} from './strip-original'
 import type {PatchOps} from './patches'
 import {
   CONVERTED_ASSET_SETTINGS_FIELD,
@@ -67,6 +70,31 @@ export function createSanityStore(client: SanityClient): ContentStore {
         {tag: 'video-to-mp4.reuse'},
       )
     },
+    async findStrippedOriginal(uploadAssetId) {
+      return raw.fetch<AssetDocument | null>(
+        `*[_type == "sanity.fileAsset" && source.name == $name && source.id == $id && ${PRIVACY_FIELD}.status == "stripped" && ${PRIVACY_FIELD}.version == $version] | order(_createdAt asc)[0]`,
+        {name: VIDEO_ORIGINAL_SOURCE_NAME, id: uploadAssetId, version: VIDEO_STRIP_VERSION},
+        {tag: 'video-to-mp4.stripped'},
+      )
+    },
+    async deleteAssetIfUnreferenced(assetId): Promise<DeleteOutcome> {
+      // The raw perspective includes drafts and release versions.
+      const referencing = () =>
+        raw.fetch<string[]>('*[references($id)]._id', {id: assetId}, {tag: 'video-to-mp4.references'})
+      const before = await referencing()
+      if (before.length > 0) return {kind: 'referenced', by: before}
+      try {
+        await raw.delete(assetId, {visibility: 'sync'})
+        return {kind: 'deleted'}
+      } catch (error) {
+        if (error instanceof ClientError && error.statusCode === 404) return {kind: 'missing'}
+        if (error instanceof ClientError && error.statusCode === 409) {
+          // A reference was added between the query and the delete.
+          return {kind: 'referenced', by: await referencing()}
+        }
+        throw error
+      }
+    },
   }
 }
 
@@ -86,23 +114,41 @@ export function createSanityConverter(
   client: SanityClient,
   options: SanityConverterOptions,
 ): Converter {
+  const verifiedFfmpeg = async (): Promise<string> => {
+    try {
+      return await options.ffmpeg()
+    } catch (error) {
+      throw new RetryableConversionError(
+        `the converter is not set up correctly (${(error as Error).message}); the site owner has to redeploy it`,
+      )
+    }
+  }
+  // Lambda runs one invocation per container at a time, so any work directory left in /tmp
+  // belongs to an earlier run that was killed. Removed once per run, before the first step.
+  let cleaned = false
+  const removeStale = async () => {
+    if (cleaned) return
+    cleaned = true
+    const removed = await removeStaleWorkDirs(options.tmpDir ?? os.tmpdir())
+    if (removed.length > 0) {
+      options.log(`removed work directories of an earlier run: ${removed.join(', ')}`)
+    }
+  }
   return {
+    async strip(upload: AssetDocument) {
+      const ffmpegPath = await verifiedFfmpeg()
+      await removeStale()
+      return stripOriginal(client, upload, {
+        ffmpegPath,
+        deadline: options.deadline,
+        log: options.log,
+        tmpDir: options.tmpDir,
+      })
+    },
     async convert(source: AssetDocument) {
       if (!source.url) throw new RetryableConversionError(`${source._id} has no URL yet`)
-      let ffmpegPath: string
-      try {
-        ffmpegPath = await options.ffmpeg()
-      } catch (error) {
-        throw new RetryableConversionError(
-          `the converter is not set up correctly (${(error as Error).message}); the site owner has to redeploy it`,
-        )
-      }
-      // Lambda runs one invocation per container at a time, so any work directory left in /tmp
-      // belongs to an earlier run that was killed.
-      const removed = await removeStaleWorkDirs(options.tmpDir ?? os.tmpdir())
-      if (removed.length > 0) {
-        options.log(`removed work directories of an earlier run: ${removed.join(', ')}`)
-      }
+      const ffmpegPath = await verifiedFfmpeg()
+      await removeStale()
       const started = Date.now()
       const converted = await convertToMp4(
         {

@@ -53,6 +53,10 @@ Read these first. Everything else matches the brief.
 | `studio/schemaTypes/shared/video-conversion.ts` | `videoNeedsConversion` (the contract's rule), `videoConversionState` and `videoConversionLabel` (the preview's status line; pass `SETTINGS_VERSION`, because a failure is final only for its settings), the Studio's stuck check `videoConversionNudge` and `nudgedConversion`, `STALE_PROCESSING_SECONDS`, `RETRY_DELAY_SECONDS`, and the types `VideoValue`, `VideoConversionValue`, `FileValue`, `VideoConversionState`, `VideoConversionNudgeReason` | none (a type-only import from `constants.ts`; Node's type stripping loads it) |
 | `studio/functions/video-to-mp4/settings.ts` | The MP4 settings, see [MP4 settings](#mp4-settings): `SETTINGS_VERSION`, `buildFfmpegArgs`, `VIDEO_FILTER`, `expectedOutputSize`, `convertedFilename`, `CONVERTED_ASSET_SOURCE_NAME`, `CONVERTED_ASSET_SETTINGS_FIELD`, `OUTPUT_MIME_TYPE`, `OUTPUT_EXTENSION`, `MAX_DIMENSION`, `CRF`, `AUDIO_BITRATE`, `AUDIO_CHANNELS`, `X264_PRESETS`, `DEFAULT_PRESET`, `isX264Preset`, `MIN_FFMPEG_VERSION`, `parseFfmpegVersion`, `checkFfmpegVersion`, and the types `X264Preset`, `FfmpegArgsOptions`, `VideoSize`, `FfmpegVersion` | none (no imports, only erasable TypeScript: runs under the Functions bundler, `tsx` and Node's type stripping) |
 | `studio/functions/video-to-mp4/frames.ts` | The frame-time check every converter runs: `compareFrameTimes`, `frameTimeProblems`, `FRAME_TIME_TOLERANCE_SECONDS`, and the showinfo parser the Function uses (`FrameTimesCollector`, `SHOWINFO_FILTER`) | none |
+| `studio/functions/privacy/constants.ts` | See [Privacy](#privacy-location-and-personal-metadata): `IMAGE_STRIP_VERSION`, `VIDEO_STRIP_VERSION`, `PRIVACY_FIELD`, `IMAGE_PRIVACY_SOURCE_NAME`, `VIDEO_ORIGINAL_SOURCE_NAME`, `ACCEPTED_IMAGE_MIME_TYPES`, `IMAGE_ACCEPT`, `IMAGE_METADATA_OPTIONS`, `ASSET_PRIVACY_STATUSES`, and the types `AssetPrivacy`, `AssetPrivacyStatus` | none (no imports, only erasable TypeScript) |
+| `studio/functions/privacy/image-strip.ts` | `stripImage`, `analyzeImage`, `detectImageFormat`, `IMAGE_MIME_TYPES`, `ImageStripError` | Node built-ins only (`node:crypto`, `node:zlib`) |
+| `studio/functions/privacy/video-strip.ts` | `stripVideo`, `planStrip`, `stripArgs`, `describeContainer`, `checkIsobmffBoxes`, `comparePackets`, `parseFrameMd5`, `parseStreamHash`, `majorBrand`, `VideoStripError`, `VideoStripTimeoutError` | Node built-ins only; ffmpeg is passed in |
+| `studio/schemaTypes/shared/image-privacy.ts` | `PRIVATE_IMAGE_OPTIONS`, `imageFormatProblem`, `imagePrivacyState`, `imagePrivacyWarning`, `imagePrivacyLabel` | `functions/privacy/constants.ts` only |
 | `studio/schemaTypes/index.ts` | `schemaTypes: SchemaTypeDefinition[]` (every type below except `code`, which its plugin adds), each type definition by name (`blogPost`, `project`, ...), and everything from `constants.ts` | `sanity`, `@sanity/icons` (resolved from `studio/node_modules`, so run `npm ci` in `studio/` first) |
 
 The Next.js app should not import from `studio/`. It uses `sanity.types.ts` and its own queries.
@@ -118,7 +122,7 @@ Registered in `document.singletons`; create, duplicate, delete and unpublish are
 |---|---|---|---|
 | `firstName` | string | yes | |
 | `lastName` | string | yes | |
-| `image` | image (hotspot) with `alt` string | | `{_type: "image", asset, hotspot?, crop?, alt?}`. Missing alt is a warning. |
+| `image` | image (hotspot) with `alt` string | | `{_type: "image", asset, hotspot?, crop?, alt?}`. Missing alt is a warning. Private image options ([Privacy](#privacy-location-and-personal-metadata)). |
 | `location` | string | | |
 | `jobTitle` | string | | |
 | `bio` | `blockContent` | | |
@@ -132,7 +136,7 @@ Registered in `document.singletons`; create, duplicate, delete and unpublish are
 |---|---|---|---|
 | `firstName` | string | yes | |
 | `lastName` | string | yes | |
-| `image` | image (hotspot) with `alt` string | | Warning when missing (the ASCII art comes from it). |
+| `image` | image (hotspot) with `alt` string | | Warning when missing (the ASCII art comes from it). Private image options. |
 | `jobTitle` | string | | |
 | `relationship` | string | | |
 | `link` | url | | http or https. |
@@ -146,7 +150,7 @@ Registered in `document.singletons`; create, duplicate, delete and unpublish are
 | Field | Type | Req. | Notes |
 |---|---|---|---|
 | `title` | string | yes | |
-| `image` | image (hotspot) with `alt` string | | |
+| `image` | image (hotspot) with `alt` string | | Private image options. |
 | `description` | `blockContent` | | |
 | `link` | url | | http(s) or a site path. |
 | `linkText` | string | | Plain string (Wagtail's rich-text `link_text` flattened). Warning when `link` is set and this is empty. |
@@ -240,12 +244,14 @@ absent for snippets), `firstPublishedAt` and `lastPublishedAt` ISO datetimes.
 
 Image type named `imageWithAlt`, hotspot on, with `alt` string and `caption` string:
 `{_type: "imageWithAlt", asset: {_type: "reference", _ref: "image-..."}, hotspot?, crop?, alt?, caption?}`.
-Used by `heroMedia[]`, `contentImage`, `previewImage`. Missing alt is a warning.
+Used by `heroMedia[]`, `contentImage`, `previewImage`. Missing alt is a warning. Private image
+options ([Privacy](#privacy-location-and-personal-metadata)).
 
 ### `imageBlock` (rich text)
 
 Image type named `imageBlock`, hotspot on, fields `alt` string, `caption` string, `layout`
 (`fullwidth` | `left` | `right`, required). Errors without an image asset. Missing alt is a warning.
+Private image options.
 
 ### `youtube`
 
@@ -275,6 +281,8 @@ Video contract v2; the full rules are in [Videos](#videos-video-contract-v2).
     "sourceAssetId": "file-<sha1>-mov",
     "outputAssetId": "file-<sha1>-mp4",
     "settingsVersion": "h264-crf23-max1920-v2",
+    "originalStripped": true,
+    "stripVersion": "video-strip-v1",
     "updatedAt": "2026-11-26T05:00:00.000Z"
   }
 }
@@ -283,13 +291,15 @@ Video contract v2; the full rules are in [Videos](#videos-video-contract-v2).
 | Field | Type | Req. | Studio | Notes |
 |---|---|---|---|---|
 | `file` | file, `accept: "video/*"` | yes | editable | The file the site plays. After conversion it is the converted MP4. Must reference an asset whose `mimeType` starts with `video/`. |
-| `original` | file | | read-only, hidden while empty | The file as uploaded, kept but never served. Set by the converter. |
+| `original` | file | | read-only, hidden while empty | The upload, kept but never served. Since 2026-11-26 a copy of it without location and personal metadata (same video and audio packets); set by the converter. |
 | `conversion` | object | | read-only, collapsed | Set by the converter. |
 | `conversion.status` | string `pending` \| `processing` \| `ready` \| `failed` | | | Titles Pending, Processing, Ready, Failed. Other values are a validation error. `pending` with a message for the current file is a retryable problem (not the video's fault) that the converter retries. |
 | `conversion.message` | string | | | Failure reason, retry reason, or other converter details. |
 | `conversion.sourceAssetId` | string | | | `_id` of the original asset that was (or is being) converted. |
 | `conversion.outputAssetId` | string | | | `_id` of the MP4 asset produced. |
 | `conversion.settingsVersion` | string | | | `SETTINGS_VERSION` the MP4 was made with, `h264-crf23-max1920-v2` today. |
+| `conversion.originalStripped` | boolean | | | `true` when `original` is the upload's copy without location and personal metadata. The video-to-mp4 Function writes it on every ready result (`false` only for an adopted MP4 whose original was never stripped). |
+| `conversion.stripVersion` | string | | | `VIDEO_STRIP_VERSION` of that copy, `video-strip-v1` today. |
 | `conversion.updatedAt` | datetime | | | When the converter last wrote `conversion`. |
 
 The asset ids are plain strings, not references, so they never block deleting an asset.
@@ -350,7 +360,11 @@ migrated block that has not been converted yet.
 **What a converter does** (the video-to-mp4 Sanity Function for Studio uploads, the migration for
 the 29 Wagtail videos):
 
-1. Takes `file.asset._ref` as the source asset.
+1. Takes `file.asset._ref` as the upload. Unless it already is a stripped copy (`privacy.status`
+   `stripped` with the current `VIDEO_STRIP_VERSION`), the Function makes the original private
+   first: it reuses the upload's earlier copy (`source: {name: "video-to-mp4-original", id: <upload
+   _id>}` with that version) or strips and uploads one ([Privacy](#privacy-location-and-personal-metadata)).
+   That copy is the source asset from here on.
 2. Looks for an existing asset with `source.name == "video-to-mp4" && source.id == <source asset _id>`
    **and `videoToMp4SettingsVersion == SETTINGS_VERSION`** and reuses it instead of converting again
    (idempotent, no duplicate conversions, never an MP4 made with other settings).
@@ -361,9 +375,10 @@ the 29 Wagtail videos):
    `source: {name: "video-to-mp4", id: <source asset _id>}` (`CONVERTED_ASSET_SOURCE_NAME`). Right
    after the upload it sets `videoToMp4SettingsVersion` (`CONVERTED_ASSET_SETTINGS_FIELD`) on that
    asset document to `SETTINGS_VERSION`.
-4. Sets `original` to the source file, `file` to the MP4, and `conversion` to
-   `{status: "ready", sourceAssetId, outputAssetId, settingsVersion, updatedAt}`, where
-   `settingsVersion` is the version recorded on the MP4 asset. While working it may write
+4. Sets `original` to the source file (the stripped copy), `file` to the MP4, and `conversion` to
+   `{status: "ready", sourceAssetId, outputAssetId, settingsVersion, originalStripped, stripVersion,
+   updatedAt}`, where `settingsVersion` is the version recorded on the MP4 asset, then deletes the
+   unstripped upload once nothing references it. While working it may write
    `status: "processing"`. When the video itself cannot be converted: `status: "failed"` with
    `sourceAssetId` and `message`, leaving `file` as it was. When the problem is not the video's
    fault (the converter's setup, a download, an API error): `status: "pending"` with
@@ -388,7 +403,10 @@ reuses them.
 **Studio.** The block preview's title is the `file` asset's `originalFilename`; its subtitle is
 "No video file", "Converting to MP4..." (needs conversion and no failure for this file), "Waiting
 to retry the conversion: <message>" (`pending` with a message for this file, or `failed` under
-another settings version, which the Function converts again), "Ready" (`file` is the MP4) or
+another settings version, which the Function converts again), "Ready" (`file` is the MP4; followed
+by ". Original kept without location data" when `conversion.originalStripped` is true or the
+original's asset has `privacy.status` "stripped", or ". The original upload still has its
+metadata" for an original from before stripping) or
 "Conversion failed: <message>" (status `failed`, `sourceAssetId` is the current file and
 `settingsVersion` is the current `SETTINGS_VERSION`; a failure recorded for an earlier file or
 under other settings does not count, the same rule as the Function's). A failed conversion is a
@@ -472,6 +490,75 @@ body[]{
 
 `original` is never queried for playback.
 
+## Privacy (location and personal metadata)
+
+Owner decision 2026-11-26: every asset the public datasets serve is stripped of location and
+personal metadata, without re-encoding. Assets uploaded before 2026-11-26 (the Wagtail migration)
+are stripped by the migration's privacy step (`migration/wagtail-to-sanity`); every later upload by
+the Sanity Functions below. Both mark their copies with the same `privacy` field.
+
+**Asset `privacy` field** (`PRIVACY_FIELD`, on `sanity.imageAsset` and `sanity.fileAsset`):
+
+```json
+{"status": "stripped", "version": "image-strip-v1", "strippedFrom": "image-<sha1>-4032x3024-jpg",
+ "removed": ["EXIF: Make, Model, GPS, MakerNote, thumbnail (IFD1)", "XMP"], "updatedAt": "..."}
+```
+
+| `status` | Meaning |
+|---|---|
+| `processing` | A run is checking or stripping this upload; also its lease (`holder`, `expiresAt`). |
+| `pending` | A problem that is not the file's fault (download, upload, API); retried by the first event 10 minutes or more later. `message` says why. |
+| `failed` | The file cannot be stripped with this `version` (corrupt, BigTIFF, old-style JPEG-in-TIFF, SVG). Final until the version changes. |
+| `clean` | Checked: nothing personal. Left as it is. |
+| `stripped` | A copy without personal metadata (`strippedFrom`: the upload it was made from; `removed`: what went, names only). |
+| `replaced` | An upload with personal metadata; `replacementAssetId` is its copy. References are moved and it is deleted once nothing references it. |
+
+`version` is `IMAGE_STRIP_VERSION` (`image-strip-v1`) for images and `VIDEO_STRIP_VERSION`
+(`video-strip-v1`) for videos. A new version re-checks images on the next change of a document that
+uses them. Copies made by the Functions have `source: {name: "image-privacy", id: <upload>}` or
+`source: {name: "video-to-mp4-original", id: <upload>}`.
+
+**Images** (image-privacy Function, `studio/functions/image-privacy`; stripper
+`studio/functions/privacy/image-strip.ts`):
+
+- Every image field and type (`person.image`, `testimonial.image`, `service.image`, `imageWithAlt`,
+  `imageBlock`) has `options: {hotspot: true, accept: "image/jpeg,image/png,image/webp,image/gif,image/avif,image/tiff",
+  metadata: ["blurhash", "thumbhash", "lqip", "palette"]}`: Sanity never extracts `exif`, `image`
+  (camera) or `location` into the asset document, and only formats that can be stripped losslessly
+  can be uploaded. SVG, HEIC/HEIF (Sanity itself cannot process HEVC images) and BMP are refused,
+  and an existing asset of another format is a validation error.
+- The input shows the Function's progress under the image ("Checking...", "Removing location and
+  camera data...", "Location and camera data removed...", or a warning when it failed or waits to
+  retry).
+- Trigger: create and update of the watched document types (drafts included) with an image whose
+  asset was uploaded since 2026-11-26T00:00:00Z and still needs work (no `privacy`, another
+  version, `replaced`, a stale `processing`, a due `pending`). The filter follows `asset->`.
+- What counts as personal: anything except the orientation, size, resolution and colour-space EXIF
+  tags, the ICC profile and the chunks a decoder needs. Personal: GPS, camera make, model and
+  serial numbers, maker notes, lens, capture settings, dates, authors, software, comments, XMP,
+  IPTC/Photoshop data, thumbnails, data after the end of the image (MPF gain maps and depth maps,
+  motion photos), unknown chunks. An image with nothing personal is left alone (marked `clean`).
+  This is stricter than the migration's rule for the older assets (which keeps camera make, model,
+  dates and comments).
+- The copy keeps the coded image byte for byte (identical decoded pixels), the orientation and the
+  ICC profile, and has the upload's dimensions, so crops and hotspots stay right. Every reference
+  in drafts, published documents and release versions moves to it (`asset._ref` only: crop,
+  hotspot, alt, caption, layout unchanged), then the upload is deleted.
+- The plain image CDN URL serves a re-encoded rendition without any metadata; the stored file is
+  only available with `?dlRaw=` and a token. The Function reads the stored file that way.
+
+**Videos** (video-to-mp4 Function; stripper `studio/functions/privacy/video-strip.ts`): `original`
+is a stream copy of the upload (every video and audio packet identical) without file and stream
+metadata (QuickTime keys and user data: location, make, model, software, creation dates), data
+tracks (`mebx` timed metadata), subtitles, chapters, cover art and creation times; the rotation,
+colour description and HDR side data are kept. QuickTime stays QuickTime and MP4 stays MP4, except
+that a Dolby Vision video becomes MP4 so its configuration (`dvvC`) is kept. Packets whose source
+time stamps repeat (screen recordings) move by at most 50 ms (9.8 ms in the Wagtail videos). The
+unstripped upload is deleted once nothing references it. The converted MP4 is checked to carry no
+metadata boxes besides ffmpeg's encoder name.
+
+Not covered by the Functions: files in `fileLink` annotations and `stlModel` blocks (PDF, STL).
+
 ## Validation
 
 `npm run validate` (production) and `npm run validate:staging` in `studio/` run
@@ -493,13 +580,17 @@ Errors:
 - `video` without a `file`, or whose `file` asset is missing or not a `video/*` MIME type;
   `conversion.status` outside its list; a `video` whose MP4 conversion failed for its current file;
   `imageBlock` without an image; `fileLink` without a file; `code` with blank code.
+- An image (any image field or type) whose asset's format cannot be stripped losslessly (not
+  JPEG, PNG, WebP, GIF, AVIF or TIFF, for example an SVG or HEIC picked from the media browser).
 - Redirect `source`/`destination` format, duplicate `source`, `destination` equal to `source`.
 - Duplicate `medium` or `technology` title ignoring case.
 - Strong references to documents that don't exist or aren't published (Sanity's own check).
 
 Warnings (reported, never fail `npm run validate`): missing image alt text, testimonial without a
-photo, service link without link text, SEO title over 70 or description over 160 characters, and
-Sanity's own "File type ... is not accepted" for a non-video `file`.
+photo, service link without link text, SEO title over 70 or description over 160 characters,
+Sanity's own "File type ... is not accepted" for a non-video `file`, and an image whose location
+and camera data the image-privacy Function could not remove (yet): `privacy.status` `failed`,
+`pending` or `replaced`.
 
 All 29 migrated video blocks are contract v2 and `ready` (`h264-crf23-max1920-v2`), and no
 `mux.*` document is left: `npm run validate` and `npm run validate:staging` report 0 errors (on

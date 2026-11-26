@@ -4,6 +4,9 @@ import {defineField, defineType} from 'sanity'
 import {AUDIENCE_OPTIONS} from '../constants'
 import {altField} from '../shared/alt-field'
 import {audienceField, GROUPS, legacyField} from '../shared/fields'
+import {ImagePrivacyInput} from '../../components/ImagePrivacyInput'
+import {PRIVATE_IMAGE_OPTIONS} from '../shared/image-privacy'
+import {privateImageValidation} from '../shared/image-validation'
 
 /** Service card on the home page (Wagtail `home.Service`). */
 export const service = defineType({
@@ -23,8 +26,10 @@ export const service = defineType({
       name: 'image',
       type: 'image',
       group: GROUPS.content.name,
-      options: {hotspot: true},
+      options: PRIVATE_IMAGE_OPTIONS,
+      components: {input: ImagePrivacyInput},
       fields: [altField()],
+      validation: (rule) => privateImageValidation(rule),
     }),
     defineField({name: 'description', type: 'blockContent', group: GROUPS.content.name}),
     defineField({

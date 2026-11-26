@@ -24,6 +24,9 @@ export interface VideoConversionValue {
   sourceAssetId?: string
   outputAssetId?: string
   settingsVersion?: string
+  /** True when `original` is the upload's copy without location and personal metadata. */
+  originalStripped?: boolean
+  stripVersion?: string
   updatedAt?: string
 }
 
@@ -111,6 +114,34 @@ export function videoConversionLabel(state: VideoConversionState): string {
     case 'failed':
       return `Conversion failed: ${state.message}`
   }
+}
+
+/**
+ * What the block keeps as its original (shown after "Ready" in the Studio preview): `stripped` when
+ * it is a copy without location and personal metadata (`conversion.originalStripped`, written by
+ * the video-to-mp4 Function, or `privacy.status` "stripped" on the original's asset, written by the
+ * Function and by the migration's privacy step), `unstripped` for an original from before
+ * stripping existed, `none` without an original.
+ */
+export function videoOriginalState(
+  conversion: VideoConversionValue | undefined,
+  originalAssetId: string | undefined,
+  originalPrivacyStatus?: string,
+): 'stripped' | 'unstripped' | 'none' {
+  if (!originalAssetId) return 'none'
+  return conversion?.originalStripped === true || originalPrivacyStatus === 'stripped' ? 'stripped' : 'unstripped'
+}
+
+/** The preview subtitle: the conversion status, and for a ready block what its original is. */
+export function videoPreviewSubtitle(
+  state: VideoConversionState,
+  original: 'stripped' | 'unstripped' | 'none',
+): string {
+  const label = videoConversionLabel(state)
+  if (state.kind !== 'ready' || original === 'none') return label
+  return original === 'stripped'
+    ? `${label}. Original kept without location data`
+    : `${label}. The original upload still has its metadata`
 }
 
 function ageSeconds(time: string | undefined, now: Date): number {

@@ -152,6 +152,10 @@ export interface ConversionValue {
   sourceAssetId?: string
   outputAssetId?: string
   settingsVersion?: string
+  /** True when `original` is a copy of the upload without location and personal metadata. */
+  originalStripped?: boolean
+  /** VIDEO_STRIP_VERSION of that copy. */
+  stripVersion?: string
   updatedAt?: string
 }
 

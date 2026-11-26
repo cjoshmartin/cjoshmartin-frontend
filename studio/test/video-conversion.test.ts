@@ -24,6 +24,8 @@ import {
   videoConversionNudge,
   videoConversionState,
   videoNeedsConversion,
+  videoOriginalState,
+  videoPreviewSubtitle,
   type VideoValue,
 } from '../schemaTypes/shared/video-conversion'
 
@@ -409,5 +411,20 @@ describe('videoConversionNudge and nudgedConversion', () => {
     assert.equal(found, 'settings-changed')
     const nudged = {...failedByFunction, conversion: nudgedConversion(failedByFunction, found, NOW)}
     assert.equal(await functionFilterMatches(nudged), false)
+  })
+})
+
+describe('videoOriginalState and videoPreviewSubtitle', () => {
+  it('says whether a ready block keeps its original without location data', () => {
+    const ready = {status: 'ready', sourceAssetId: ORIGINAL, outputAssetId: MP4}
+    assert.equal(videoOriginalState({...ready, originalStripped: true}, ORIGINAL), 'stripped')
+    assert.equal(videoOriginalState(ready, ORIGINAL), 'unstripped')
+    assert.equal(videoOriginalState(ready, undefined), 'none')
+    // A copy the migration's privacy step made: marked on its asset.
+    assert.equal(videoOriginalState(ready, ORIGINAL, 'stripped'), 'stripped')
+    assert.equal(videoPreviewSubtitle({kind: 'ready'}, 'stripped'), 'Ready. Original kept without location data')
+    assert.equal(videoPreviewSubtitle({kind: 'ready'}, 'unstripped'), 'Ready. The original upload still has its metadata')
+    assert.equal(videoPreviewSubtitle({kind: 'ready'}, 'none'), 'Ready')
+    assert.equal(videoPreviewSubtitle({kind: 'converting'}, 'stripped'), 'Converting to MP4...')
   })
 })

@@ -2,8 +2,10 @@
 
 Sanity Function that converts every video uploaded in the Studio to an MP4 with the fixed
 settings in `settings.ts` (video contract v2, `docs/sanity-migration/schema-contract.md`,
-"Videos"). The site only plays `video.file`; after conversion that is the MP4, and the upload is
-kept in `video.original` (read-only, never served).
+"Videos"). The site only plays `video.file`; after conversion that is the MP4. The upload is kept
+in `video.original` (read-only, never served) as a copy without its location and personal
+metadata (`../privacy/video-strip.ts`, a stream copy), and the unstripped upload is deleted
+("Privacy" in the contract).
 
 | File | What it is |
 | --- | --- |
@@ -11,7 +13,8 @@ kept in `video.original` (read-only, never served).
 | `trigger.ts` | Event filter and projection, the watched fields per document type, and the same "which block needs work" rule in TypeScript. |
 | `orchestrator.ts` | One run: pick the block, take the per-upload lease, mark `processing`, adopt / reuse / convert, deliver the result, release. |
 | `patches.ts` | The patches the Function writes (by block `_key`) and the lease rules. |
-| `convert.ts` | Download (or range proxy), `ffmpeg -i` description, conversion, MP4 checks, full decode check, frame-time check. |
+| `convert.ts` | Download (or range proxy), `ffmpeg -i` description, conversion, MP4 checks (including no metadata boxes besides ffmpeg's encoder tag), full decode check, frame-time check. |
+| `strip-original.ts` | The copy of the upload without location and personal metadata: download or range proxy, `stripVideo`, upload with source `video-to-mp4-original`, `privacy` stripped. |
 | `frames.ts` | Frame times from ffmpeg's `showinfo` filter and the check that every input frame is in the MP4 at its own time. |
 | `media-info.ts` | Parser for `ffmpeg -i` output (audio, displayed size after rotation, duration); replaces ffprobe. |
 | `mp4.ts` | Minimal MP4 reader and the output checks (H.264 High 4:2:0 8-bit, size, no rotation, AAC stereo, faststart, duration). |
@@ -40,11 +43,21 @@ kept in `video.original` (read-only, never served).
    revision-checked patch. Only one run can hold it, so one upload is never converted twice at
    once, even from different documents. A run that finds it held marks its block `processing`
    ("waiting") and stops; the holder delivers its result to every waiting block.
-4. **MP4.** In order: the file already is an MP4 made by this converter with the current settings
+4. **Private original.** Unless the file is an MP4 of this converter (adopted or swapped back as
+   below): the upload already is a stripped copy (`privacy` stripped with `VIDEO_STRIP_VERSION`;
+   use it), or an earlier stripped copy of it exists (`source: {name: "video-to-mp4-original",
+   id: <upload>}` with the current strip version; reuse it), or the upload is stripped now:
+   download to `/tmp` (sha1 checked) when it and its copy fit, else read through the range proxy;
+   `stripVideo` (stream copy, then the stream list, the metadata left, the boxes and every packet
+   checked against the upload with the same ffmpeg); upload as `<base>.<mov|mp4|mkv|webm>` with
+   that source; record `privacy` = {status: stripped, version, strippedFrom, removed, ...} on it.
+   A file that cannot be stripped fails the conversion (`failed`); a problem that is not the
+   file's fault is `pending`. The stripped copy is what is converted.
+5. **MP4.** In order: the file already is an MP4 made by this converter with the current settings
    (adopt it as it is); the file is an MP4 this converter made with older settings and its
    original still exists (point `file` back at the original, which the next run converts); an
-   asset with `source: {name: "video-to-mp4", id: <upload>}` and `videoToMp4SettingsVersion` =
-   `SETTINGS_VERSION` exists (reuse it); otherwise convert: download to `/tmp` (sha1 checked) when
+   asset with `source: {name: "video-to-mp4", id: <stripped copy>}` and `videoToMp4SettingsVersion`
+   = `SETTINGS_VERSION` exists (reuse it); otherwise convert the copy: download to `/tmp` (sha1 checked) when
    the upload is at most 400 MB and it plus an MP4 1.5 times its size fit in the free space, else
    read through the range proxy (also the fallback when `/tmp` fills up during a downloaded
    conversion); describe with `ffmpeg -i`; run `buildFfmpegArgs` (preset `medium`) with a second
@@ -52,16 +65,19 @@ kept in `video.original` (read-only, never served).
    it completely, logging its frame times; require every input frame at its own time and no other
    frame (`frames.ts`, 1 ms); upload it as `<base>.mp4`, `video/mp4`, with that `source`; and record
    `videoToMp4SettingsVersion` on the new asset.
-5. **Result.** Ready: `file` = the MP4, `original` = the upload, `conversion` = `{status: ready,
-   message, sourceAssetId, outputAssetId, settingsVersion, updatedAt}`. Failed (the video itself
+6. **Result.** Ready: `file` = the MP4, `original` = the stripped copy, `conversion` = `{status:
+   ready, message, sourceAssetId (the copy), outputAssetId, settingsVersion, originalStripped: true,
+   stripVersion, updatedAt}`. Failed (the video itself
    cannot be converted): `conversion` = `{status: failed, message, sourceAssetId, settingsVersion,
    updatedAt}`, `file` left on the upload. Retry (not the video's fault: the ffmpeg binary check,
    a download, the CDN connection, an API error or any unexpected error): the same with `status:
    pending` and a message saying it is retried. The result goes to every draft or published block
    that still uses the upload (a draft published mid-conversion is converted in its published
    document, without a second conversion), and again after the lease is released for blocks that
-   started waiting meanwhile.
-6. Every write is a patch on `field[_key=="..."]` with `ifRevisionID`, re-read and retried on a
+   started waiting meanwhile. Then the unstripped upload is deleted if no document (drafts,
+   published, release versions) references it any more; otherwise the run for the block that
+   still uses it deletes it.
+7. Every write is a patch on `field[_key=="..."]` with `ifRevisionID`, re-read and retried on a
    conflict, so concurrent edits are kept and a block whose file changed meanwhile is left alone.
 
 **Retrying.** A `failed` conversion is final for that upload and settings version (otherwise the
@@ -87,7 +103,8 @@ scheduled sweep would cover them, but scheduled Functions need the Blueprint sta
 organization scope (one-way) and a robot token; that is the site owner's decision.
 
 **Limits.** 10 GB memory, 900 s timeout; ffmpeg is stopped 60 s before the timeout and the block
-is marked failed. The worst case measured by the spike (60 s of 4K 10-bit HEVC) takes about 54 s.
+is marked failed. Stripping needs the copy (about the upload's size) to fit in `/tmp` (512 MB), so
+uploads above about 480 MB fail with a message. The worst case measured by the spike (60 s of 4K 10-bit HEVC) takes about 54 s.
 `/tmp` is 512 MB: uploads that do not fit together with an MP4 1.5 times their size (or are above
 400 MB) are read through the range proxy, so only the MP4 must fit; a downloaded conversion that
 fills `/tmp` is converted again through the proxy.

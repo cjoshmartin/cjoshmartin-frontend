@@ -5,8 +5,9 @@ import {SETTINGS_VERSION} from '../../functions/video-to-mp4/settings'
 import {API_VERSION} from '../../lib/constants'
 import {VIDEO_CONVERSION_STATUSES} from '../constants'
 import {
-  videoConversionLabel,
   videoConversionState,
+  videoOriginalState,
+  videoPreviewSubtitle,
   type FileValue,
   type VideoValue,
 } from '../shared/video-conversion'
@@ -60,7 +61,8 @@ export const video = defineType({
       name: 'original',
       title: 'Original upload',
       type: 'file',
-      description: 'The file as it was uploaded, kept for reference. The site never serves it.',
+      description:
+        'The uploaded file, kept for reference without its location and personal metadata (same video and audio). The site never serves it.',
       readOnly: true,
       hidden: ({value}) => !(value as FileValue | undefined)?.asset?._ref,
     }),
@@ -100,6 +102,18 @@ export const video = defineType({
           type: 'string',
         }),
         defineField({
+          name: 'originalStripped',
+          title: 'Original without location data',
+          type: 'boolean',
+          description:
+            'Whether "Original upload" is a copy without location and personal metadata (the unstripped upload is deleted).',
+        }),
+        defineField({
+          name: 'stripVersion',
+          title: 'Strip version',
+          type: 'string',
+        }),
+        defineField({
           name: 'updatedAt',
           title: 'Updated at',
           type: 'datetime',
@@ -132,6 +146,9 @@ export const video = defineType({
       sourceAssetId: 'conversion.sourceAssetId',
       outputAssetId: 'conversion.outputAssetId',
       settingsVersion: 'conversion.settingsVersion',
+      originalStripped: 'conversion.originalStripped',
+      originalAssetId: 'original.asset._ref',
+      originalPrivacyStatus: 'original.asset.privacy.status',
     },
     prepare({
       filename,
@@ -141,15 +158,15 @@ export const video = defineType({
       sourceAssetId,
       outputAssetId,
       settingsVersion,
+      originalStripped,
+      originalAssetId,
+      originalPrivacyStatus,
     }) {
-      const state = videoConversionState(
-        fileAssetId,
-        {status, message, sourceAssetId, outputAssetId, settingsVersion},
-        SETTINGS_VERSION,
-      )
+      const conversion = {status, message, sourceAssetId, outputAssetId, settingsVersion, originalStripped}
+      const state = videoConversionState(fileAssetId, conversion, SETTINGS_VERSION)
       return {
         title: filename || 'Video',
-        subtitle: videoConversionLabel(state),
+        subtitle: videoPreviewSubtitle(state, videoOriginalState(conversion, originalAssetId, originalPrivacyStatus)),
         media: VideoIcon,
       }
     },

@@ -87,6 +87,7 @@ describe('resultOps', () => {
     outputAssetId: MP4,
     original: 'current-file',
     settingsVersion: SETTINGS_VERSION,
+    originalStripped: false,
     message: 'Converted',
   }
 
@@ -103,9 +104,35 @@ describe('resultOps', () => {
         message: 'Converted',
         sourceAssetId: MOV,
         outputAssetId: MP4,
+        originalStripped: false,
         settingsVersion: SETTINGS_VERSION,
         updatedAt: NOW.toISOString(),
       },
+    })
+  })
+
+  it('ready with a stripped original: original is the copy, conversion records the strip version', () => {
+    const doc = {_id: 'd', _type: 'blogPost', body: [block]}
+    const stripped = 'file-aaaa111111111111111111111111111111111111-mov'
+    const result: ConversionResult = {
+      ...ready,
+      sourceAssetId: stripped,
+      original: {assetId: stripped},
+      originalStripped: true,
+      stripVersion: 'video-strip-v1',
+      deleteUpload: MOV,
+    }
+    const after = applyPatch(doc, resultOps(located(block), result, NOW))
+    assert.deepEqual(after.body[0].original, file(stripped))
+    assert.deepEqual(after.body[0].conversion, {
+      status: 'ready',
+      message: 'Converted',
+      sourceAssetId: stripped,
+      outputAssetId: MP4,
+      originalStripped: true,
+      stripVersion: 'video-strip-v1',
+      settingsVersion: SETTINGS_VERSION,
+      updatedAt: NOW.toISOString(),
     })
   })
 
@@ -229,6 +256,7 @@ describe('resultOps', () => {
         outputAssetId: MP4,
         original: 'current-file',
         settingsVersion: SETTINGS_VERSION,
+        originalStripped: false,
         message: '',
       },
       {documentId: 'x', field: 'body', key: 'k'},

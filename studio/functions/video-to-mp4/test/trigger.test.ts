@@ -362,6 +362,7 @@ describe("no loops: the Function's own patches stop the filter", () => {
       outputAssetId: MP4,
       original: 'current-file',
       settingsVersion: SETTINGS_VERSION,
+      originalStripped: false,
       message: 'ok',
     }
     const failed: ConversionResult = {status: 'failed', fileAssetId: MOV, message: 'broken'}

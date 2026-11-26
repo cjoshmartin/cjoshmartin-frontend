@@ -4,6 +4,9 @@ import {defineField, defineType} from 'sanity'
 
 import {altField} from '../shared/alt-field'
 import {GROUPS, legacyField} from '../shared/fields'
+import {ImagePrivacyInput} from '../../components/ImagePrivacyInput'
+import {PRIVATE_IMAGE_OPTIONS} from '../shared/image-privacy'
+import {privateImageValidation} from '../shared/image-validation'
 
 const ASCII_ART_GROUP = {name: 'asciiArt', title: 'ASCII art', icon: TerminalIcon}
 
@@ -32,14 +35,17 @@ export const testimonial = defineType({
       type: 'image',
       group: GROUPS.content.name,
       description: 'Photo. The ASCII art is generated from it automatically.',
-      options: {hotspot: true},
+      options: PRIVATE_IMAGE_OPTIONS,
+      components: {input: ImagePrivacyInput},
       fields: [altField()],
-      validation: (rule) =>
+      validation: (rule) => [
         rule
           .custom((value) =>
             value?.asset ? true : 'Add a photo: the home page shows ASCII art generated from it',
           )
           .warning(),
+        ...privateImageValidation(rule),
+      ],
     }),
     defineField({name: 'jobTitle', type: 'string', group: GROUPS.content.name}),
     defineField({

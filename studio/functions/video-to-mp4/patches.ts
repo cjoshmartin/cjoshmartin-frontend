@@ -120,6 +120,17 @@ export type ConversionResult =
       original: 'current-file' | {assetId: string} | null
       /** `conversion.settingsVersion`: the settings the MP4 was made with (recorded on its asset). */
       settingsVersion: string
+      /**
+       * `conversion.originalStripped` and `conversion.stripVersion`: whether `original` is a copy
+       * without location and personal metadata (privacy/video-strip.ts), and its version.
+       */
+      originalStripped: boolean
+      stripVersion?: string
+      /**
+       * The unstripped upload the block's `file` pointed at, deleted once nothing references it
+       * (after `original` points at its stripped copy). Undefined when there is nothing to delete.
+       */
+      deleteUpload?: string
       message: string
     }
   /** The video cannot be converted with these settings; final until the file changes. */
@@ -137,7 +148,8 @@ export type ConversionResult =
   | {status: 'restart'; fileAssetId: string; originalAssetId: string; message: string}
 
 /**
- * Ready: `file` becomes the MP4, `original` the upload, `conversion` ready. Failed: only
+ * Ready: `file` becomes the MP4, `original` the upload's copy without location and personal
+ * metadata (or the upload, when it already is such a copy), `conversion` ready. Failed: only
  * `conversion` changes; `file` keeps pointing at the upload.
  */
 export function resultOps(video: LocatedVideo, result: ConversionResult, now: Date): PatchOps {
@@ -167,6 +179,8 @@ export function resultOps(video: LocatedVideo, result: ConversionResult, now: Da
         message: result.message,
         sourceAssetId: result.sourceAssetId,
         outputAssetId: result.outputAssetId,
+        originalStripped: result.originalStripped,
+        ...(result.stripVersion === undefined ? {} : {stripVersion: result.stripVersion}),
       },
       now,
       result.settingsVersion,

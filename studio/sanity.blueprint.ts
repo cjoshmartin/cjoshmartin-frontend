@@ -13,6 +13,11 @@ import {
   TESTIMONIAL_ASCII_ART_PROJECTION,
 } from './functions/testimonial-ascii-art/trigger'
 import {
+  FUNCTION_TIMEOUT_SECONDS as IMAGE_PRIVACY_TIMEOUT_SECONDS,
+  IMAGE_PRIVACY_FILTER,
+  IMAGE_PRIVACY_PROJECTION,
+} from './functions/image-privacy/trigger'
+import {
   FUNCTION_TIMEOUT_SECONDS as VIDEO_TO_MP4_TIMEOUT_SECONDS,
   VIDEO_TO_MP4_FILTER,
   VIDEO_TO_MP4_PROJECTION,
@@ -46,6 +51,8 @@ export default defineBlueprint({
       name: 'video-to-mp4',
       displayName: 'Video to MP4',
       // Code, its own package.json (ffmpeg-static pinned) and tests live in functions/video-to-mp4.
+      // It also keeps each upload's original as a copy without location and personal metadata
+      // (functions/privacy/video-strip.ts) and deletes the unstripped upload.
       // DEPLOY WITH npm_config_platform=linux npm_config_arch=arm64 in the environment, or the
       // deploy bundles this machine's ffmpeg and every conversion fails its binary check (see
       // functions/video-to-mp4/README.md).
@@ -63,6 +70,27 @@ export default defineBlueprint({
         projection: VIDEO_TO_MP4_PROJECTION,
         // Drafts too, so a video is converted while the editor is still writing. A draft published
         // mid-conversion gets its result in the published document (no second conversion).
+        includeDrafts: true,
+      },
+    }),
+    defineDocumentFunction({
+      name: 'image-privacy',
+      displayName: 'Image privacy',
+      // Code, its own package.json and tests live in functions/image-privacy; the stripper is
+      // functions/privacy/image-strip.ts (pure TypeScript, no binaries).
+      // Images are processed in memory: 2 GB holds a large TIFF several times over.
+      memory: 2,
+      timeout: IMAGE_PRIVACY_TIMEOUT_SECONDS,
+      runtime: 'nodejs24.x',
+      event: {
+        on: ['create', 'update'],
+        // Only documents in production or staging with an image whose asset was never checked,
+        // was checked by another stripper version, is replaced by a stripped copy, or has a stale
+        // or due retry; see functions/image-privacy/trigger.ts. The filter follows asset->.
+        filter: IMAGE_PRIVACY_FILTER,
+        projection: IMAGE_PRIVACY_PROJECTION,
+        // Drafts too, so an image is stripped as soon as the editor adds it. A draft published
+        // mid-way is fixed in the published document by the same run (or the next event).
         includeDrafts: true,
       },
     }),

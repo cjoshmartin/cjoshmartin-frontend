@@ -3,6 +3,9 @@ import {defineField, defineType} from 'sanity'
 
 import {altField} from '../shared/alt-field'
 import {GROUPS, legacyField} from '../shared/fields'
+import {ImagePrivacyInput} from '../../components/ImagePrivacyInput'
+import {PRIVATE_IMAGE_OPTIONS} from '../shared/image-privacy'
+import {privateImageValidation} from '../shared/image-validation'
 
 /** Author of posts and the person shown on the home page (Wagtail `home.Author`). */
 export const person = defineType({
@@ -28,8 +31,10 @@ export const person = defineType({
       name: 'image',
       type: 'image',
       group: GROUPS.content.name,
-      options: {hotspot: true},
+      options: PRIVATE_IMAGE_OPTIONS,
+      components: {input: ImagePrivacyInput},
       fields: [altField()],
+      validation: (rule) => privateImageValidation(rule),
     }),
     defineField({name: 'location', type: 'string', group: GROUPS.content.name}),
     defineField({name: 'jobTitle', type: 'string', group: GROUPS.content.name}),

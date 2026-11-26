@@ -3,8 +3,10 @@
  *
  * Uses the scratch document `blogPost-video-function-check` and checks that:
  *  1. a draft with a video block pointing at a fresh HEVC .mov upload goes processing -> ready;
- *     `file` becomes an H.264 MP4 within the settings, `original` is the .mov, and the MP4 from
- *     the CDN passes ffprobe checks and decodes completely;
+ *     `file` becomes an H.264 MP4 within the settings, `original` is the upload's copy without
+ *     location and personal metadata (source video-to-mp4-original, `privacy` stripped), the MP4
+ *     is converted from that copy, the unstripped upload is deleted, and the MP4 from the CDN
+ *     passes ffprobe checks and decodes completely;
  *  2. saving the draft again does not convert again;
  *  3. publishing it gives a correct published document, without converting again;
  *  4. replacing the file with another upload converts again, and publishing while that
@@ -34,6 +36,7 @@ import {parseArgs, promisify} from 'node:util'
 
 import {createClient, type SanityClient} from '@sanity/client'
 
+import {VIDEO_ORIGINAL_SOURCE_NAME, VIDEO_STRIP_VERSION} from '../../privacy/constants'
 import {sha1File} from '../ffmpeg'
 import {inspectMp4} from '../mp4'
 import {LEASE_FIELD} from '../patches'
@@ -150,6 +153,25 @@ async function upload(client: SanityClient, file: string, contentType: string): 
   return asset._id
 }
 
+/** The upload's copy without location and personal metadata, made by the Function. */
+async function strippedCopy(client: SanityClient, uploadId: string) {
+  return client.fetch<{_id: string; privacy?: {status?: string; version?: string}} | null>(
+    '*[_type == "sanity.fileAsset" && source.name == $name && source.id == $id][0]{_id, privacy}',
+    {name: VIDEO_ORIGINAL_SOURCE_NAME, id: uploadId},
+    {perspective: 'raw', useCdn: false},
+  )
+}
+
+/** Waits until the unstripped upload is deleted (right after the result is delivered). */
+async function waitForDeleted(client: SanityClient, id: string) {
+  const started = Date.now()
+  while (Date.now() - started < 60_000) {
+    if (!(await client.fetch<string | null>('*[_id == $id][0]._id', {id}, {perspective: 'raw'}))) return true
+    await sleep(2000)
+  }
+  return false
+}
+
 async function convertedAssets(client: SanityClient, sourceId: string) {
   return client.fetch<
     {
@@ -176,7 +198,7 @@ interface ProbeStream {
   width?: number
   height?: number
   channels?: number
-  side_data_list?: {rotation?: number}[]
+  side_data_list?: {rotation?: number; side_data_type?: string}[]
 }
 
 /** Downloads the MP4 from the CDN and checks it with ffprobe, the MP4 reader and a full decode. */
@@ -220,7 +242,11 @@ async function checkMp4(
     video[0].width === expected.width && video[0].height === expected.height,
     `size ${video[0].width}x${video[0].height}`,
   )
-  check(!video[0].side_data_list, 'no display matrix in the output')
+  // Other side data (an iPhone HDR clip's ambient viewing environment) may stay.
+  check(
+    !video[0].side_data_list?.some((d) => d.side_data_type === 'Display Matrix' || d.rotation !== undefined),
+    'no display matrix in the output',
+  )
   if (expected.audio)
     check(
       audio.length === 1 && audio[0].codec_name === 'aac' && audio[0].channels === 2,
@@ -308,14 +334,20 @@ async function cleanup(client: SanityClient) {
     {perspective: 'raw'},
   )
   if (docs.length > 0) await docs.reduce((tx, id) => tx.delete(id), client.transaction()).commit()
+  // The stripped copies of the uploads, then the MP4s converted from the uploads or the copies.
+  const copies = await client.fetch<string[]>(
+    '*[_type == "sanity.fileAsset" && source.name == $name && source.id in $ids]._id',
+    {name: VIDEO_ORIGINAL_SOURCE_NAME, ids: created.uploads},
+    {perspective: 'raw'},
+  )
   const outputs = await client.fetch<string[]>(
     '*[_type == "sanity.fileAsset" && source.name == $name && source.id in $ids]._id',
-    {name: CONVERTED_ASSET_SOURCE_NAME, ids: created.uploads},
+    {name: CONVERTED_ASSET_SOURCE_NAME, ids: [...created.uploads, ...copies]},
     {perspective: 'raw'},
   )
   const deleted: string[] = []
   const kept: string[] = []
-  for (const id of [...outputs, ...created.uploads]) {
+  for (const id of [...outputs, ...copies, ...created.uploads]) {
     const refs = await client.fetch<number>('count(*[references($id)])', {id}, {perspective: 'raw'})
     if (refs > 0) {
       kept.push(`${id} (${refs} references)`)
@@ -333,7 +365,7 @@ async function cleanup(client: SanityClient) {
   }
   const left = await client.fetch<string[]>(
     '*[_id in $ids]._id',
-    {ids: [...created.documents, ...outputs, ...created.uploads]},
+    {ids: [...created.documents, ...outputs, ...copies, ...created.uploads]},
     {perspective: 'raw'},
   )
   note(
@@ -418,11 +450,15 @@ async function main() {
       `status ${block.conversion?.status}: ${block.conversion?.message}`,
     )
     const mp4 = block.file!.asset!._ref!
+    const copy = await strippedCopy(client, mov)
+    check(copy && copy.privacy?.status === 'stripped' && copy.privacy.version === VIDEO_STRIP_VERSION, 'a stripped copy of the upload')
     check(block.conversion?.outputAssetId === mp4, 'outputAssetId = file')
-    check(block.conversion?.sourceAssetId === mov, 'sourceAssetId = upload')
+    check(block.conversion?.sourceAssetId === copy._id, 'sourceAssetId = the stripped copy')
     check(block.conversion?.settingsVersion === SETTINGS_VERSION, 'settingsVersion')
-    check(block.original?.asset?._ref === mov, 'original = the .mov upload')
-    const outputs = await convertedAssets(client, mov)
+    check(block.conversion?.originalStripped === true && block.conversion.stripVersion === VIDEO_STRIP_VERSION, 'originalStripped')
+    check(block.original?.asset?._ref === copy._id, 'original = the stripped copy')
+    check(await waitForDeleted(client, mov), 'the unstripped upload is deleted')
+    const outputs = await convertedAssets(client, copy._id)
     check(
       outputs.length === 1 && outputs[0]._id === mp4,
       `one MP4 for the upload (${outputs.map((o) => o._id).join(', ')})`,
@@ -438,7 +474,7 @@ async function main() {
     )
     const probe1 = await checkMp4(outputs[0].url, mp4, work, firstInfo)
     note(
-      `1. draft: processing seen after ${processing.ms} ms, ready after ${ready.ms} ms; file ${mp4} (${outputs[0].originalFilename}, ${(outputs[0].size / 1e6).toFixed(2)} MB): ${probe1}; original ${mov}; message "${block.conversion?.message}"`,
+      `1. draft: processing seen after ${processing.ms} ms, ready after ${ready.ms} ms; file ${mp4} (${outputs[0].originalFilename}, ${(outputs[0].size / 1e6).toFixed(2)} MB): ${probe1}; original ${copy._id} (stripped copy of ${mov}, which is deleted); message "${block.conversion?.message}"`,
     )
 
     // 2. Save again.
@@ -446,7 +482,7 @@ async function main() {
       .patch(DRAFT_ID)
       .set({title: 'Video Function check (scratch, saved again)'})
       .commit()
-    await quietPeriod(client, DRAFT_ID, mov, block, 're-save')
+    await quietPeriod(client, DRAFT_ID, copy._id, block, 're-save')
     note(
       `2. draft saved again: no new conversion in ${QUIET_MS / 1000} s (conversion.updatedAt unchanged, still one MP4)`,
     )
@@ -461,14 +497,14 @@ async function main() {
     const pub = published.block!
     check(
       pub.file?.asset?._ref === mp4 &&
-        pub.original?.asset?._ref === mov &&
+        pub.original?.asset?._ref === copy._id &&
         pub.conversion?.status === 'ready',
       'published block converted',
     )
     check((await videoBlock(client, DRAFT_ID)) === null, 'draft gone after publish')
-    await quietPeriod(client, SCRATCH_ID, mov, pub, 'publish')
+    await quietPeriod(client, SCRATCH_ID, copy._id, pub, 'publish')
     note(
-      `3. published: file ${mp4}, original ${mov}, ready; no new conversion in ${QUIET_MS / 1000} s`,
+      `3. published: file ${mp4}, original ${copy._id}, ready; no new conversion in ${QUIET_MS / 1000} s`,
     )
 
     // 4. Replace the file in a new draft, publish while it converts.
@@ -509,11 +545,13 @@ async function main() {
       SCRATCH_ID,
       'published replacement ready',
       (b) =>
-        b?.conversion?.sourceAssetId === replacement &&
-        (b.conversion.status === 'ready' || b.conversion.status === 'failed'),
+        (b?.conversion?.status === 'ready' && b.file?.asset?._ref !== mp4) ||
+        (b?.conversion?.sourceAssetId === replacement && b.conversion.status === 'failed'),
       t4,
     )
     const rb = republished.block!
+    const copy2 = await strippedCopy(client, replacement)
+    check(copy2 && copy2.privacy?.status === 'stripped', 'a stripped copy of the replacement')
     check(
       rb.conversion?.status === 'ready',
       `replacement status ${rb.conversion?.status}: ${rb.conversion?.message}`,
@@ -522,17 +560,19 @@ async function main() {
     check(
       mp4b !== mp4 &&
         rb.conversion?.outputAssetId === mp4b &&
-        rb.original?.asset?._ref === replacement,
-      'reconverted',
+        rb.conversion?.sourceAssetId === copy2._id &&
+        rb.original?.asset?._ref === copy2._id,
+      'reconverted from the stripped copy',
     )
-    const outputs2 = await convertedAssets(client, replacement)
+    check(await waitForDeleted(client, replacement), 'the unstripped replacement is deleted')
+    const outputs2 = await convertedAssets(client, copy2._id)
     check(
       outputs2.length === 1 && outputs2[0]._id === mp4b,
       `one MP4 for the replacement (${outputs2.map((o) => o._id).join(', ')})`,
     )
     const probe2 = await checkMp4(outputs2[0].url, mp4b, work, secondInfo)
     check((await videoBlock(client, DRAFT_ID)) === null, 'draft gone after publish')
-    await quietPeriod(client, SCRATCH_ID, replacement, rb, 'publish mid-conversion')
+    await quietPeriod(client, SCRATCH_ID, copy2._id, rb, 'publish mid-conversion')
     check(
       publishedMidConversion,
       'the draft was published while its conversion was still processing',
@@ -627,7 +667,9 @@ async function main() {
       retried.block?.conversion?.status === 'ready',
       `stale retry ${retried.block?.conversion?.status}`,
     )
-    const staleOutputs = await convertedAssets(client, staleUpload)
+    const staleCopy = await strippedCopy(client, staleUpload)
+    check(staleCopy, 'a stripped copy of the stale upload')
+    const staleOutputs = await convertedAssets(client, staleCopy._id)
     check(
       staleOutputs.length === 1 && retried.block?.file?.asset?._ref === staleOutputs[0]._id,
       'stale retry converted once',

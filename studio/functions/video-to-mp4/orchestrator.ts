@@ -10,18 +10,24 @@
  *    waiting block when it is done.
  * 3. Mark the block `processing`, then produce the MP4: adopt the file if it already is an MP4
  *    converted with the current settings, swap an MP4 made with older settings back to its
- *    original upload (converted by the next run), reuse an earlier conversion of the same upload
- *    with the current settings (asset `source` and CONVERTED_ASSET_SETTINGS_FIELD), or convert and
- *    upload a new one.
+ *    original upload (converted by the next run), or else first make the original private: reuse
+ *    the upload's earlier copy without location and personal metadata (asset `source`
+ *    VIDEO_ORIGINAL_SOURCE_NAME and `privacy.version`), or strip and upload one (privacy/
+ *    video-strip.ts, a stream copy), unless the upload already is such a copy. Then reuse an
+ *    earlier conversion of that copy with the current settings (asset `source` and
+ *    CONVERTED_ASSET_SETTINGS_FIELD), or convert it and upload a new MP4.
  * 4. Deliver the result to the block and to every other draft or published block that uses the
  *    same upload (a draft published mid-conversion is converted in its published document without
  *    a second conversion), release the lease, then deliver once more to blocks that started
  *    waiting while the lease was held.
+ * 5. Delete the unstripped upload once nothing references it any more (drafts, published documents
+ *    and release versions), so only the copy without location data stays in the dataset.
  *
  * Every document write is a patch addressed by block `_key` and guarded by the document revision
  * that was read (ifRevisionID), retried after re-reading on a conflict, so a concurrent edit is
  * never overwritten and a block that changed meanwhile is left alone.
  */
+import {PRIVACY_FIELD, VIDEO_ORIGINAL_SOURCE_NAME, VIDEO_STRIP_VERSION, type AssetPrivacy} from '../privacy/constants'
 import {
   CONVERTED_ASSET_SETTINGS_FIELD,
   CONVERTED_ASSET_SOURCE_NAME,
@@ -66,7 +72,20 @@ export interface AssetDocument {
   /** On a converted MP4: the SETTINGS_VERSION it was made with. */
   [CONVERTED_ASSET_SETTINGS_FIELD]?: unknown
   [LEASE_FIELD]?: unknown
+  /** On a stripped original: what was removed, and the strip version (privacy/constants.ts). */
+  [PRIVACY_FIELD]?: AssetPrivacy
 }
+
+/** Whether the asset is a copy of an upload without location and personal metadata, made with the current stripper. */
+export function isStrippedOriginal(asset: AssetDocument | null | undefined): boolean {
+  const privacy = asset?.[PRIVACY_FIELD]
+  return privacy?.status === 'stripped' && privacy.version === VIDEO_STRIP_VERSION
+}
+
+export type DeleteOutcome =
+  | {kind: 'deleted'}
+  | {kind: 'missing'}
+  | {kind: 'referenced'; by: string[]}
 
 /** The Content Lake operations a run needs. */
 export interface ContentStore {
@@ -81,6 +100,17 @@ export interface ContentStore {
    * current settings (CONVERTED_ASSET_SETTINGS_FIELD == SETTINGS_VERSION), or null.
    */
   findConvertedAsset(sourceAssetId: string): Promise<AssetDocument | null>
+  /**
+   * The oldest copy of the upload without location and personal metadata made with the current
+   * stripper: source {name: VIDEO_ORIGINAL_SOURCE_NAME, id: uploadAssetId} and `privacy` stripped
+   * with VIDEO_STRIP_VERSION, or null.
+   */
+  findStrippedOriginal(uploadAssetId: string): Promise<AssetDocument | null>
+  /**
+   * Deletes the asset if no document references it (drafts, published documents and release
+   * versions are all checked); otherwise reports the referencing document ids.
+   */
+  deleteAssetIfUnreferenced(assetId: string): Promise<DeleteOutcome>
 }
 
 /**
@@ -102,6 +132,13 @@ export class RetryableConversionError extends Error {
 export interface Converter {
   /** Converts the upload to MP4 and uploads it. Throws ConversionFailure for expected failures. */
   convert(source: AssetDocument): Promise<{outputAssetId: string; message: string}>
+  /**
+   * Makes a copy of the upload without location and personal metadata (a stream copy, verified)
+   * and uploads it with source {name: VIDEO_ORIGINAL_SOURCE_NAME, id: upload} and `privacy`
+   * stripped. Throws ConversionFailure when the file cannot be stripped, RetryableConversionError
+   * for problems that are not the file's fault.
+   */
+  strip(upload: AssetDocument): Promise<{assetId: string; message: string}>
 }
 
 export interface RunOptions {
@@ -283,6 +320,7 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
       const madeWith = asset[CONVERTED_ASSET_SETTINGS_FIELD]
       if (madeWith === SETTINGS_VERSION) {
         // The editor picked an MP4 this converter made with the current settings: use it as it is.
+        const originalStripped = Boolean(original && isStrippedOriginal(original as AssetDocument))
         return {
           result: {
             status: 'ready',
@@ -291,6 +329,8 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
             outputAssetId: assetId,
             original: original && originalId ? {assetId: originalId} : null,
             settingsVersion: SETTINGS_VERSION,
+            originalStripped,
+            ...(originalStripped ? {stripVersion: VIDEO_STRIP_VERSION} : {}),
             message: 'This file is already an MP4 made by the converter; it was used as it is.',
           },
         }
@@ -312,35 +352,52 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
       )
     }
 
-    const existing = await store.findConvertedAsset(assetId)
-    if (existing) {
-      log(`${assetId}: reusing the earlier conversion ${existing._id}`)
-      return {
-        result: {
-          status: 'ready',
-          fileAssetId: assetId,
-          sourceAssetId: assetId,
-          outputAssetId: existing._id,
-          original: 'current-file',
-          settingsVersion: SETTINGS_VERSION,
-          message: `Reused the MP4 converted earlier from this upload (${existing.originalFilename ?? existing._id}).`,
-        },
-      }
-    }
-
     try {
-      const output = await converter.convert(asset)
-      return {
-        result: {
-          status: 'ready',
-          fileAssetId: assetId,
-          sourceAssetId: assetId,
-          outputAssetId: output.outputAssetId,
-          original: 'current-file',
-          settingsVersion: SETTINGS_VERSION,
-          message: output.message,
-        },
+      // The original that is kept: the upload without location and personal metadata.
+      let source: AssetDocument
+      let strippedNote: string
+      if (isStrippedOriginal(asset)) {
+        source = asset
+        strippedNote = 'The upload already is a copy without location and personal metadata.'
+      } else {
+        const earlier = await store.findStrippedOriginal(assetId)
+        if (earlier) {
+          log(`${assetId}: reusing its copy without metadata ${earlier._id}`)
+          source = earlier
+          strippedNote = 'Kept the copy of this upload without location and personal metadata made earlier.'
+        } else {
+          const stripped = await converter.strip(asset)
+          const copy = (await store.getDocument(stripped.assetId)) as AssetDocument | null
+          if (!copy) throw new RetryableConversionError(`the stripped copy ${stripped.assetId} cannot be read back yet`)
+          source = copy
+          strippedNote = stripped.message
+        }
       }
+      const ready = (outputAssetId: string, message: string): ConversionResult => ({
+        status: 'ready',
+        fileAssetId: assetId,
+        sourceAssetId: source._id,
+        outputAssetId,
+        original: source._id === assetId ? 'current-file' : {assetId: source._id},
+        settingsVersion: SETTINGS_VERSION,
+        originalStripped: true,
+        stripVersion: VIDEO_STRIP_VERSION,
+        ...(source._id === assetId ? {} : {deleteUpload: assetId}),
+        message: `${message} ${strippedNote}`,
+      })
+
+      const existing = await store.findConvertedAsset(source._id)
+      if (existing) {
+        log(`${source._id}: reusing the earlier conversion ${existing._id}`)
+        return {
+          result: ready(
+            existing._id,
+            `Reused the MP4 converted earlier from this upload (${existing.originalFilename ?? existing._id}).`,
+          ),
+        }
+      }
+      const output = await converter.convert(source)
+      return {result: ready(output.outputAssetId, output.message)}
     } catch (error) {
       if (error instanceof ConversionFailure) return {result: failed(error.message)}
       if (error instanceof RetryableConversionError) return {result: retry(error.message)}
@@ -348,6 +405,18 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
         result: retry(`unexpected error while converting (${errorText(error)})`),
         unexpected: error,
       }
+    }
+  }
+
+  /** Deletes the unstripped upload once nothing references it; logs what keeps it otherwise. */
+  async function deleteUpload(uploadId: string): Promise<void> {
+    const outcome = await store.deleteAssetIfUnreferenced(uploadId)
+    if (outcome.kind === 'deleted') log(`${uploadId}: unstripped upload deleted`)
+    else if (outcome.kind === 'missing') log(`${uploadId}: unstripped upload already deleted`)
+    else {
+      log(
+        `${uploadId}: unstripped upload kept for now, still referenced by ${outcome.by.join(', ')}; it is deleted by the run for those blocks`,
+      )
     }
   }
 
@@ -363,6 +432,9 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
     const lease = await acquireLease(assetId)
 
     if (lease.kind === 'missing') {
+      // An upload deleted after its conversion completed every block that used it (its stripped
+      // copy replaced it): nothing is waiting, so there is no failure to record.
+      if (!(await anyBlockWaiting(assetId, origin))) return {kind: 'no-target', assetId}
       const result: ConversionResult = {
         status: 'failed',
         fileAssetId: assetId,
@@ -416,6 +488,9 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
 
     if (produced) {
       for (const id of await deliver(produced.result, origin)) patched.add(id)
+      if (produced.result.status === 'ready' && produced.result.deleteUpload) {
+        await deleteUpload(produced.result.deleteUpload)
+      }
       const outcome: RunOutcome = {
         kind: 'done',
         assetId,

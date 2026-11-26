@@ -1,0 +1,26 @@
+{
+  "name": "image-privacy",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Sanity Function that replaces every image added to a document that carries location or other personal metadata with a losslessly stripped copy, and deletes the original upload.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "index.ts",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@sanity/client": "8.17.0",
+    "@sanity/functions": "1.11.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.4",
+    "groq-js": "2.0.3",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3"
+  }
+}

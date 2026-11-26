@@ -7,7 +7,8 @@ import {randomUUID} from 'node:crypto'
 
 import {evaluate, parse} from 'groq-js'
 
-import type {AssetDocument, ContentStore, StoredDocument} from '../orchestrator'
+import {PRIVACY_FIELD, VIDEO_ORIGINAL_SOURCE_NAME, VIDEO_STRIP_VERSION} from '../../privacy/constants'
+import type {AssetDocument, ContentStore, DeleteOutcome, StoredDocument} from '../orchestrator'
 import type {PatchOps} from '../patches'
 import {
   CONVERTED_ASSET_SETTINGS_FIELD,
@@ -159,5 +160,25 @@ export class MemoryStore implements ContentStore {
         settingsVersion: SETTINGS_VERSION,
       },
     )
+  }
+
+  async findStrippedOriginal(uploadAssetId: string): Promise<AssetDocument | null> {
+    return this.query<AssetDocument | null>(
+      `*[_type == "sanity.fileAsset" && source.name == $name && source.id == $id && ${PRIVACY_FIELD}.status == "stripped" && ${PRIVACY_FIELD}.version == $version] | order(_createdAt asc)[0]`,
+      {name: VIDEO_ORIGINAL_SOURCE_NAME, id: uploadAssetId, version: VIDEO_STRIP_VERSION},
+    )
+  }
+
+  /** Ids of every document (drafts and versions included) that references the asset. */
+  async referencing(assetId: string): Promise<string[]> {
+    return this.query<string[]>('*[references($id)]._id', {id: assetId})
+  }
+
+  async deleteAssetIfUnreferenced(assetId: string): Promise<DeleteOutcome> {
+    const by = await this.referencing(assetId)
+    if (by.length > 0) return {kind: 'referenced', by}
+    if (!this.docs.has(assetId)) return {kind: 'missing'}
+    this.docs.delete(assetId)
+    return {kind: 'deleted'}
   }
 }

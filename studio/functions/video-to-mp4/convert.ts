@@ -10,6 +10,7 @@ import path from 'node:path'
 import {Readable} from 'node:stream'
 import {pipeline} from 'node:stream/promises'
 
+import {checkIsobmffBoxes} from '../privacy/video-strip'
 import {runFfmpeg, sha1File} from './ffmpeg'
 import {FrameTimesCollector, frameTimeProblems, SHOWINFO_FILTER, type FrameTimes} from './frames'
 import {
@@ -55,7 +56,7 @@ export function chooseInputMode(
 /** ffmpeg's message when a write fails because the disk is full (ENOSPC). */
 const NO_SPACE = /No space left on device/i
 
-const WORK_DIR_PREFIX = 'video-to-mp4-'
+export const WORK_DIR_PREFIX = 'video-to-mp4-'
 
 export interface SourceVideo {
   assetId: string
@@ -117,7 +118,7 @@ export async function removeStaleWorkDirs(tmpDir: string): Promise<string[]> {
   return removed
 }
 
-async function download(
+export async function download(
   source: SourceVideo,
   file: string,
   deadline: number,
@@ -390,6 +391,9 @@ export async function convertToMp4(
       hasAudio: description.hasAudio,
       inputDurationSeconds: description.durationSeconds,
     })
+    // No location or other metadata may reach the MP4 the site serves: no metadata boxes except
+    // ffmpeg's encoder tag, no creation times, no tracks other than video and audio.
+    problems.push(...(await checkIsobmffBoxes(outputPath, {allowEncoderTag: true})))
     if (problems.length > 0) {
       throw new ConversionFailure(`The converted MP4 failed its checks: ${problems.join('; ')}`)
     }
