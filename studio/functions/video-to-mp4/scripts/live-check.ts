@@ -11,7 +11,9 @@
  *  3. publishing it gives a correct published document, without converting again;
  *  4. replacing the file with another upload converts again, and publishing while that
  *     conversion runs still ends with a converted published document, converted once;
- *  5. a file that is not a video (random bytes named .mov) ends as `failed` with a message, and
+ *  5. a file that is not a video (random bytes named .mov), which the stripper cannot handle, is
+ *     taken out of the block (`file` and `original` removed, `failed` with a message that names
+ *     no asset) and deleted (privacy review round 2: an unstrippable upload is never kept), and
  *     saving again does not retry it;
  *  6. a fresh `processing` mark does not start a run, and once it is older than the stale limit
  *     (timeout + 5 min) the next save retries the conversion (the filter's now() arithmetic in
@@ -614,10 +616,10 @@ async function main() {
     )
     const fb = failed.block!
     check(fb.conversion?.status === 'failed', `status ${fb.conversion?.status}`)
-    check(
-      fb.file?.asset?._ref === fakeId && !fb.original && fb.conversion?.sourceAssetId === fakeId,
-      'file left on the upload',
-    )
+    check(!fb.file && !fb.original && fb.conversion?.sourceAssetId === undefined, 'the upload is out of the block')
+    check(/The upload was removed from this block and deleted/.test(fb.conversion?.message ?? ''), 'the message says it was removed')
+    check(!JSON.stringify(fb).includes(fakeId.split('-')[1]), 'the block does not name the deleted upload')
+    check(await waitForDeleted(client, fakeId), 'the unstrippable upload is deleted')
     check((await convertedAssets(client, fakeId)).length === 0, 'no MP4 for the fake file')
     await client
       .patch(DRAFT_ID)
@@ -625,7 +627,7 @@ async function main() {
       .commit()
     await quietPeriod(client, DRAFT_ID, fakeId, fb, 'failed re-save')
     note(
-      `5. not a video (${fakeId}): failed after ${failed.ms} ms with "${fb.conversion?.message}"; saving again did not retry`,
+      `5. not a video (${fakeId}): removed from the block and deleted after ${failed.ms} ms with "${fb.conversion?.message}"; saving again did not retry`,
     )
 
     // 6. Fresh and stale processing marks, written as a dead run would have left them.

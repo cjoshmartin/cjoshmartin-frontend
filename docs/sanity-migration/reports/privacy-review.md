@@ -347,3 +347,296 @@ cleaned up, 0 documents and 0 assets left):
    Privacy is no longer affected: the block moves to the copy and the upload is deleted.
 5. **Gain maps.** The stored copies of `IMG_9344.jpeg` and `IMG_5509.jpg` have no HDR gain map
    any more (the unified policy removes everything after the primary image).
+
+## Round 2 (2026-11-26, 17:30 to 19:30 UTC)
+
+Fix package for the 7 findings of recheck 1, an independent re-check of round 1. Commits `a47b845`
+(code, tests, contract and READMEs) and the commit of this report. Deployed: Blueprint operation
+`OP-8zw5cnw4xr` (4 Functions), the Studio and 2/2 schemas, and a new Function environment variable
+`PRIVACY_LINK_KEY` on image-privacy, video-to-mp4 and upload-privacy. The 99 stripped copies of
+each dataset were updated, and the changes were tested live on staging.
+
+### Verdict
+
+- **No public document names an unstripped upload any more.** Each stripped copy recorded the
+  deleted upload's asset id in `privacy.strippedFrom`, and that id is the upload's
+  content-addressed CDN path. The copies now record a keyed digest instead
+  (`privacy.strippedFromDigest`, HMAC-SHA256 with the owner's key), and so do the Functions'
+  copies, also in `source.id`. A new validation check fails on any document that names an asset
+  that is not in the dataset.
+- **The Functions no longer put unstripped uploads into the CDN's public cache.** On staging with
+  fresh assets: after an anonymous GET of a file's plain URL and the deletion, the plain URL still
+  answered 200. After a GET with a unique query parameter, or with a token, it answered 404. Every
+  read of an upload by a Function now has both.
+- **Files deleted before this round may stay cached for up to 30 days.** From this machine none of
+  the 26 location-bearing URLs (13 per dataset) answers 200. 3 deleted video files and 58 deleted
+  images per dataset still do. These hold no location; one video holds device data. Only Sanity
+  support can purge them. The request is ready for the owner and kept outside the repository,
+  because it lists the paths.
+- **An upload the strippers cannot handle is no longer kept.** A video upload is taken out of every
+  block and deleted at once, and the Studio says why. A failed image is a validation error, because
+  it stays public while a document uses it. Any unused failed upload is deleted.
+- **The media tests run on the real originals** with the local ffmpeg 9.1 and with the Function's
+  ffmpeg 7.0.2.
+- **Not fixed:** PDF and STL uploads are still not stripped by any Function (R2-7, open point).
+  Capture dates in file names are the owner's call (R2-5).
+
+### Findings
+
+| # | Sev. | Finding | Resolution |
+|---|---|---|---|
+| R2-1 | high | Deleted unstripped assets stay downloadable from the asset CDN, and public documents name them | Confirmed (measured). Fixed at the root: keyed digests, private reads, a validation check, data updated. The copies cached before the fix need a purge by Sanity support (request prepared) or expire by 2026-12-26 (probe script). |
+| R2-2 | medium | Uploads the stripper cannot handle keep their location public indefinitely | Confirmed. Fixed: a failed video upload is removed from its blocks and deleted; a failed image is a Studio error; unused failed uploads are deleted. A streaming strip for large videos was considered and not built. |
+| R2-3 | low | Media tests fail on the real originals with ffmpeg 9.1; stream groups break `describeContainer` | Confirmed. Fixed: `describeContainer` reads stream groups, and the JPEG test helper uses `jpeg_pipe`. Both corpora run and pass with 9.1 and with 7.0.2. |
+| R2-4 | low | Location inside the kept audio/video bitstream is kept by design and not documented | Confirmed: it follows from the owner's "bit-identical streams". Documented in the contract and the Studio help text. It is not detected (see below). |
+| R2-5 | low | Capture dates and times stay public in asset file names and titles | Confirmed: 59 of 173 assets per dataset. Not changed: names are outside the owner's decision, and the site shows them. Owner's call. |
+| R2-6 | low | The contract says the plain image CDN URL always re-encodes | Confirmed. Fixed in the contract and the image-privacy README. The failed-upload handling (R2-2) covers the case. |
+| R2-7 | low | No Function checks PDF or STL uploads | Confirmed. Not fixed in this round (open point; design below). |
+
+### R2-1. Deleted assets in the CDN, and public pointers to them (high)
+
+- **Confirmed.**
+  - Responses carry `cache-control: public, max-age=31536000, s-maxage=2592000` and
+    `via: 1.1 google` (Google Cloud CDN).
+  - Sanity's documentation: "the CDN might have your asset cached, so it may not disappear
+    immediately". No purge API is documented.
+  - Controlled test on staging (`recheck2/scripts/cdn_cache_probe.py`, fresh random assets, one
+    per variant). Each asset was fetched once, deleted, and fetched again 20 s later:
+
+    | First fetch | Plain URL after the deletion |
+    |---|---|
+    | anonymous, plain URL (control) | 200, `age: 22` |
+    | plain URL with a token | 404 |
+    | unique query parameter | 404 |
+    | unique query parameter with a token | 404 |
+    | image `?dlRaw=` with a token | 404 (that response is `private, no-cache, no-store`) |
+
+  - Pointers: all 99 copies per dataset named their deleted upload in `privacy.strippedFrom`. That
+    includes 11 originals with a location (6 images, 5 videos). A scan of every document (raw
+    perspective) found no other field that names a deleted asset.
+- **Fix, Functions** (`studio/functions/privacy/private-fetch.ts`, `provenance.ts`):
+  - Every read of an asset's bytes gets a unique `privacyFetch` query parameter and the
+    Function's token. This covers video-to-mp4's head read, download and range proxy (upload and
+    copy) and upload-privacy's image-file download. image-privacy already reads with `?dlRaw=` and
+    the token; that response is not cached.
+  - A copy records `strippedFromDigest` = `hmac-sha256:<hex>` of the upload's id. The key is
+    `PRIVACY_LINK_KEY`, 32 random bytes in `secrets.env`, set on the three Functions with
+    `sanity functions env add` (the CLI never prints values).
+  - The Function copies' `source.id` is the same digest. video-to-mp4 looks up an upload's earlier
+    copy by the digest.
+  - Without the key a Function writes `source.id: "unlinked"` and logs it. It never falls back to
+    the id.
+  - A video block whose upload was removed (R2-2) does not name it.
+- **Fix, migration:**
+  - `strippedMarker` writes the digest (`loadSecrets` now requires `PRIVACY_LINK_KEY`).
+  - `bucketOrigin` matches a copy to its bucket original by the digest. It still reads round 1's
+    `strippedFrom`, which the step replaced.
+  - `validate` (`privacy` check) fails on any document, including drafts and release versions,
+    that names an image or file asset id not in the dataset (`src/privacy/pointers.ts`). It also
+    fails on any `privacy.strippedFrom`, and on a Function copy whose `source.id` is not a digest.
+- **Data.** `--steps privacy,assets,videos` on staging and production:
+  - The privacy map's stripper fingerprint changed, so every local copy was made again. The bytes
+    were identical (0 uploads).
+  - 70 image and 29 video copies per dataset got the new `privacy` field, 99 per dataset.
+  - The independent pointer scan (`recheck2/scripts/deleted_pointer_scan.py`, against the 155
+    and 152 deleted ids) then found 0 pointers in either dataset, down from 99.
+- **What remains** (the CDN copies made before the fix):
+  - `recheck2/cdn-purge-request.md` (outside the repository) lists all 307 deleted paths, the 26
+    with a location first, with a ready message for Sanity support. Sending it is the owner's step.
+  - `migration/verify/src/deleted-asset-cdn-probe.mjs` re-probes them from a private id list
+    (`recheck2/deleted-ids.json`) and exits 1 if a location-bearing URL answers 200. Run it until
+    2026-12-26.
+  - Baseline at 18:15 UTC, 2 rounds from this machine: 0 of 26 location-bearing URLs answer 200;
+    3 files and 58 images per dataset are still served. One edge node elsewhere may still hold more
+    (recheck 1 saw one 200 for a hoov copy once). That is why the purge request matters.
+  - The repository (public) holds no full id of a location-bearing deleted video. It does hold the
+    sha1 of one location-bearing original photo (`migration/wagtail-to-sanity/src/discrepancies.ts`,
+    as the bucket file's hash, which equals its deleted asset's id). That image's deleted CDN URL
+    answers 404 from this machine. The bucket object it names is public anyway until the WP6
+    lockdown. It is in the purge request. A unit test in this round briefly used a real deleted id
+    and was changed to a fake one before the commit.
+- **Limit of the check.** The 404 results show what the edge near this machine caches. A
+  Function's reads reach an edge near its Lambda. The mechanism is the same everywhere (the cache
+  key includes the query string, and requests with a token were not cached), and the request
+  shape is unit-tested (`test/provenance.test.ts`).
+
+### R2-2. Uploads the strippers cannot handle (medium)
+
+- **Confirmed.** In code and in the round-1 tests ("records failed ... does not ... delete it").
+- **Fix, videos** (video-to-mp4 `orchestrator.ts`, `patches.ts`). When the strip fails with a
+  `ConversionFailure`, or the upload already carries a `failed` mark from the current stripper:
+  - the upload is marked `privacy.status: failed`;
+  - the result `{status: failed, removeUpload, deleteUpload}` goes to every writable block that
+    uses the upload, not only the waiting ones;
+  - `file` and `original` are unset, and `conversion` is `{status: failed, message, settingsVersion,
+    updatedAt}` without `sourceAssetId`;
+  - the message says why, and that "The upload was removed from this block and deleted: a file
+    whose location data cannot be removed is not kept in the public dataset. Upload another file.";
+  - the upload is then deleted. A locked release keeps it until the sweep.
+
+  The Studio shows the block as "Upload removed: ..." (`videoConversionState` kind `removed`), with
+  an error on the block and on its file field. The trigger does not match a block without a file,
+  so there is no loop.
+- **Fix, images.** A `failed` image is now a validation error, not a warning
+  (`imagePrivacyError`). The message says the file stays public, with that data, while a document
+  uses it, and asks for a replacement.
+- **Fix, unused uploads** (upload-privacy):
+  - `failed` uploads with the current version are deleted;
+  - a strip failure of an image, an image file or a video deletes the upload at once;
+  - the sweep includes `failed` uploads of any version. One from an older stripper is stripped
+    again.
+- **Tests.**
+  - video-to-mp4: 118. New: removal from every block, a recorded failure is used without stripping
+    again, a locked release keeps the upload, and `resultOps` with `removeUpload`.
+  - upload-privacy: 18. New: sweep and orchestrator deletion of failed uploads, re-strip after an
+    older failure, and an unstrippable image.
+  - Studio: 70.
+  - Live: T2 below, and step 5 of the video-to-mp4 live check.
+- **Considered, not built: a streaming in-place strip.** It would lift the about-480 MB `/tmp`
+  limit. Uploads above that limit are now removed with a message instead of staying public, so the
+  limit only restricts which videos can be used; it is no longer a privacy gap. A streaming strip
+  would read the upload three times over the network: the plan, then ffmpeg's packet hashes of the
+  input and of a virtual output through the range proxy. It would also need a verified streamed
+  upload. That is a feature for long videos (open point 4).
+
+### R2-3. Media tests with ffmpeg 9.1 (low)
+
+- **Confirmed.** ffmpeg 9.1 prints `Stream group #0:N[...]: Track Reference:` sections. A grouped
+  stream is printed once per group, and the video of `IMG_0169.MOV` appears only inside groups.
+  `describeContainer` counted each line.
+- **Fix.**
+  - `describeContainer` reads each stream once, wherever ffmpeg prints it first, in index order.
+    Repeated entries (with their metadata and side data) are skipped. A group's own metadata counts
+    as file metadata, so a check reports it. New unit test with 9.1's layout.
+  - The test helper decodes JPEGs with `jpeg_pipe`, as the migration does (`ffmpegFrames`).
+    `sameImageFrames` accepts that only the primary image is left when the stripper removed data
+    after it (MPF secondary images).
+  - The stream-copy fallback with 9.1 refuses 7 macOS screen recordings that have runs of equal
+    decode time stamps ("packet N duration changed by 16.583 ms"). 9.1's muxer changes a
+    packet's duration where 7.0.2 moves time stamps by one tick. The packet check correctly fails
+    closed. The corpus test accepts only that refusal, only for files with repeated decode time
+    stamps, and only with another ffmpeg than the Function's. The in-place strip, the Function's
+    path for these files, is not affected.
+
+| Run | Result |
+|---|---|
+| `npm run test:media`, local ffmpeg 9.1, with both corpora | 24/24; images: all 110 originals; videos: in place 29/29, stream copy 22 stripped + 7 refused (above) |
+| video media tests, Function's ffmpeg 7.0.2 in Docker, with the video corpus | 9/9; in place 29/29 and stream copy 29/29 |
+
+### R2-4. Location inside the kept bitstream (low)
+
+- **Confirmed.** It follows from the owner's rule: the streams are bit-identical, so a location
+  inside the samples stays. One example is H.264/HEVC SEI user data from some dash cams and
+  drones. The 29 originals have no fingerprint anywhere in their bytes (recheck 1).
+- **Fix.**
+  - The contract has a "Residual limit" paragraph.
+  - The Studio's `original` field description says that location a camera writes into the video
+    data is kept, and that the file can be downloaded by anyone who finds it.
+  - The `file` description says an upload whose location cannot be removed is not kept.
+- **Not detected.**
+  - A search for SEI user data would flag ordinary iPhone files, which carry SEI messages.
+  - Binary formats, such as those of drones, carry no text fingerprint.
+  - A detector that cannot tell location from other data would only block uploads.
+  - The converted MP4, which the site plays, is re-encoded and does not carry it.
+
+### R2-5. Capture dates in file names and titles (low)
+
+- **Confirmed.** 59 of 173 asset documents per dataset have a date and time in `originalFilename`
+  or `title`, for example screen recordings.
+- **Not a defect of the owner's decision.**
+  - The decision covers metadata embedded in the files (EXIF/XMP/IPTC, QuickTime keys, timed
+    metadata). Round 1 zeroed capture times there.
+  - File names are names the uploader gave. They carry no time zone, and the Wagtail site served
+    them.
+  - They are site content: the site shows `originalFilename` for STL models and video blocks.
+- **Owner's call.** Renaming would change what the site shows. It would be an `originalFilename`
+  and `title` patch on the asset documents, plus a rule for new uploads.
+
+### R2-6. The plain image CDN URL does not always re-encode (low)
+
+- **Confirmed** from recheck 1's measurements: 22 of 110 images per dataset are served as stored,
+  and 18 with `?dl=`.
+- **Fixed** in `schema-contract.md` (Images) and `studio/functions/image-privacy/README.md` (step
+  3).
+- `privacy-functions.md` finding 3, which made the same claim, is a historical report and is
+  corrected by this entry.
+- The case is now covered: a failed image is an error and is deleted once unused (R2-2).
+
+### R2-7. PDF and STL uploads (low)
+
+- **Confirmed.** No Function strips them.
+- Today the two résumé PDFs keep the printing browser, the PDF producer and their dates. The three
+  STL headers name the CAD exporter and its version ("ATF ... COLOR="). None has a location or a
+  person.
+- **Not fixed in this round.** It needs three pieces:
+  1. a PDF stripper: no PDF tool runs in the Function runtime, and a lossless rewrite has to keep
+     every object;
+  2. a path in upload-privacy for files a document already uses: strip, repoint the `fileLink` or
+     `stlModel` reference, delete;
+  3. new file kinds in the migration's privacy step for the five existing files.
+- **Proposed design.**
+  - PDF: blank the document information dictionaries of every revision, and the uncompressed XMP
+    streams, in place. Keep the same length, as the video stripper does. Refuse what cannot be
+    blanked that way (encryption, information in object streams, compressed XMP); such a file is
+    deleted like any unstrippable upload.
+  - STL: rewrite the 80-byte header and keep only `COLOR=`/`MATERIAL=`, which three.js reads for
+    face colours.
+
+### Verification
+
+**Tests** (19:00 UTC).
+
+| Suite | Result |
+|---|---|
+| `studio/functions/privacy` `npm test` | 41/41 |
+| `studio/functions/privacy` media, local ffmpeg 9.1, both corpora | 24/24 (see R2-3) |
+| `studio/functions/privacy` video media, Function's ffmpeg 7.0.2 in Docker, video corpus | 9/9 |
+| `studio/functions/image-privacy` | 32/32 |
+| `studio/functions/video-to-mp4` | 118/118 |
+| `studio/functions/upload-privacy` | 18/18 |
+| Studio `npm test`, typecheck, lint | 70/70, clean, clean |
+| `migration/wagtail-to-sanity` `npm test`, typecheck | 94/94, clean |
+
+**Live on staging** (deployed code; scratch data; fake test coordinates; everything cleaned up).
+
+| Test | Result |
+|---|---|
+| T1: GPS JPEG in a draft (`recheck2/scripts/live_tests.py`) | Moved to the copy after 5.1 s. Upload deleted 0.4 s later. Copy: `source.id` and `privacy.strippedFromDigest` are the upload's digest, the upload's sha1 appears nowhere in it, and the stored copy (`dlRaw`) has no GPS, make or model. |
+| T2: garbage uploaded as an `image/jpeg` file, never used | upload-privacy waited the grace period, failed to strip ("JPEG segment 0xe1 runs past the end of the file") and deleted it after 65.6 s. |
+| T3: GPS video uploaded, never used | Stripped in place by upload-privacy (private reads) and deleted after 64.9 s. The copy records the digest and has no location or comment. |
+| video-to-mp4 `scripts/live-check.ts` (`IMG_3151.MOV`, `deep_linking.MP4`) | All 6 steps pass. Step 1: ready after 30.2 s, and the stripped copy records the upload's digest and never its id; the upload is deleted. Step 5 (random bytes named `.mov`): taken out of the block and deleted after 5.8 s; `conversion` names no asset and says why; saving again does not retry. Cleanup complete: no scratch document, asset or lease left. |
+
+A first T2 run reported a deletion after 0.4 s. The query API had briefly not returned the new
+asset. The script now uses the document endpoint, and the Function log showed the real deletion
+after 64.7 s.
+
+**Datasets.**
+
+| Check | staging | production |
+|---|---|---|
+| Privacy step, rules v2 | 0 of 173 assets with personal metadata; nothing to replace | same |
+| assets + videos steps | 70 + 29 copies re-marked with the digest; 0 uploads | same |
+| Pointers to deleted assets (independent scan) | 0 (was 99) | 0 (was 99) |
+| `validate` (13 checks) | 13/13 pass (18:38 UTC). `privacy`: 173 assets, 0 with personal metadata, 99/99 copies marked, 0 documents naming a missing asset (269 searched) | 13/13 pass (18:32 UTC). `privacy`: 173 assets, 0 with personal metadata, 99/99 copies marked, 0 documents naming a missing asset (271 searched) |
+| `compare` | 269/269 shared ids identical (the 99 re-marked copies included), NDJSON byte-identical, Portable Text digest `0819ad48e7b0de27` | same |
+| Asset bytes | Unchanged this round: the 173 asset ids and sha1 hashes equal the set recheck 1 scanned byte by byte at 17:12 to 17:24 UTC (0 location fingerprints, 0 personal tags, 0 non-zero unused `mdat` bytes). Asset ids are content hashes. The `validate` `privacy` check above downloaded and scanned every asset again. | same |
+| Deleted URLs still served (probe, 2 rounds) | 3 files, 58 images; 0 with a location | same |
+
+### Open points for the owner (round 2)
+
+1. **Send the purge request** (`~/cjoshmartin-migration/privacy/recheck2/cdn-purge-request.md`) to
+   Sanity support. Until it is done, or until 2026-12-26, run
+   `node migration/verify/src/deleted-asset-cdn-probe.mjs --ids
+   ~/cjoshmartin-migration/privacy/recheck2/deleted-ids.json --location
+   ~/cjoshmartin-migration/privacy/recheck2/location-ids.json` now and then.
+2. **Keep `PRIVACY_LINK_KEY` safe** (`secrets.env`, and the three Functions' environment).
+   - Rotating it means setting the new key on the three Functions (`sanity functions env add`) and
+     in `secrets.env`, then re-marking the migration's copies (`--steps privacy,assets,videos`).
+   - Copies the Functions made keep digests of the old key; they only lose their link.
+   - Losing the key loses nothing but those links.
+3. **PDF and STL stripping** (R2-7): a separate work package (design above).
+4. **Videos above about 480 MB** cannot be stripped in the Function. They are now removed with a
+   message instead of staying public. A streaming strip would lift the limit (R2-2).
+5. **File names with capture dates** (R2-5): rename them or leave them.
+6. Round 1's open points 1 (scheduled sweep), 2 (bucket lockdown), 4 (intermittent frame check)
+   and 5 (gain maps) are unchanged.

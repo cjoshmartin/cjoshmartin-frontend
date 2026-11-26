@@ -325,6 +325,7 @@ None of these blocks the site. Items 1 to 3 are about the old infrastructure, no
 | 19 | low, pre-existing content | Testimonial 4 shows the literal text `Josh&#x27;s`, as on the live site. Two published posts have SEO descriptions over 160 characters. Image 3's original bytes are gone from the bucket. | Edit in the Studio if you want. |
 | 20 | low (WP6 F5) | 4 local stashes in `~/code/cjoshmartin.com/cjoshmartin-backend` contain key files. | `git stash clear` there when you no longer need them. |
 | 21 | info | GitHub reports Dependabot alerts on the default branch (63 at the overnight push). | Review Dependabot separately. |
+| 22 | high (owner action, privacy review round 2) | **Deleted uploads with personal metadata can stay in the asset CDN's cache for up to 30 days.** Deleting a Sanity asset does not purge `cdn.sanity.io`. From this machine none of the 26 location-bearing URLs answers 200 (18:37 UTC), but 3 deleted videos and 58 deleted images per dataset still do, and other edges may hold more. New uploads are read privately, and no document names a deleted upload any more (`privacy-review.md`, round 2). | Send `~/cjoshmartin-migration/privacy/recheck2/cdn-purge-request.md` to Sanity support (it lists every path; it stays outside the repository). Until it is done or until 2026-12-26, run `node migration/verify/src/deleted-asset-cdn-probe.mjs` (command in `privacy-review.md`). Keep `PRIVACY_LINK_KEY` (in `secrets.env` and the three privacy Functions) safe. |
 
 ## Blocked steps (exact commands)
 
