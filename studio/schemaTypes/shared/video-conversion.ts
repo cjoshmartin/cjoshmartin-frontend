@@ -55,22 +55,39 @@ export type VideoConversionState =
   | {kind: 'failed'; message: string}
 
 /**
+ * Whether a `failed` conversion is final: only for the settings it failed with. The video-to-mp4
+ * Function converts the file again under any other SETTINGS_VERSION (isFailedForCurrentFile in
+ * functions/video-to-mp4/trigger.ts), on the next event of its document. `currentSettingsVersion`
+ * is SETTINGS_VERSION from functions/video-to-mp4/settings.ts; callers pass it in because this
+ * module has no runtime imports.
+ */
+function isFinalFailure(conversion: VideoConversionValue, currentSettingsVersion: string): boolean {
+  return conversion.status === 'failed' && conversion.settingsVersion === currentSettingsVersion
+}
+
+/**
  * Where the video of `fileAssetId` stands. A `failed` or `pending` status only counts when it is
  * about the current file (`conversion.sourceAssetId`); after the editor picks another file the old
  * status no longer applies and the new file waits for conversion. `pending` with a message is a
- * problem that was not the video's fault; the converter retries it (`waiting`).
+ * problem that was not the video's fault; the converter retries it (`waiting`). `failed` under
+ * other settings than `currentSettingsVersion` is retried with the current settings (`waiting`).
  */
 export function videoConversionState(
   fileAssetId: string | undefined,
   conversion: VideoConversionValue | undefined,
+  currentSettingsVersion: string,
 ): VideoConversionState {
   if (!fileAssetId) return {kind: 'empty'}
   if (fileAssetId === conversion?.outputAssetId) return {kind: 'ready'}
   if (conversion?.sourceAssetId === fileAssetId) {
     if (conversion.status === 'failed') {
+      const message = conversion.message?.trim() || 'no error message was recorded'
+      if (isFinalFailure(conversion, currentSettingsVersion)) return {kind: 'failed', message}
       return {
-        kind: 'failed',
-        message: conversion.message?.trim() || 'no error message was recorded',
+        kind: 'waiting',
+        message: `it failed with older settings (${
+          conversion.settingsVersion?.trim() || 'no settings version was recorded'
+        }) and is converted again with the current settings. The last error: ${message}`,
       }
     }
     if (conversion.status === 'pending' && conversion.message?.trim()) {
@@ -101,6 +118,9 @@ function ageSeconds(time: string | undefined, now: Date): number {
   return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : (now.getTime() - parsed) / 1000
 }
 
+export type VideoConversionNudgeReason =
+  'stale-processing' | 'retry-due' | 'never-started' | 'settings-changed'
+
 /**
  * Why the converter should be started again for this block, or null. The video-to-mp4 Function
  * only runs on a document event, and nothing sends one when a block is stuck:
@@ -110,14 +130,17 @@ function ageSeconds(time: string | undefined, now: Date): number {
  *   RETRY_DELAY_SECONDS;
  * - `never-started`: the file needs conversion, the converter never wrote a status for it, and the
  *   document has not changed for STALE_PROCESSING_SECONDS (the event was missed, for example while
- *   the Function was being redeployed).
- * A failed conversion is never retried this way: it would fail the same way.
+ *   the Function was being redeployed);
+ * - `settings-changed`: the conversion failed under other settings than `currentSettingsVersion`
+ *   (the Function retries those) and the failure is older than RETRY_DELAY_SECONDS.
+ * A failure under the current settings is never retried this way: it would fail the same way.
  */
 export function videoConversionNudge(
   value: VideoValue | undefined,
   documentUpdatedAt: string | undefined,
   now: Date,
-): 'stale-processing' | 'retry-due' | 'never-started' | null {
+  currentSettingsVersion: string,
+): VideoConversionNudgeReason | null {
   if (!videoNeedsConversion(value)) return null
   const fileAssetId = value?.file?.asset?._ref
   const conversion = value?.conversion
@@ -132,7 +155,8 @@ export function videoConversionNudge(
     case 'pending':
       return ageSeconds(conversion.updatedAt, now) > RETRY_DELAY_SECONDS ? 'retry-due' : null
     case 'failed':
-      return null
+      if (isFinalFailure(conversion, currentSettingsVersion)) return null
+      return ageSeconds(conversion.updatedAt, now) > RETRY_DELAY_SECONDS ? 'settings-changed' : null
     default:
       return ageSeconds(documentUpdatedAt, now) > STALE_PROCESSING_SECONDS ? 'never-started' : null
   }
@@ -142,12 +166,19 @@ export function videoConversionNudge(
  * The `conversion` written to start the video-to-mp4 Function again: `pending` for the current
  * file. A stuck mark keeps its `updatedAt` (old enough that the Function's filter matches it); a
  * block the Function never started gets a fresh object without one.
+ *
+ * A failure under older settings (`settings-changed`) stays `failed`, and only its `updatedAt`
+ * moves to `now`. The write is the event, and the Function decides with its own SETTINGS_VERSION:
+ * while the Studio and the Function are deployed with different settings, a block is neither
+ * converted again with the settings it already failed with nor nudged more than once per
+ * RETRY_DELAY_SECONDS.
  */
 export function nudgedConversion(
   block: VideoValue,
-  reason: NonNullable<ReturnType<typeof videoConversionNudge>>,
+  reason: VideoConversionNudgeReason,
   now: Date,
 ): VideoConversionValue {
+  if (reason === 'settings-changed') return {...block.conversion, updatedAt: now.toISOString()}
   const fileAssetId = block.file?.asset?._ref
   const message = `Retry requested by the Studio at ${now.toISOString()} (${
     reason === 'stale-processing'

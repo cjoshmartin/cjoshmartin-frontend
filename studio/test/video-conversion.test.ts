@@ -8,10 +8,13 @@ import {describe, it} from 'node:test'
 
 import {evaluate, parse} from 'groq-js'
 
+import {SETTINGS_VERSION} from '../functions/video-to-mp4/settings'
 import {
   RETRY_DELAY_SECONDS as FUNCTION_RETRY_DELAY_SECONDS,
   STALE_PROCESSING_SECONDS as FUNCTION_STALE_PROCESSING_SECONDS,
   VIDEO_TO_MP4_FILTER,
+  isFailedForCurrentFile,
+  isPendingVideo,
 } from '../functions/video-to-mp4/trigger'
 import {
   RETRY_DELAY_SECONDS,
@@ -27,6 +30,8 @@ import {
 const ORIGINAL = 'file-1111111111111111111111111111111111111111-mov'
 const MP4 = 'file-2222222222222222222222222222222222222222-mp4'
 const REPLACEMENT = 'file-3333333333333333333333333333333333333333-webm'
+/** A settings version other than the current one, as after a SETTINGS_VERSION bump. */
+const OLD_SETTINGS = 'h264-crf23-max1920-v1'
 
 const file = (ref: string) => ({_type: 'file', asset: {_type: 'reference', _ref: ref}})
 
@@ -88,7 +93,7 @@ describe('videoNeedsConversion', () => {
 
 describe('videoConversionState and videoConversionLabel', () => {
   const label = (fileAssetId: string | undefined, conversion?: VideoValue['conversion']) =>
-    videoConversionLabel(videoConversionState(fileAssetId, conversion))
+    videoConversionLabel(videoConversionState(fileAssetId, conversion, SETTINGS_VERSION))
 
   it('shows that there is no file', () => {
     assert.equal(label(undefined), 'No video file')
@@ -113,19 +118,55 @@ describe('videoConversionState and videoConversionLabel', () => {
     )
   })
 
-  it('shows the failure message for the current file', () => {
+  it('shows the failure message for the current file and settings', () => {
     assert.equal(
       label(ORIGINAL, {
         status: 'failed',
         sourceAssetId: ORIGINAL,
+        settingsVersion: SETTINGS_VERSION,
         message: 'ffmpeg exited with code 1',
       }),
       'Conversion failed: ffmpeg exited with code 1',
     )
     assert.equal(
-      label(ORIGINAL, {status: 'failed', sourceAssetId: ORIGINAL, message: '  '}),
+      label(ORIGINAL, {
+        status: 'failed',
+        sourceAssetId: ORIGINAL,
+        settingsVersion: SETTINGS_VERSION,
+        message: '  ',
+      }),
       'Conversion failed: no error message was recorded',
     )
+  })
+
+  it('shows a failure under other settings as waiting, because the Function converts it again', () => {
+    assert.equal(
+      label(ORIGINAL, {
+        status: 'failed',
+        sourceAssetId: ORIGINAL,
+        settingsVersion: OLD_SETTINGS,
+        message: 'ffmpeg exited with code 1',
+      }),
+      `Waiting to retry the conversion: it failed with older settings (${OLD_SETTINGS}) and is converted again with the current settings. The last error: ffmpeg exited with code 1`,
+    )
+    assert.equal(
+      label(ORIGINAL, {status: 'failed', sourceAssetId: ORIGINAL, message: 'x'}),
+      'Waiting to retry the conversion: it failed with older settings (no settings version was recorded) and is converted again with the current settings. The last error: x',
+    )
+  })
+
+  it("counts a failure as final exactly when the Function's rule does", () => {
+    for (const settingsVersion of [SETTINGS_VERSION, OLD_SETTINGS, undefined]) {
+      for (const sourceAssetId of [ORIGINAL, REPLACEMENT]) {
+        const conversion = {status: 'failed', sourceAssetId, settingsVersion, message: 'x'}
+        const block = {_type: 'video' as const, _key: 'v', file: file(ORIGINAL), conversion}
+        assert.equal(
+          videoConversionState(ORIGINAL, conversion, SETTINGS_VERSION).kind === 'failed',
+          isFailedForCurrentFile(block),
+          JSON.stringify(conversion),
+        )
+      }
+    }
   })
 
   it('ignores a failure or a ready MP4 that belongs to a file the editor has since replaced', () => {
@@ -144,11 +185,15 @@ describe('waiting to retry', () => {
   it('shows the retry message of a pending conversion of the current file', () => {
     assert.equal(
       videoConversionLabel(
-        videoConversionState(ORIGINAL, {
-          status: 'pending',
-          sourceAssetId: ORIGINAL,
-          message: 'Could not convert yet: the download failed.',
-        }),
+        videoConversionState(
+          ORIGINAL,
+          {
+            status: 'pending',
+            sourceAssetId: ORIGINAL,
+            message: 'Could not convert yet: the download failed.',
+          },
+          SETTINGS_VERSION,
+        ),
       ),
       'Waiting to retry the conversion: Could not convert yet: the download failed.',
     )
@@ -238,13 +283,58 @@ describe('videoConversionNudge and nudgedConversion', () => {
       reason: 'retry-due',
     },
     {
-      name: 'failed',
+      name: 'failed with the current settings',
       block: {
         file: file(ORIGINAL),
-        conversion: {status: 'failed', sourceAssetId: ORIGINAL, updatedAt: LONG_AGO, message: 'x'},
+        conversion: {
+          status: 'failed',
+          sourceAssetId: ORIGINAL,
+          settingsVersion: SETTINGS_VERSION,
+          updatedAt: LONG_AGO,
+          message: 'x',
+        },
       },
       updatedAt: LONG_AGO,
       reason: null,
+    },
+    {
+      name: 'failed with older settings, long ago',
+      block: {
+        file: file(ORIGINAL),
+        conversion: {
+          status: 'failed',
+          sourceAssetId: ORIGINAL,
+          settingsVersion: OLD_SETTINGS,
+          updatedAt: ago(RETRY_DELAY_SECONDS + 5),
+          message: 'x',
+        },
+      },
+      updatedAt: LONG_AGO,
+      reason: 'settings-changed',
+    },
+    {
+      name: 'failed with older settings, nudged less than the retry delay ago',
+      block: {
+        file: file(ORIGINAL),
+        conversion: {
+          status: 'failed',
+          sourceAssetId: ORIGINAL,
+          settingsVersion: OLD_SETTINGS,
+          updatedAt: ago(RETRY_DELAY_SECONDS - 5),
+          message: 'x',
+        },
+      },
+      updatedAt: LONG_AGO,
+      reason: null,
+    },
+    {
+      name: 'failed without a settings version',
+      block: {
+        file: file(ORIGINAL),
+        conversion: {status: 'failed', sourceAssetId: ORIGINAL, message: 'x'},
+      },
+      updatedAt: LONG_AGO,
+      reason: 'settings-changed',
     },
     {
       name: 'new upload, just saved',
@@ -271,14 +361,53 @@ describe('videoConversionNudge and nudgedConversion', () => {
 
   for (const {name, block, updatedAt, reason} of cases) {
     it(`${name}: ${reason ?? 'no nudge'}`, async () => {
-      const found = videoConversionNudge(block, updatedAt, NOW)
+      const found = videoConversionNudge(block, updatedAt, NOW, SETTINGS_VERSION)
       assert.equal(found, reason)
       if (!found) return
       // The nudge is an event the Function's filter matches, so the conversion starts again.
       const nudged = {...block, conversion: nudgedConversion(block, found, NOW)}
-      assert.equal(nudged.conversion.status, 'pending')
+      if (found === 'settings-changed') {
+        // Only the time moves: the Function decides with its own settings version.
+        assert.deepEqual(nudged.conversion, {...block.conversion, updatedAt: NOW.toISOString()})
+      } else {
+        assert.equal(nudged.conversion.status, 'pending')
+      }
       assert.equal(nudged.conversion.sourceAssetId, block.file?.asset?._ref)
       assert.equal(await functionFilterMatches(nudged), true)
+      // The handler applies the same rule in code.
+      const handlerBlock = {
+        _type: 'video' as const,
+        _key: 'v',
+        file: nudged.file && {...nudged.file},
+        conversion: nudged.conversion,
+      }
+      assert.equal(isPendingVideo(handlerBlock, NOW), true)
+      // Right after the nudge the block is not nudged again (a second tab, or the next check
+      // before the Function has marked it processing, waits for RETRY_DELAY_SECONDS).
+      if (found === 'settings-changed') {
+        assert.equal(videoConversionNudge(nudged, NOW.toISOString(), NOW, SETTINGS_VERSION), null)
+      }
     })
   }
+
+  it('does not convert again a failure that the Function made with its own settings', async () => {
+    // While the Studio is deployed with newer settings than the Function, the Studio sees the
+    // Function's failure as older settings and nudges it; the Function's filter still skips it,
+    // so it is not converted again with the settings it failed with.
+    const failedByFunction: VideoValue = {
+      file: file(ORIGINAL),
+      conversion: {
+        status: 'failed',
+        sourceAssetId: ORIGINAL,
+        settingsVersion: SETTINGS_VERSION,
+        updatedAt: LONG_AGO,
+        message: 'x',
+      },
+    }
+    const studioSettings = 'h264-crf23-max1920-v99'
+    const found = videoConversionNudge(failedByFunction, LONG_AGO, NOW, studioSettings)
+    assert.equal(found, 'settings-changed')
+    const nudged = {...failedByFunction, conversion: nudgedConversion(failedByFunction, found, NOW)}
+    assert.equal(await functionFilterMatches(nudged), false)
+  })
 })

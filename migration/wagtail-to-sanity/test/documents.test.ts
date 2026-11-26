@@ -56,7 +56,9 @@ describe('videoBlock', () => {
   it('does not need conversion by the Studio rule, so the video-to-mp4 Function leaves it alone', () => {
     const block = videoBlock('k', assets) as Parameters<typeof videoNeedsConversion>[0]
     assert.equal(videoNeedsConversion(block), false)
-    assert.deepEqual(videoConversionState(block?.file?.asset?._ref, block?.conversion), {kind: 'ready'})
+    assert.deepEqual(videoConversionState(block?.file?.asset?._ref, block?.conversion, SETTINGS_VERSION), {
+      kind: 'ready',
+    })
   })
 })
 

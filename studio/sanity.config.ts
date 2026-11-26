@@ -9,6 +9,7 @@ import {defineConfig, defineSingleton, type WorkspaceOptions} from 'sanity'
 import {presentationTool} from 'sanity/presentation'
 import {structureTool} from 'sanity/structure'
 
+import {VideoConversionDocumentInput} from './components/VideoConversionWatcher'
 import {
   API_VERSION,
   PRODUCTION_DATASET,
@@ -83,6 +84,8 @@ function workspace({name, dataset, subtitle, icon}: WorkspaceSettings): Workspac
       }),
     ],
     schema: {types: schemaTypes},
+    // Restarts stuck video conversions while a document that can hold videos is open.
+    form: {components: {input: VideoConversionDocumentInput}},
     document: {
       singletons: [
         defineSingleton({

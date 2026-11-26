@@ -1,7 +1,7 @@
 import {VideoIcon} from '@sanity/icons/Video'
 import {defineField, defineType, type ValidationContext} from 'sanity'
 
-import {VideoConversionInput} from '../../components/VideoConversionInput'
+import {SETTINGS_VERSION} from '../../functions/video-to-mp4/settings'
 import {API_VERSION} from '../../lib/constants'
 import {VIDEO_CONVERSION_STATUSES} from '../constants'
 import {
@@ -37,14 +37,14 @@ async function validateVideoFile(value: FileValue | undefined, context: Validati
  * docs/sanity-migration/schema-contract.md). Every upload is converted to MP4 with the settings in
  * functions/video-to-mp4/settings.ts: the converter points `file` at the MP4, keeps the upload in
  * `original` and records its progress in `conversion`. The site only ever plays `file`.
+ * While a document is open in the Studio, ../../components/VideoConversionWatcher.tsx (the
+ * document form's root input) restarts the conversion of a stuck block.
  */
 export const video = defineType({
   name: 'video',
   title: 'Video',
   type: 'object',
   icon: VideoIcon,
-  // Restarts a stuck conversion while the document is open (see the component).
-  components: {input: VideoConversionInput},
   fields: [
     defineField({
       name: 'file',
@@ -110,10 +110,15 @@ export const video = defineType({
   // A failed conversion leaves the original upload in `file`. The site never plays a file that is
   // not the converted MP4, so publishing would show no video: an error, so the editor replaces the
   // file or removes the block. A conversion that is still running or waiting to retry is not an
-  // error; the converter writes the result to the published document too.
+  // error; the converter writes the result to the published document too. A failure under older
+  // settings is retried with the current ones, so it waits too (videoConversionState).
   validation: (rule) =>
     rule.custom((value: VideoValue | undefined) => {
-      const state = videoConversionState(value?.file?.asset?._ref, value?.conversion)
+      const state = videoConversionState(
+        value?.file?.asset?._ref,
+        value?.conversion,
+        SETTINGS_VERSION,
+      )
       return state.kind === 'failed'
         ? `MP4 conversion failed: ${state.message}. Upload another file or remove the video.`
         : true
@@ -126,14 +131,22 @@ export const video = defineType({
       message: 'conversion.message',
       sourceAssetId: 'conversion.sourceAssetId',
       outputAssetId: 'conversion.outputAssetId',
+      settingsVersion: 'conversion.settingsVersion',
     },
-    prepare({filename, fileAssetId, status, message, sourceAssetId, outputAssetId}) {
-      const state = videoConversionState(fileAssetId, {
-        status,
-        message,
-        sourceAssetId,
-        outputAssetId,
-      })
+    prepare({
+      filename,
+      fileAssetId,
+      status,
+      message,
+      sourceAssetId,
+      outputAssetId,
+      settingsVersion,
+    }) {
+      const state = videoConversionState(
+        fileAssetId,
+        {status, message, sourceAssetId, outputAssetId, settingsVersion},
+        SETTINGS_VERSION,
+      )
       return {
         title: filename || 'Video',
         subtitle: videoConversionLabel(state),

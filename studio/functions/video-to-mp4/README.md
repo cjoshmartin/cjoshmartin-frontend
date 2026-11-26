@@ -67,18 +67,24 @@ kept in `video.original` (read-only, never served).
 **Retrying.** A `failed` conversion is final for that upload and settings version (otherwise the
 failure patch would trigger another run, and it would fail the same way). To retry, remove the
 video block and add the video again, or upload another file. A new `SETTINGS_VERSION` retries
-failed blocks once. A `pending` one (a retryable problem) is retried by the first event at least
-10 minutes after it was written, so after a redeploy that fixes the converter the next save, or
-opening the document in the Studio, converts it.
+failed blocks once, on the next event of their document (the Studio sends one while the document
+is open, see below; until then it shows the block as waiting, not failed). A `pending` one (a
+retryable problem) is retried by the first event at least 10 minutes after it was written, so
+after a redeploy that fixes the converter the next save, or opening the document in the Studio,
+converts it.
 
-**Stuck blocks.** The Function only runs on a document event. While a document is open in the
-Studio, the video block's input (`studio/components/VideoConversionInput.tsx`) checks every
-minute for a block that is stuck: `processing` older than 20 minutes (a run that died),
-`pending` older than 10 minutes (a retry that is due), or no status at all on a document unchanged
-for 20 minutes (a missed event). It then writes `pending` to that block, which is the event that
-starts the Function again. A scheduled sweep would also cover documents nobody opens, but
-scheduled Functions need the Blueprint stack promoted to organization scope (one-way) and a robot
-token; that is the site owner's decision.
+**Stuck blocks.** The Function only runs on a document event. While a document's form is open in
+the Studio, whichever field group, block or dialog is shown, the form's root input
+(`studio/components/VideoConversionWatcher.tsx`, registered as `form.components.input` in
+`studio/sanity.config.ts` for every type in `VIDEO_FIELDS_BY_TYPE`) checks the draft and the
+published document right away and then every minute for a block that is stuck: `processing` older
+than 20 minutes (a run that died), `pending` older than 10 minutes (a retry that is due), no status
+at all on a document unchanged for 20 minutes (a missed event), or `failed` under another
+`SETTINGS_VERSION` more than 10 minutes ago. It then writes to that block (`pending`, or for the
+old-settings failure only a new `updatedAt`), at most once per block every 10 minutes, and that
+write is the event that starts the Function again. Documents nobody opens are not checked. A
+scheduled sweep would cover them, but scheduled Functions need the Blueprint stack promoted to
+organization scope (one-way) and a robot token; that is the site owner's decision.
 
 **Limits.** 10 GB memory, 900 s timeout; ffmpeg is stopped 60 s before the timeout and the block
 is marked failed. The worst case measured by the spike (60 s of 4K 10-bit HEVC) takes about 54 s.

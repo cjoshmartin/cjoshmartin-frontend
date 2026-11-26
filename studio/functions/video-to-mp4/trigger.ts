@@ -18,9 +18,10 @@
  *   must not trigger another run). Uploading another file, or removing the block and adding the
  *   video again, starts a new conversion.
  *
- * Nothing sends an event by itself when a `processing` or `pending` mark goes stale. The Studio
- * does: while a document with such a block is open, it touches the block (see
- * studio/components/VideoConversionInput.tsx), which starts the retry.
+ * Nothing sends an event by itself when a `processing` or `pending` mark goes stale, or when
+ * SETTINGS_VERSION changes after a failure. The Studio does: while the document's form is open, it
+ * checks every minute and touches such a block, at most once per RETRY_DELAY_SECONDS (see
+ * studio/components/VideoConversionWatcher.tsx, the form's root input), which starts the retry.
  *
  * Recursion guard: every patch the Function writes leaves each block it touches either converted
  * (`file` is the MP4), `processing` or freshly `pending` for the current file, `failed` for the

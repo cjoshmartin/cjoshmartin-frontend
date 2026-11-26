@@ -50,7 +50,7 @@ Read these first. Everything else matches the brief.
 |---|---|---|
 | `studio/schemaTypes/constants.ts` | `AUDIENCE_OPTIONS`, `DEFAULT_AUDIENCE`, `PROJECT_TYPE_OPTIONS`, `DEFAULT_PROJECT_TYPE`, `IMAGE_LAYOUT_OPTIONS`, `DEFAULT_IMAGE_LAYOUT`, `CODE_LANGUAGES`, `DEFAULT_CODE_LANGUAGE`, `INTERNAL_LINK_TYPES`, `HOME_PAGE_ID`, `VIDEO_CONVERSION_STATUSES`, and the types `Audience`, `ProjectType`, `ImageLayout`, `CodeLanguage`, `VideoConversionStatus` | none (plain TypeScript, safe to import from any package with a TS runtime) |
 | `studio/schemaTypes/shared/validation.ts` | `SLUG_PATTERN`, `validateSlugFormat`, `getYouTubeVideoId`, `validateYouTubeUrl`, `validateSitePath`, `validatePathOrAbsoluteUrl`, `fileAssetExtension` | none |
-| `studio/schemaTypes/shared/video-conversion.ts` | `videoNeedsConversion` (the contract's rule), `videoConversionState`, `videoConversionLabel` (the preview's status line), and the types `VideoValue`, `VideoConversionValue`, `FileValue`, `VideoConversionState` | none (a type-only import from `constants.ts`) |
+| `studio/schemaTypes/shared/video-conversion.ts` | `videoNeedsConversion` (the contract's rule), `videoConversionState` and `videoConversionLabel` (the preview's status line; pass `SETTINGS_VERSION`, because a failure is final only for its settings), the Studio's stuck check `videoConversionNudge` and `nudgedConversion`, `STALE_PROCESSING_SECONDS`, `RETRY_DELAY_SECONDS`, and the types `VideoValue`, `VideoConversionValue`, `FileValue`, `VideoConversionState`, `VideoConversionNudgeReason` | none (a type-only import from `constants.ts`; Node's type stripping loads it) |
 | `studio/functions/video-to-mp4/settings.ts` | The MP4 settings, see [MP4 settings](#mp4-settings): `SETTINGS_VERSION`, `buildFfmpegArgs`, `VIDEO_FILTER`, `expectedOutputSize`, `convertedFilename`, `CONVERTED_ASSET_SOURCE_NAME`, `CONVERTED_ASSET_SETTINGS_FIELD`, `OUTPUT_MIME_TYPE`, `OUTPUT_EXTENSION`, `MAX_DIMENSION`, `CRF`, `AUDIO_BITRATE`, `AUDIO_CHANNELS`, `X264_PRESETS`, `DEFAULT_PRESET`, `isX264Preset`, `MIN_FFMPEG_VERSION`, `parseFfmpegVersion`, `checkFfmpegVersion`, and the types `X264Preset`, `FfmpegArgsOptions`, `VideoSize`, `FfmpegVersion` | none (no imports, only erasable TypeScript: runs under the Functions bundler, `tsx` and Node's type stripping) |
 | `studio/functions/video-to-mp4/frames.ts` | The frame-time check every converter runs: `compareFrameTimes`, `frameTimeProblems`, `FRAME_TIME_TOLERANCE_SECONDS`, and the showinfo parser the Function uses (`FrameTimesCollector`, `SHOWINFO_FILTER`) | none |
 | `studio/schemaTypes/index.ts` | `schemaTypes: SchemaTypeDefinition[]` (every type below except `code`, which its plugin adds), each type definition by name (`blogPost`, `project`, ...), and everything from `constants.ts` | `sanity`, `@sanity/icons` (resolved from `studio/node_modules`, so run `npm ci` in `studio/` first) |
@@ -387,12 +387,19 @@ reuses them.
 
 **Studio.** The block preview's title is the `file` asset's `originalFilename`; its subtitle is
 "No video file", "Converting to MP4..." (needs conversion and no failure for this file), "Waiting
-to retry the conversion: <message>" (`pending` with a message for this file), "Ready" (`file` is
-the MP4) or "Conversion failed: <message>" (status `failed` and `sourceAssetId` is the current
-file; a failure recorded for an earlier file does not count). A failed conversion is a validation
-error on the block, so a document with one cannot be published. While a document is open, the
-block's input restarts a stuck conversion (`processing` older than 20 minutes, `pending` older than
-10 minutes, or no status on a document unchanged for 20 minutes) by writing `pending` to it.
+to retry the conversion: <message>" (`pending` with a message for this file, or `failed` under
+another settings version, which the Function converts again), "Ready" (`file` is the MP4) or
+"Conversion failed: <message>" (status `failed`, `sourceAssetId` is the current file and
+`settingsVersion` is the current `SETTINGS_VERSION`; a failure recorded for an earlier file or
+under other settings does not count, the same rule as the Function's). A failed conversion is a
+validation error on the block, so a document with one cannot be published. While a document's
+form is open (any field group; the block itself need not be shown), its root input
+(`studio/components/VideoConversionWatcher.tsx`) checks the draft and the published document every
+minute and restarts a stuck conversion (`processing` older than 20 minutes, `pending` older than
+10 minutes, no status on a document unchanged for 20 minutes, or `failed` under other settings more
+than 10 minutes ago) by writing to that block: `pending`, or for the old-settings failure only a
+new `updatedAt`, so the Function decides with its own settings. Documents nobody opens are not
+checked; a scheduled sweep would need a one-way Blueprint stack promotion (owner decision).
 
 **Site.** The site only plays a block whose `file` is its converted MP4 (`conversion.status` is
 `ready`, `file.asset._ref == conversion.outputAssetId`, `video/mp4`). A block that is still being
