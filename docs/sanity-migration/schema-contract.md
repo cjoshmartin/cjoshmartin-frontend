@@ -329,7 +329,7 @@ Array type. Members, in insert-menu order: `block`, `imageBlock`, `youtube`, `co
 |---|---|---|
 | `link` | `href` (url), `openInNewTab` (boolean) | `href` required; absolute `http`, `https`, `mailto`, `tel`, or relative (`/path`, `#anchor`). |
 | `internalLink` | `reference` (reference → `blogPost` \| `project` \| `flexPage` \| `homePage`) | `reference` required. |
-| `fileLink` | `file` (file: `{_type: "file", asset: {_type: "reference", _ref: "file-..."}}`) | Must have an asset. |
+| `fileLink` | `file` (file: `{_type: "file", asset: {_type: "reference", _ref: "file-..."}}`) | Must have an asset; PDF only (see Privacy). |
 
 Example block:
 
@@ -495,7 +495,9 @@ body[]{
 Owner decision 2026-11-26: every asset the public datasets serve is stripped of location and
 personal metadata, without re-encoding. Assets uploaded before 2026-11-26 (the Wagtail migration)
 are stripped by the migration's privacy step (`migration/wagtail-to-sanity`); every later upload by
-the Sanity Functions below. Both mark their copies with the same `privacy` field.
+the Sanity Functions below. Since the privacy review (2026-11-26) both use the same strippers
+(`studio/functions/privacy`) and the same policy, and mark their copies with the same `privacy`
+field.
 
 **Asset `privacy` field** (`PRIVACY_FIELD`, on `sanity.imageAsset` and `sanity.fileAsset`):
 
@@ -508,15 +510,27 @@ the Sanity Functions below. Both mark their copies with the same `privacy` field
 |---|---|
 | `processing` | A run is checking or stripping this upload; also its lease (`holder`, `expiresAt`). |
 | `pending` | A problem that is not the file's fault (download, upload, API); retried by the first event 10 minutes or more later. `message` says why. |
-| `failed` | The file cannot be stripped with this `version` (corrupt, BigTIFF, old-style JPEG-in-TIFF, SVG). Final until the version changes. |
-| `clean` | Checked: nothing personal. Left as it is. |
+| `failed` | The file cannot be stripped with this `version` (corrupt, BigTIFF, old-style JPEG-in-TIFF, SVG, not a video). Final until the version changes. |
+| `clean` | Checked: nothing personal. Left as it is (a video's `original` is then the upload itself). |
 | `stripped` | A copy without personal metadata (`strippedFrom`: the upload it was made from; `removed`: what went, names only). |
 | `replaced` | An upload with personal metadata; `replacementAssetId` is its copy. References are moved and it is deleted once nothing references it. |
 
 `version` is `IMAGE_STRIP_VERSION` (`image-strip-v1`) for images and `VIDEO_STRIP_VERSION`
-(`video-strip-v1`) for videos. A new version re-checks images on the next change of a document that
-uses them. Copies made by the Functions have `source: {name: "image-privacy", id: <upload>}` or
-`source: {name: "video-to-mp4-original", id: <upload>}`.
+(`video-strip-v2`: in place; `video-strip-v1` was the ffmpeg stream copy) for videos. A new version
+re-checks images on the next change of a document that uses them. Copies made by the Functions have
+`source: {name: "image-privacy", id: <upload>}` or `source: {name: "video-to-mp4-original", id:
+<upload>}`; the migration's copies keep `source: {name: "wagtail", id}` without `url` (the bucket
+URL would link to the unstripped original).
+
+**What counts as personal** (one policy for migrated assets and new uploads): anything except what
+displaying the picture or playing the video needs. Personal: location of any kind, camera, phone or
+computer make, model, serials and software, maker notes, lens and capture settings, capture and
+creation times with their UTC offsets, authors, people and face regions, comments and other free
+text, XMP, IPTC/Photoshop data, EXIF thumbnails, data after the end of a JPEG (MPF gain maps and
+depth maps, motion photos), timed-metadata and other data tracks, handler names, unused bytes in a
+video's `mdat` and unknown chunks or boxes. Kept: the coded image or the audio and video samples
+byte for byte, the orientation, the ICC profile, colour, HDR and Dolby Vision data, the display
+matrix (rotation), edit lists and the technical data a decoder needs.
 
 **Images** (image-privacy Function, `studio/functions/image-privacy`; stripper
 `studio/functions/privacy/image-strip.ts`):
@@ -530,34 +544,52 @@ uses them. Copies made by the Functions have `source: {name: "image-privacy", id
 - The input shows the Function's progress under the image ("Checking...", "Removing location and
   camera data...", "Location and camera data removed...", or a warning when it failed or waits to
   retry).
-- Trigger: create and update of the watched document types (drafts included) with an image whose
-  asset was uploaded since 2026-11-26T00:00:00Z and still needs work (no `privacy`, another
-  version, `replaced`, a stale `processing`, a due `pending`). The filter follows `asset->`.
-- What counts as personal: anything except the orientation, size, resolution and colour-space EXIF
-  tags, the ICC profile and the chunks a decoder needs. Personal: GPS, camera make, model and
-  serial numbers, maker notes, lens, capture settings, dates, authors, software, comments, XMP,
-  IPTC/Photoshop data, thumbnails, data after the end of the image (MPF gain maps and depth maps,
-  motion photos), unknown chunks. An image with nothing personal is left alone (marked `clean`).
-  This is stricter than the migration's rule for the older assets (which keeps camera make, model,
-  dates and comments).
+- Trigger: create and update of the watched document types (drafts and release versions included)
+  with an image whose asset was uploaded since 2026-11-26T00:00:00Z and still needs work (no
+  `privacy`, another version, `replaced`, a stale `processing`, a due `pending`). The filter follows
+  `asset->`.
+- An image with nothing personal is left alone (marked `clean`).
 - The copy keeps the coded image byte for byte (identical decoded pixels), the orientation and the
   ICC profile, and has the upload's dimensions, so crops and hotspots stay right. Every reference
   in drafts, published documents and release versions moves to it (`asset._ref` only: crop,
-  hotspot, alt, caption, layout unchanged), then the upload is deleted.
+  hotspot, alt, caption, layout unchanged; a testimonial's `asciiArtSource` moves with its image),
+  then the upload is deleted. A version in a release that can no longer be edited (scheduled,
+  published, archived) is not written; the upload stays `replaced` until the release is published
+  (the published document's event moves it) or archived (the upload-privacy sweep deletes it).
 - The plain image CDN URL serves a re-encoded rendition without any metadata; the stored file is
   only available with `?dlRaw=` and a token. The Function reads the stored file that way.
 
-**Videos** (video-to-mp4 Function; stripper `studio/functions/privacy/video-strip.ts`): `original`
-is a stream copy of the upload (every video and audio packet identical) without file and stream
-metadata (QuickTime keys and user data: location, make, model, software, creation dates), data
-tracks (`mebx` timed metadata), subtitles, chapters, cover art and creation times; the rotation,
-colour description and HDR side data are kept. QuickTime stays QuickTime and MP4 stays MP4, except
-that a Dolby Vision video becomes MP4 so its configuration (`dvvC`) is kept. Packets whose source
-time stamps repeat (screen recordings) move by at most 50 ms (9.8 ms in the Wagtail videos). The
-unstripped upload is deleted once nothing references it. The converted MP4 is checked to carry no
-metadata boxes besides ffmpeg's encoder name.
+**Videos** (video-to-mp4 Function; strippers `studio/functions/privacy/isobmff-video.ts` and
+`video-strip.ts`): `original` is the upload with its metadata removed in place for QuickTime/MP4:
+`moov/udta`, `moov/meta` and track metadata (QuickTime keys and user data: location, make, model,
+software, creation dates), data tracks (`mebx` timed metadata, timecode, text) and their samples,
+creation times, handler names and every `mdat` byte no audio or video sample uses (iOS leaves a
+draft movie header with the location there) become zeros or `free` boxes of the same size. No
+offset moves, so the container, edit lists, time stamps, the display matrix, colour, HDR and Dolby
+Vision boxes and every sample stay byte for byte; ffmpeg checks that every packet and every stream
+description is unchanged. Other containers (Matroska/WebM) and ISO BMFF files the in-place stripper
+refuses (fragmented files, unknown boxes) get an ffmpeg stream copy instead, which rewrites the
+container and says so in `privacy.message`. An upload with nothing personal is kept as it is
+(`clean`). Once the copy exists the block leaves the upload whatever the conversion does: `ready`
+points `file` at the MP4 and `original` at the copy, `failed` and `pending` point `file` at the copy
+(a retry converts it). The unstripped upload is then deleted once nothing references it. Release
+versions are converted like drafts while their release is active. The converted MP4 is checked to
+carry no metadata boxes besides ffmpeg's encoder name.
 
-Not covered by the Functions: files in `fileLink` annotations and `stlModel` blocks (PDF, STL).
+**Uploads no document uses** (upload-privacy Function, `studio/functions/upload-privacy`): on the
+creation of an image or file asset (not one the migration or a Function made) it removes any
+location or EXIF data Sanity extracted into the asset document at once, waits a minute for a
+document to use the upload (then the Functions above handle it), and otherwise strips it the same
+way (a copy, then the upload is deleted; an image uploaded as a file asset gets a file copy). On every upload and every deleted document (a publish, a
+discarded draft, an archived release) it also sweeps up to five earlier unused uploads that still
+have their metadata (never checked, `replaced` but not deleted, a due retry). There is no scheduled
+sweep (it would need the Blueprint stack promoted to the organization and a robot token: the
+owner's call).
+
+**Files**: `fileLink` annotations accept PDF documents only (`options.accept: ".pdf,application/pdf"`
+and a validation error for any other file): a photo or video attached as a file would be served
+exactly as uploaded. `stlModel` accepts `.stl` only. No Function strips PDF or STL files; the
+migration's privacy step checks STL headers and PDF metadata for people's names.
 
 ## Validation
 

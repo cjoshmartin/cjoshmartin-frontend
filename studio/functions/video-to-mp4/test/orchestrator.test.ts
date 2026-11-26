@@ -99,10 +99,19 @@ class FakeConverter implements Converter {
     private readonly error?: unknown,
     private readonly stripError?: unknown,
   ) {}
+  /** Uploads the stripper finds without personal metadata. */
+  readonly cleanUploads = new Set<string>()
   async strip(upload: AssetDocument) {
     this.stripCalls.push(upload._id)
     if (this.stripError) throw this.stripError
+    const current = this.store.get(upload._id)!
+    if (this.cleanUploads.has(upload._id)) {
+      this.store.put({...current, [PRIVACY_FIELD]: {status: 'clean', version: VIDEO_STRIP_VERSION, removed: []}})
+      return {assetId: upload._id, clean: true, message: 'The upload has no location or personal metadata; it is kept as it is.'}
+    }
     this.store.put(strippedAsset(upload._id))
+    // Like stripOriginal: the upload is marked replaced by its copy.
+    this.store.put({...current, [PRIVACY_FIELD]: {status: 'replaced', version: VIDEO_STRIP_VERSION, replacementAssetId: stripped(upload._id)}})
     return {assetId: stripped(upload._id), message: 'The original is kept without its location.'}
   }
   async convert(source: AssetDocument) {
@@ -333,7 +342,7 @@ describe('runVideoToMp4', () => {
     assert.deepEqual(after.original, file(stripped(OLD_MP4)))
   })
 
-  it('records a failure, leaves file on the upload, and does not run again for it', async () => {
+  it('records a failure after the strip on the stripped copy, deletes the upload, and does not run again', async () => {
     const converter = new FakeConverter(
       store,
       'immediate',
@@ -342,13 +351,14 @@ describe('runVideoToMp4', () => {
     const outcome = await runVideoToMp4(options({converter}))
     assert.equal(outcome.kind, 'done')
     const after = videoOf(store, 'drafts.blogPost-1')!
-    assert.deepEqual(after.file, file(MOV))
+    assert.deepEqual(after.file, file(S_MOV), 'the block keeps the copy without location data')
     assert.equal(after.original, undefined)
     assert.equal(after.conversion?.status, 'failed')
-    assert.equal(after.conversion?.sourceAssetId, MOV)
+    assert.equal(after.conversion?.sourceAssetId, S_MOV)
     assert.equal(after.conversion?.outputAssetId, undefined)
     assert.match(after.conversion?.message ?? '', /moov atom not found/)
-    assert.equal(store.get(MOV)?.[LEASE_FIELD], undefined, 'lease released')
+    assert.equal(store.get(MOV), undefined, 'the unstripped upload is deleted although the conversion failed')
+    assert.ok(store.get(S_MOV))
     const failureWrites = store.patches.filter(
       (p) => p.id === 'drafts.blogPost-1' && JSON.stringify(p.ops).includes('"failed"'),
     )
@@ -357,6 +367,60 @@ describe('runVideoToMp4', () => {
     const again = await runVideoToMp4(options({converter, runId: 'run-b'}))
     assert.equal(again.kind, 'nothing-to-do')
     assert.equal(converter.calls.length, 1)
+  })
+
+  it('records a failure to strip on the upload itself (no copy exists) and keeps it', async () => {
+    const converter = new FakeConverter(
+      store,
+      'immediate',
+      undefined,
+      new ConversionFailure('The location and personal metadata could not be removed from the original: not a video'),
+    )
+    await runVideoToMp4(options({converter}))
+    const after = videoOf(store, 'drafts.blogPost-1')!
+    assert.deepEqual(after.file, file(MOV))
+    assert.equal(after.conversion?.status, 'failed')
+    assert.equal(after.conversion?.sourceAssetId, MOV)
+    assert.ok(store.get(MOV), 'nothing replaces it')
+    assert.deepEqual(converter.calls, [])
+  })
+
+  it('waits for the upload sweep that is stripping the same upload and converts its copy', async () => {
+    const mov = store.get(MOV)!
+    store.put({...mov, [PRIVACY_FIELD]: {status: 'processing', version: VIDEO_STRIP_VERSION, holder: 'upload-sweep', updatedAt: new Date().toISOString()}})
+    const converter = new FakeConverter(store)
+    let waits = 0
+    await runVideoToMp4(
+      options({
+        converter,
+        sleep: async () => {
+          waits += 1
+          if (waits === 2) {
+            // The sweep finishes: its copy exists and the upload is marked replaced.
+            store.put(strippedAsset(MOV))
+            store.put({...store.get(MOV)!, [PRIVACY_FIELD]: {status: 'replaced', version: VIDEO_STRIP_VERSION, replacementAssetId: S_MOV}})
+          }
+        },
+      }),
+    )
+    assert.deepEqual(converter.stripCalls, [], 'not stripped twice')
+    assert.deepEqual(converter.calls, [S_MOV])
+    assert.equal(videoOf(store, 'drafts.blogPost-1')?.conversion?.status, 'ready')
+    assert.equal(store.get(MOV), undefined)
+  })
+
+  it('keeps an upload without personal metadata as it is and converts it', async () => {
+    const converter = new FakeConverter(store)
+    converter.cleanUploads.add(MOV)
+    await runVideoToMp4(options({converter}))
+    const after = videoOf(store, 'drafts.blogPost-1')!
+    assert.equal(after.conversion?.status, 'ready')
+    assert.deepEqual(converter.calls, [MOV])
+    assert.deepEqual(after.original, file(MOV), 'the upload itself is the original')
+    assert.equal(after.conversion?.sourceAssetId, MOV)
+    assert.equal(after.conversion?.originalStripped, true)
+    assert.equal((store.get(MOV)?.[PRIVACY_FIELD] as {status?: string} | undefined)?.status, 'clean')
+    assert.ok(store.get(MOV), 'a clean upload is not deleted')
   })
 
   it('records an unexpected error as pending (retried later), then rethrows it for the logs', async () => {
@@ -377,9 +441,10 @@ describe('runVideoToMp4', () => {
     const outcome = await runVideoToMp4(options({converter: broken}))
     assert.equal(outcome.kind, 'done')
     const after = videoOf(store, 'drafts.blogPost-1')!
-    assert.deepEqual(after.file, file(MOV))
+    assert.deepEqual(after.file, file(S_MOV), 'the block moves to the copy; the retry converts it')
     assert.equal(after.conversion?.status, 'pending')
-    assert.equal(after.conversion?.sourceAssetId, MOV)
+    assert.equal(after.conversion?.sourceAssetId, S_MOV)
+    assert.equal(store.get(MOV), undefined, 'the unstripped upload is deleted')
     assert.match(
       after.conversion?.message ?? '',
       /Could not convert yet: the converter is not set up/,
@@ -734,19 +799,42 @@ describe('runVideoToMp4', () => {
     assert.ok(store.get(S_MOV), 'the stripped copy is kept')
   })
 
-  it('keeps the unstripped upload while another document (a release version) still references it', async () => {
-    store.put({
-      _id: 'versions.r1.blogPost-1',
-      _type: 'blogPost',
-      body: [{_type: 'video', _key: 'v', file: file(MOV)}],
-    })
+  it('delivers to a version in an active release and deletes the upload', async () => {
+    store.put({_id: '_.releases.r1', _type: 'system.release', state: 'active'})
+    store.put({_id: 'versions.r1.blogPost-1', _type: 'blogPost', body: [{_type: 'video', _key: 'v', file: file(MOV)}]})
     const converter = new FakeConverter(store)
     await runVideoToMp4(options({converter}))
     assert.equal(videoOf(store, 'drafts.blogPost-1')?.conversion?.status, 'ready')
+    assert.equal(videoOf(store, 'versions.r1.blogPost-1')?.conversion?.status, 'ready')
+    assert.deepEqual(videoOf(store, 'versions.r1.blogPost-1')?.original, file(S_MOV))
+    assert.equal(store.get(MOV), undefined)
+    assert.deepEqual(converter.calls, [S_MOV], 'one conversion for both')
+  })
+
+  it('converts a version in an active release from its own event', async () => {
+    store.delete('drafts.blogPost-1')
+    store.put({_id: '_.releases.r1', _type: 'system.release', state: 'active'})
+    store.put({_id: 'versions.r1.blogPost-1', _type: 'blogPost', body: [{_type: 'video', _key: 'v', file: file(MOV)}]})
+    const converter = new FakeConverter(store)
+    await runVideoToMp4(options({converter, documentId: 'versions.r1.blogPost-1'}))
+    assert.equal(videoOf(store, 'versions.r1.blogPost-1')?.conversion?.status, 'ready')
+    assert.equal(store.get(MOV), undefined)
+  })
+
+  it('leaves a version in a locked release alone and keeps the upload it references', async () => {
+    store.put({_id: '_.releases.r1', _type: 'system.release', state: 'scheduled'})
+    store.put({_id: 'versions.r1.blogPost-1', _type: 'blogPost', body: [{_type: 'video', _key: 'v', file: file(MOV)}]})
+    const converter = new FakeConverter(store)
+    const locked = await runVideoToMp4(options({converter, documentId: 'versions.r1.blogPost-1'}))
+    assert.equal(locked.kind, 'nothing-to-do')
+    assert.deepEqual(converter.calls, [])
+    await runVideoToMp4(options({converter, runId: 'run-b'}))
+    assert.equal(videoOf(store, 'drafts.blogPost-1')?.conversion?.status, 'ready')
+    assert.equal(videoOf(store, 'versions.r1.blogPost-1')?.conversion, undefined, 'the locked version is not written')
     assert.ok(store.get(MOV), 'not deleted while referenced')
     assert.ok(logs.some((line) => line.includes('still referenced by versions.r1.blogPost-1')))
-    // Release versions are not converted by the Function (isVersionId); once the version no longer
-    // uses the upload, the next run for a block with it deletes it.
+    // Once the version no longer uses the upload (the release was published or archived), the next
+    // run for a block with it deletes it.
     store.delete('versions.r1.blogPost-1')
     store.put({_id: 'drafts.project-2', _type: 'project', body: [{_type: 'video', _key: 'p', file: file(MOV)}]})
     await runVideoToMp4(options({converter, documentId: 'drafts.project-2', runId: 'run-b'}))

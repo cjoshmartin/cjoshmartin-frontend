@@ -15,9 +15,12 @@
  *    the copy `stripped`, then mark the upload `replaced` (and remove any location or EXIF Sanity
  *    extracted into its asset document).
  * 5. Point every reference to the upload in drafts, published documents and release versions at
- *    the copy (only `_ref` changes; crop, hotspot, alt, caption stay), then delete the upload once
- *    nothing references it. A reference added meanwhile is caught by deleting with a check and
- *    repeating, and in the worst case by the filter, which matches `replaced`.
+ *    the copy (only `_ref` changes, and a testimonial's `asciiArtSource` with it; crop, hotspot,
+ *    alt, caption stay), then delete the upload once nothing references it. A reference added
+ *    meanwhile is caught by deleting with a check and repeating, and in the worst case by the
+ *    filter, which matches `replaced`. A version in a release that can no longer be edited keeps
+ *    its reference; the upload stays `replaced` until the release is published (the published
+ *    document's event repoints it) or archived (the upload-privacy Function's sweep deletes it).
  * A file that cannot be stripped is marked `failed` (final for this version; the Studio warns); a
  * problem that is not the file's fault is marked `pending` and retried after RETRY_DELAY_SECONDS.
  */
@@ -27,7 +30,7 @@ import {
   assetNeedsWork,
   imageAssetIds,
   isStrippedImage,
-  referencePaths,
+  repointSet,
   STALE_PROCESSING_SECONDS,
   type ImageAssetDocument,
 } from './trigger'
@@ -48,6 +51,11 @@ export interface ImageStore {
   patchIfRevision(id: string, revision: string, ops: PatchOps): Promise<'ok' | 'conflict'>
   /** Ids of every document (drafts, published, release versions) that references the asset. */
   referencing(assetId: string): Promise<string[]>
+  /**
+   * Whether the Function may write to the document: drafts and published documents always, a
+   * release version only while its release is active (privacy/releases.ts).
+   */
+  isWritable(id: string): Promise<boolean>
   /** Deletes the asset if nothing references it. */
   deleteAssetIfUnreferenced(assetId: string): Promise<DeleteOutcome>
   /** The upload's bytes, checked against its sha1hash and size. */
@@ -110,8 +118,17 @@ function truncate(message: string): string {
 
 export const RETRY_NOTE = 'It is retried automatically on the next change to a document that uses the image, 10 minutes after this attempt or later.'
 
-export async function runImagePrivacy(options: RunOptions): Promise<RunOutcome> {
-  const {store, documentId, runId} = options
+/** What processing one image asset needs: the store, this run's id (the lease holder) and the clock. */
+export type ImageAssetProcessorOptions = Pick<RunOptions, 'store' | 'runId' | 'now' | 'log' | 'sleep'>
+
+/**
+ * Steps 1 to 5 of the top of this file for one asset, shared by this Function's document events and
+ * the upload-privacy Function's check of uploads that no document uses.
+ */
+export function createImageAssetProcessor(options: ImageAssetProcessorOptions): {
+  processAsset: (assetId: string) => Promise<{outcome: AssetOutcome; unexpected?: unknown}>
+} {
+  const {store, runId} = options
   const now = options.now ?? (() => new Date())
   const log = options.log ?? (() => undefined)
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
@@ -147,9 +164,13 @@ export async function runImagePrivacy(options: RunOptions): Promise<RunOutcome> 
   async function repointAndDelete(from: string, to: string): Promise<boolean> {
     for (let round = 1; round <= MAX_REPOINT_ROUNDS; round++) {
       for (const id of await store.referencing(from)) {
+        if (!(await store.isWritable(id))) {
+          log(`${id}: in a release that can no longer be edited; its reference to ${from} stays until the release is published or archived`)
+          continue
+        }
         const outcome = await update(id, (doc) => {
-          const paths = referencePaths(doc, from)
-          return paths.length > 0 ? {set: Object.fromEntries(paths.map((p) => [p, to]))} : null
+          const set = repointSet(doc, from, to)
+          return Object.keys(set).length > 0 ? {set} : null
         })
         if (outcome === 'patched') log(`${id}: references to ${from} now point at ${to}`)
       }
@@ -281,6 +302,16 @@ export async function runImagePrivacy(options: RunOptions): Promise<RunOutcome> 
     await markUpload(assetId, {status: 'pending', version: IMAGE_STRIP_VERSION, message, updatedAt: now().toISOString()})
     return {outcome: {assetId, kind: 'pending', message}, ...(error instanceof RetryableImageError ? {} : {unexpected: error})}
   }
+
+  return {processAsset}
+}
+
+export async function runImagePrivacy(options: RunOptions): Promise<RunOutcome> {
+  const {store, documentId, runId} = options
+  const now = options.now ?? (() => new Date())
+  const log = options.log ?? (() => undefined)
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const {processAsset} = createImageAssetProcessor(options)
 
   const doc = await store.getDocument(documentId)
   if (!doc) return {kind: 'document-missing'}

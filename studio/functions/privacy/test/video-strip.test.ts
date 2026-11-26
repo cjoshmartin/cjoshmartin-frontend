@@ -194,4 +194,7 @@ test('parseFrameMd5 reads lines with side data; parseStreamHash reads sha256 lin
   const parsed = parseFrameMd5(`${HEADER}1,      -2031,      -2031,     1024,        6, cbdc7e26b5b510ac44abfeb0db3f2189, S=1,       10, 20427fd3274ad3676ba943dd82d6eda0\n`)
   assert.equal(parsed.streams[1][0].md5, 'cbdc7e26b5b510ac44abfeb0db3f2189')
   assert.deepEqual(parseStreamHash(`0,v,SHA256=${'a'.repeat(64)}\n1,a,SHA256=${'b'.repeat(64)}\n`), HASHES)
+  // ffmpeg 9.1 writes version 2 of the format.
+  const version2 = ['#format: stream checksums', '#version: 2', '#hash: SHA256', `#extradata 0,  46, ${'c'.repeat(64)}`, '#stream#, size, hash', `0,       18055, ${'a'.repeat(64)}, S=1,       36, ${'d'.repeat(64)}`, `1,       88200, ${'b'.repeat(64)}`].join('\n')
+  assert.deepEqual(parseStreamHash(version2), HASHES)
 })

@@ -8,6 +8,7 @@ import {randomUUID} from 'node:crypto'
 import {evaluate, parse} from 'groq-js'
 
 import {PRIVACY_FIELD, VIDEO_ORIGINAL_SOURCE_NAME, VIDEO_STRIP_VERSION} from '../../privacy/constants'
+import {isWritableDocument, releaseDocumentId, releaseOfVersion} from '../../privacy/releases'
 import type {AssetDocument, ContentStore, DeleteOutcome, StoredDocument} from '../orchestrator'
 import type {PatchOps} from '../patches'
 import {
@@ -148,6 +149,12 @@ export class MemoryStore implements ContentStore {
 
   async documentsUsingFile(assetId: string): Promise<string[]> {
     return this.query<string[]>(documentsUsingFileQuery(), {assetId})
+  }
+
+  async isWritable(id: string): Promise<boolean> {
+    const release = releaseOfVersion(id)
+    const state = release === null ? null : ((this.docs.get(releaseDocumentId(release)) as {state?: string} | undefined)?.state ?? null)
+    return isWritableDocument(id, state)
   }
 
   async findConvertedAsset(sourceAssetId: string): Promise<AssetDocument | null> {

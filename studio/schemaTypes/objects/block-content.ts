@@ -9,6 +9,7 @@ import {
   INTERNAL_LINK_TYPES,
   type CodeLanguage,
 } from '../constants'
+import {FILE_LINK_ACCEPT, fileLinkProblem} from '../shared/validation'
 
 const CODE_LANGUAGE_VALUES: readonly string[] = CODE_LANGUAGES.map((language) => language.value)
 
@@ -95,9 +96,13 @@ export const blockContent = defineType({
               defineField({
                 name: 'file',
                 type: 'file',
+                description:
+                  'A PDF document. Photos and videos go in an image or video block instead, where their location and camera data is removed automatically.',
+                // Only documents: a photo or video attached here would be served exactly as uploaded,
+                // with its location (no Function strips file links).
+                options: {accept: FILE_LINK_ACCEPT},
                 // The custom rule also runs when the field is empty, so it doubles as the required check.
-                validation: (rule) =>
-                  rule.custom((value) => (value?.asset?._ref ? true : 'Upload or select a file')),
+                validation: (rule) => rule.custom((value) => fileLinkProblem(value?.asset?._ref) ?? true),
               }),
             ],
           }),

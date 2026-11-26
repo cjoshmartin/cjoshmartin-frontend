@@ -4,8 +4,8 @@ Sanity Function that converts every video uploaded in the Studio to an MP4 with 
 settings in `settings.ts` (video contract v2, `docs/sanity-migration/schema-contract.md`,
 "Videos"). The site only plays `video.file`; after conversion that is the MP4. The upload is kept
 in `video.original` (read-only, never served) as a copy without its location and personal
-metadata (`../privacy/video-strip.ts`, a stream copy), and the unstripped upload is deleted
-("Privacy" in the contract).
+metadata (`../privacy/isobmff-video.ts`, edited in place; `../privacy/video-strip.ts`, a stream
+copy, for other containers), and the unstripped upload is deleted ("Privacy" in the contract).
 
 | File | What it is |
 | --- | --- |
@@ -14,7 +14,7 @@ metadata (`../privacy/video-strip.ts`, a stream copy), and the unstripped upload
 | `orchestrator.ts` | One run: pick the block, take the per-upload lease, mark `processing`, adopt / reuse / convert, deliver the result, release. |
 | `patches.ts` | The patches the Function writes (by block `_key`) and the lease rules. |
 | `convert.ts` | Download (or range proxy), `ffmpeg -i` description, conversion, MP4 checks (including no metadata boxes besides ffmpeg's encoder tag), full decode check, frame-time check. |
-| `strip-original.ts` | The copy of the upload without location and personal metadata: download or range proxy, `stripVideo`, upload with source `video-to-mp4-original`, `privacy` stripped. |
+| `strip-original.ts` | The copy of the upload without location and personal metadata: download, `stripIsobmffInPlace` (or the `stripVideo` stream copy for other containers, also through the range proxy), upload with source `video-to-mp4-original`, `privacy` stripped, the upload marked `replaced` (or `clean`, kept as it is). Also used by the upload-privacy Function. |
 | `frames.ts` | Frame times from ffmpeg's `showinfo` filter and the check that every input frame is in the MP4 at its own time. |
 | `media-info.ts` | Parser for `ffmpeg -i` output (audio, displayed size after rotation, duration); replaces ffprobe. |
 | `mp4.ts` | Minimal MP4 reader and the output checks (H.264 High 4:2:0 8-bit, size, no rotation, AAC stereo, faststart, duration). |
@@ -29,8 +29,9 @@ metadata (`../privacy/video-strip.ts`, a stream copy), and the unstripped upload
 ## How it works
 
 1. **Trigger.** `create` and `update` of `blogPost`, `project`, `flexPage`, `testimonial` (field
-   `body`), `homePage`, `person` (`bio`) and `service` (`description`), drafts included, in
-   `production` and `staging`, when a `video` block needs work:
+   `body`), `homePage`, `person` (`bio`) and `service` (`description`), drafts and release versions
+   included (`includeAllVersions`; a version in a scheduled, published or archived release is left
+   alone), in `production` and `staging`, when a `video` block needs work:
    - `file.asset._ref` is set and differs from `conversion.outputAssetId` (the contract rule), and
    - it is not `processing` for the current file with `updatedAt` less than 20 minutes old
      (timeout + 5 min; an older mark belongs to a run that died and is retried), and
@@ -44,15 +45,21 @@ metadata (`../privacy/video-strip.ts`, a stream copy), and the unstripped upload
    once, even from different documents. A run that finds it held marks its block `processing`
    ("waiting") and stops; the holder delivers its result to every waiting block.
 4. **Private original.** Unless the file is an MP4 of this converter (adopted or swapped back as
-   below): the upload already is a stripped copy (`privacy` stripped with `VIDEO_STRIP_VERSION`;
-   use it), or an earlier stripped copy of it exists (`source: {name: "video-to-mp4-original",
-   id: <upload>}` with the current strip version; reuse it), or the upload is stripped now:
-   download to `/tmp` (sha1 checked) when it and its copy fit, else read through the range proxy;
-   `stripVideo` (stream copy, then the stream list, the metadata left, the boxes and every packet
-   checked against the upload with the same ffmpeg); upload as `<base>.<mov|mp4|mkv|webm>` with
-   that source; record `privacy` = {status: stripped, version, strippedFrom, removed, ...} on it.
-   A file that cannot be stripped fails the conversion (`failed`); a problem that is not the
-   file's fault is `pending`. The stripped copy is what is converted.
+   below): the upload already is a stripped copy or was found clean (`privacy` stripped or clean
+   with `VIDEO_STRIP_VERSION`; use it), or the upload-privacy Function is stripping it right now
+   (a fresh `processing` mark: wait up to 5 minutes for its copy), or an earlier stripped copy of
+   it exists (`source: {name: "video-to-mp4-original", id: <upload>}` with the current strip
+   version; reuse it), or the upload is stripped now: download to `/tmp` (sha1 checked), then
+   `stripIsobmffInPlace` for QuickTime/MP4 (metadata boxes, data tracks, creation times, handler
+   names and unused `mdat` bytes removed without moving a byte; checked: bytes outside the changed
+   ranges, nothing personal left, the same streams and side data, every packet with its time
+   stamps), or for other containers and refused files the `stripVideo` stream copy (through the
+   range proxy when the copy fits in `/tmp` but the upload does not fit next to it); upload with
+   that source (in place: the upload's file name and type); record `privacy` = {status: stripped,
+   version, strippedFrom, removed, ...} on it and `privacy` = {status: replaced,
+   replacementAssetId} on the upload. An upload with nothing personal is marked `clean` and is its
+   own original. A file that cannot be stripped fails the conversion (`failed`); a problem that is
+   not the file's fault is `pending`. The stripped copy is what is converted.
 5. **MP4.** In order: the file already is an MP4 made by this converter with the current settings
    (adopt it as it is); the file is an MP4 this converter made with older settings and its
    original still exists (point `file` back at the original, which the next run converts); an
@@ -69,14 +76,17 @@ metadata (`../privacy/video-strip.ts`, a stream copy), and the unstripped upload
    ready, message, sourceAssetId (the copy), outputAssetId, settingsVersion, originalStripped: true,
    stripVersion, updatedAt}`. Failed (the video itself
    cannot be converted): `conversion` = `{status: failed, message, sourceAssetId, settingsVersion,
-   updatedAt}`, `file` left on the upload. Retry (not the video's fault: the ffmpeg binary check,
-   a download, the CDN connection, an API error or any unexpected error): the same with `status:
-   pending` and a message saying it is retried. The result goes to every draft or published block
-   that still uses the upload (a draft published mid-conversion is converted in its published
-   document, without a second conversion), and again after the lease is released for blocks that
-   started waiting meanwhile. Then the unstripped upload is deleted if no document (drafts,
-   published, release versions) references it any more; otherwise the run for the block that
-   still uses it deletes it.
+   updatedAt}`; once the stripped copy exists, `file` moves to the copy (and `sourceAssetId` is the
+   copy), otherwise (the strip itself failed) it stays on the upload. Retry (not the video's fault:
+   the ffmpeg binary check, a download, the CDN connection, an API error or any unexpected error):
+   the same with `status: pending` and a message saying it is retried; `file` moves to the copy
+   when it exists, so the retry converts the copy. The result goes to every draft, published or
+   active-release block that still uses the upload (a draft published mid-conversion is converted
+   in its published document, without a second conversion), and again after the lease is released
+   for blocks that started waiting meanwhile. Then, whatever the outcome, the unstripped upload is
+   deleted if no document (drafts, published, release versions) references it any more;
+   otherwise the run for the block that still uses it, or the upload-privacy sweep once nothing
+   does, deletes it.
 7. Every write is a patch on `field[_key=="..."]` with `ifRevisionID`, re-read and retried on a
    conflict, so concurrent edits are kept and a block whose file changed meanwhile is left alone.
 

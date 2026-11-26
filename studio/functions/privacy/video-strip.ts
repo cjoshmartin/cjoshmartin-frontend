@@ -1,6 +1,24 @@
 /**
- * Video stripper used by the video-to-mp4 Function for the original it keeps: a stream copy with
- * ffmpeg (no re-encoding) that keeps every video and audio stream and nothing else. Removed: global
+ * Video stripper used by the video-to-mp4 Function (and its upload sweep) for the original it
+ * keeps.
+ *
+ * QuickTime/MP4 (ISO BMFF) files are stripped in place (stripIsobmffInPlace, with
+ * isobmff-video.ts): the metadata boxes, data tracks, creation times and unused mdat bytes are
+ * removed without moving a byte, so the container, the edit lists, the time stamps and every
+ * sample stay exactly as they were. Measured with the Function's ffmpeg 7.0.2 on the Wagtail
+ * videos, a stream copy instead rewrote the edit lists (an iPhone screen recording lost its
+ * audio's initial empty edit and the discard flag of an AAC priming packet), changed the track time
+ * scales and durations, moved repeated time stamps of macOS screen recordings and turned a Dolby
+ * Vision QuickTime file into MP4. The in-place result is checked with ffmpeg: the same streams
+ * with the same codec, picture, sound and side data (rotation, HDR, Dolby Vision), only technical
+ * stream metadata left, and every packet identical (framemd5: size, MD5, time stamps and duration;
+ * streamhash: sha256 per stream); and byte by byte: every byte outside the stripped ranges
+ * unchanged, nothing personal left (checkStrippedIsobmff).
+ *
+ * Other containers (Matroska/WebM and anything ffmpeg reads) and ISO BMFF files the in-place
+ * stripper refuses (fragmented files, unknown boxes) fall back to a stream copy with ffmpeg
+ * (stripVideo below), which rewrites the container and says so in its notes: no re-encoding. It
+ * keeps every video and audio stream and nothing else. Removed: global
  * and per-stream metadata (QuickTime keys and user data such as com.apple.quicktime.location.ISO6709,
  * ©xyz, make, model, software, creation dates), timed-metadata and other data tracks (iPhone `mebx`
  * location and Live Photo tracks, GoPro GPMF), subtitles, attachments, cover art, chapters, and the
@@ -9,7 +27,7 @@
  * instead of QuickTime when needed, the Dolby Vision configuration (ffmpeg 7.0's QuickTime muxer
  * cannot write `dvvC`).
  *
- * The result is checked with the same ffmpeg before it is used: the stream list, the metadata left
+ * The stream copy is checked with the same ffmpeg before it is used: the stream list, the metadata left
  * (only the container's own brand and handler fields), the boxes of an MP4/QuickTime file, and every
  * packet of every kept stream compared with the input (framemd5: size and MD5 of each packet, its
  * time stamps and duration; streamhash: sha256 of each stream). ffmpeg's muxer must make decode
@@ -18,8 +36,19 @@
  * stream's last packet, are allowed within MAX_TIMESTAMP_ADJUSTMENT_SECONDS and reported. No
  * network here: the input is a local path or the range proxy's 127.0.0.1 URL.
  */
+import {createHash} from 'node:crypto'
 import {open, readFile} from 'node:fs/promises'
 import path from 'node:path'
+
+import {
+  applyIsobmffPlanToFile,
+  checkStrippedIsobmff,
+  fileHandleReader,
+  planIsobmffStrip,
+  subtractRanges,
+  type ByteReader,
+  type IsobmffVideoPlan,
+} from './isobmff-video'
 
 /** ffmpeg run by the caller (the Function's verified binary, or a local one in tests). */
 export type FfmpegRunner = (args: string[]) => Promise<{code: number | null; stderr: string; killedAtDeadline: boolean}>
@@ -481,11 +510,18 @@ export function parseFrameMd5(text: string): FrameMd5 {
   return {codecs, streams}
 }
 
-/** `<index>,<type>,SHA256=<hex>` lines of ffmpeg's streamhash muxer. */
+/**
+ * The sha256 per stream from ffmpeg's streamhash muxer: `<index>,<type>,SHA256=<hex>` lines (up to
+ * ffmpeg 9.0, the Function's 7.0.2 included), or version 2 (ffmpeg 9.1: a `#hash: SHA256` header
+ * and `<index>, <size>, <hex>` lines).
+ */
 export function parseStreamHash(text: string): string[] {
   const hashes: string[] = []
-  for (const line of text.split('\n')) {
-    const match = /^(\d+),[a-z],SHA256=([0-9a-f]{64})$/.exec(line.trim())
+  const lines = text.split('\n').map((line) => line.trim())
+  const version2 = lines.includes('#hash: SHA256')
+  for (const line of lines) {
+    // Version 2 lines go on with the side data's hash (", S=1, 36, <hex>") when a stream has some.
+    const match = version2 ? /^(\d+),\s*\d+,\s*([0-9a-f]{64})(?:,|$)/.exec(line) : /^(\d+),[a-z],SHA256=([0-9a-f]{64})$/.exec(line)
     if (match) hashes[Number(match[1])] = match[2]
   }
   return hashes
@@ -680,5 +716,127 @@ export async function stripVideo(options: {
       timing: compared.timing,
       streamSha256: outputHashes,
     },
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// In-place strip of QuickTime/MP4 files.
+
+/** Stream metadata an in-place strip may leave: technical fields of the track and sample entry. */
+const IN_PLACE_STREAM_KEYS = new Set(['handler_name', 'vendor_id', 'encoder', 'language'])
+
+/** sha256 over every byte of the file outside `ranges` (sorted, merged), with the ranges' positions. */
+async function hashOutside(reader: ByteReader, ranges: [number, number][]): Promise<string> {
+  const hash = createHash('sha256')
+  const chunk = 4 * 1024 * 1024
+  for (const [start, end] of subtractRanges([[0, reader.size]], ranges)) {
+    hash.update(`${start}-${end}:`)
+    for (let at = start; at < end; at += chunk) hash.update(await reader.read(at, Math.min(chunk, end - at)))
+  }
+  return hash.digest('hex')
+}
+
+/** Problems when two framemd5/streamhash outputs are not exactly equal (no time stamp may move). */
+export function exactPacketProblems(input: FrameMd5, output: FrameMd5, inputHashes: string[], outputHashes: string[]): string[] {
+  const problems: string[] = []
+  const count = Math.max(input.streams.length, output.streams.length)
+  for (let s = 0; s < count; s++) {
+    const a = input.streams[s] ?? []
+    const b = output.streams[s] ?? []
+    const codec = input.codecs[s] ?? '?'
+    if (input.codecs[s] !== output.codecs[s]) problems.push(`stream ${s}: codec ${input.codecs[s]} became ${output.codecs[s]}`)
+    if (!inputHashes[s] || inputHashes[s] !== outputHashes[s]) problems.push(`stream ${s} (${codec}): sha256 of the stream differs`)
+    if (a.length === 0) problems.push(`stream ${s} (${codec}): no packets`)
+    if (a.length !== b.length) {
+      problems.push(`stream ${s} (${codec}): ${a.length} packets became ${b.length}`)
+      continue
+    }
+    for (let i = 0; i < a.length; i++) {
+      const p = a[i]
+      const q = b[i]
+      if (p.size !== q.size || p.md5 !== q.md5 || compare(p.dts, q.dts) !== 0 || compare(p.pts, q.pts) !== 0 || compare(p.duration, q.duration) !== 0) {
+        problems.push(`stream ${s} (${codec}): packet ${i} differs`)
+        break
+      }
+    }
+  }
+  return problems
+}
+
+/** Problems with the streams of the stripped file compared with the input's audio and video streams. */
+export function inPlaceDescriptionProblems(input: ContainerDescription, output: ContainerDescription): string[] {
+  const problems: string[] = []
+  const kept = input.streams.filter((s) => s.kind === 'video' || s.kind === 'audio')
+  if (output.streams.length !== kept.length) problems.push(`${output.streams.length} streams instead of ${kept.length}`)
+  output.streams.forEach((s, i) => {
+    const expected = kept[i]
+    if (!expected) return
+    if (s.kind !== expected.kind || s.codec !== expected.codec) problems.push(`stream ${i} is ${s.kind} ${s.codec}, expected ${expected.kind} ${expected.codec}`)
+    if (s.details.join(', ') !== expected.details.join(', ')) problems.push(`stream ${i} changed from "${expected.details.join(', ')}" to "${s.details.join(', ')}"`)
+    if (s.sideData.join('; ') !== expected.sideData.join('; ')) problems.push(`stream ${i} side data changed from "${expected.sideData.join('; ')}" to "${s.sideData.join('; ')}"`)
+    if (s.dolbyVision !== expected.dolbyVision) problems.push(`stream ${i} ${expected.dolbyVision ? 'lost' : 'gained'} its Dolby Vision configuration`)
+    const extra = s.metadataKeys.filter((k) => !IN_PLACE_STREAM_KEYS.has(k) || !expected.metadataKeys.includes(k))
+    if (extra.length > 0) problems.push(`stream ${i} still has metadata: ${extra.join(', ')}`)
+  })
+  const extra = output.globalMetadataKeys.filter((k) => !['major_brand', 'minor_version', 'compatible_brands'].includes(k))
+  if (extra.length > 0) problems.push(`file metadata left: ${extra.join(', ')}`)
+  if (output.chapters > 0) problems.push(`${output.chapters} chapters left`)
+  return problems
+}
+
+export type InPlaceStripOutcome =
+  | {kind: 'clean'; plan: IsobmffVideoPlan}
+  | {kind: 'stripped'; plan: IsobmffVideoPlan; removed: string[]; streamSha256: string[]}
+
+/**
+ * Strips the QuickTime/MP4 file at `file` in place (the caller's own copy of the upload) and
+ * verifies it (see the top of this file). Returns `clean` without touching the file when it has
+ * nothing personal. Throws IsobmffUnsupportedError (from the planner) for files the in-place
+ * stripper refuses, VideoStripError when a check fails (the file is then unusable) and
+ * VideoStripTimeoutError.
+ */
+export async function stripIsobmffInPlace(options: {ffmpeg: FfmpegRunner; file: string; workDir: string}): Promise<InPlaceStripOutcome> {
+  const {ffmpeg, file, workDir} = options
+  const handle = await open(file, 'r+')
+  try {
+    const reader = await fileHandleReader(handle)
+    const plan = await planIsobmffStrip(reader)
+    if (!plan.personal) return {kind: 'clean', plan}
+
+    const before = await describeFile(ffmpeg, file)
+    const media = before.streams.filter((s) => s.kind === 'video' || s.kind === 'audio')
+    if (media.length !== plan.keptTracks.length) {
+      throw new VideoStripError(`ffmpeg reads ${media.length} audio and video streams, the file has ${plan.keptTracks.length} audio and video tracks`)
+    }
+    const files = {
+      inFrames: path.join(workDir, 'input.framemd5'),
+      inHash: path.join(workDir, 'input.streamhash'),
+      outFrames: path.join(workDir, 'output.framemd5'),
+      outHash: path.join(workDir, 'output.streamhash'),
+    }
+    await run(ffmpeg, hashArgs(file, media.map((s) => s.index), files.inFrames, files.inHash), 'hashing the original packets')
+    const outsideBefore = await hashOutside(reader, plan.changedRanges)
+
+    await applyIsobmffPlanToFile(handle, plan)
+
+    const problems: string[] = []
+    if ((await hashOutside(reader, plan.changedRanges)) !== outsideBefore) problems.push('bytes outside the stripped ranges changed')
+    problems.push(...(await checkStrippedIsobmff(reader)))
+    problems.push(...inPlaceDescriptionProblems(before, await describeFile(ffmpeg, file)))
+    await run(ffmpeg, hashArgs(file, media.map((_, i) => i), files.outFrames, files.outHash), 'hashing the stripped packets')
+    const inputHashes = parseStreamHash(await readFile(files.inHash, 'utf8'))
+    const outputHashes = parseStreamHash(await readFile(files.outHash, 'utf8'))
+    problems.push(
+      ...exactPacketProblems(
+        parseFrameMd5(await readFile(files.inFrames, 'utf8')),
+        parseFrameMd5(await readFile(files.outFrames, 'utf8')),
+        inputHashes,
+        outputHashes,
+      ),
+    )
+    if (problems.length > 0) throw new VideoStripError(`the stripped video failed its checks: ${problems.join('; ')}`)
+    return {kind: 'stripped', plan, removed: plan.removals.filter((r) => r.personal).map((r) => r.what), streamSha256: outputHashes}
+  } finally {
+    await handle.close()
   }
 }

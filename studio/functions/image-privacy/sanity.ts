@@ -9,6 +9,7 @@ import {createHash} from 'node:crypto'
 import {ClientError, type SanityClient} from '@sanity/client'
 
 import {IMAGE_METADATA_OPTIONS, IMAGE_PRIVACY_SOURCE_NAME} from '../privacy/constants'
+import {isWritableDocument, releaseDocumentId, releaseOfVersion} from '../privacy/releases'
 import {RetryableImageError, type DeleteOutcome, type ImageStore, type PatchOps, type StoredDocument} from './orchestrator'
 import type {ImageAssetDocument} from './trigger'
 
@@ -52,6 +53,12 @@ export function createSanityImageStore(client: SanityClient, options: {deadline:
       }
     },
     referencing,
+    async isWritable(id) {
+      const release = releaseOfVersion(id)
+      if (release === null) return true
+      const state = await raw.fetch<string | null>('*[_id == $id][0].state', {id: releaseDocumentId(release)}, {tag: 'image-privacy.release'})
+      return isWritableDocument(id, state)
+    },
     async deleteAssetIfUnreferenced(assetId): Promise<DeleteOutcome> {
       const before = await referencing(assetId)
       if (before.length > 0) return {kind: 'referenced', by: before}

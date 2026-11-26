@@ -133,13 +133,19 @@ export type ConversionResult =
       deleteUpload?: string
       message: string
     }
-  /** The video cannot be converted with these settings; final until the file changes. */
-  | {status: 'failed'; fileAssetId: string; message: string}
+  /**
+   * The video cannot be converted with these settings; final until the file changes. With
+   * `strippedAssetId` (the copy without location data was made before the conversion failed),
+   * `file` moves to that copy and `deleteUpload` names the unstripped upload to delete.
+   */
+  | {status: 'failed'; fileAssetId: string; message: string; strippedAssetId?: string; deleteUpload?: string}
   /**
    * A problem that is not the video's fault (the converter's setup, a download, an API error):
-   * recorded as `pending` and retried by the first event after RETRY_DELAY_SECONDS.
+   * recorded as `pending` and retried by the first event after RETRY_DELAY_SECONDS. With
+   * `strippedAssetId`, `file` moves to the copy without location data (the retry converts it)
+   * and `deleteUpload` names the unstripped upload to delete.
    */
-  | {status: 'retry'; fileAssetId: string; message: string}
+  | {status: 'retry'; fileAssetId: string; message: string; strippedAssetId?: string; deleteUpload?: string}
   /**
    * `file` is an MP4 this converter made with older settings and its original upload still exists:
    * `file` goes back to that original (and `conversion` and `original` are removed), so the next
@@ -149,17 +155,20 @@ export type ConversionResult =
 
 /**
  * Ready: `file` becomes the MP4, `original` the upload's copy without location and personal
- * metadata (or the upload, when it already is such a copy), `conversion` ready. Failed: only
- * `conversion` changes; `file` keeps pointing at the upload.
+ * metadata (or the upload, when it already is such a copy or clean), `conversion` ready. Failed
+ * or pending: `conversion` records it for the block's file; when the copy without location data
+ * exists (`strippedAssetId`), `file` becomes that copy, so the unstripped upload can be deleted.
  */
 export function resultOps(video: LocatedVideo, result: ConversionResult, now: Date): PatchOps {
   const path = (child: string) => blockPath(video.field, video.key, child)
   if (result.status === 'failed' || result.status === 'retry') {
+    const file = result.strippedAssetId ?? result.fileAssetId
     return {
       set: {
+        ...(result.strippedAssetId ? {[path('file')]: fileReference(result.strippedAssetId)} : {}),
         [path('conversion')]: conversionValue(
           result.status === 'failed' ? 'failed' : 'pending',
-          {message: result.message, sourceAssetId: result.fileAssetId},
+          {message: result.message, sourceAssetId: file},
           now,
         ),
       },

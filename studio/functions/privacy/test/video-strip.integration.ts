@@ -9,18 +9,22 @@
  * - ffmpeg (stream copy) gives every kept stream the same sha256 (streamhash) and every packet the
  *   same size and MD5 (framemd5).
  *
- * By default stripVideo runs the ffmpeg on PATH. With FFMPEG_LINUX_ARM64 set to ffmpeg-static
- * 5.3.0's linux-arm64 binary it runs the Function's own ffmpeg 7.0.2 in Docker (see
+ * The in-place strip of QuickTime/MP4 files (stripIsobmffInPlace, the Function's main path) is
+ * checked the same way and more strictly: same size, every packet's time stamps too, the edit
+ * lists and the Dolby Vision record byte for byte, and an iOS-like draft movie header in mdat gone.
+ *
+ * By default the strippers run the ffmpeg on PATH. With FFMPEG_LINUX_ARM64 set to ffmpeg-static
+ * 5.3.0's linux-arm64 binary they run the Function's own ffmpeg 7.0.2 in Docker (see
  * ffmpeg-runner.ts). With PRIVACY_VIDEOS_DIR set (for example ~/cjoshmartin-migration/gcs/media),
  * every video in it is checked as well, and an iPhone clip with Dolby Vision must keep it.
  */
 import assert from 'node:assert/strict'
-import {existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync} from 'node:fs'
+import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync} from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {test} from 'node:test'
 
-import {stripVideo} from '../video-strip'
+import {parseStreamHash, stripIsobmffInPlace, stripVideo} from '../video-strip'
 import {ffmpegRunner, LINUX_FFMPEG} from './ffmpeg-runner'
 import {exiftoolTags, personalTags, tool} from './media-tools'
 
@@ -64,11 +68,9 @@ function playback(stream: ProbeStream) {
 /** streamhash (sha256) and framemd5 payload lines of the given streams, by the local ffmpeg. */
 function packets(file: string, streams: number[]): {hashes: string[]; payloads: string[][]} {
   const maps = streams.flatMap((i) => ['-map', `0:${i}`])
-  const hashes = tool('ffmpeg', ['-v', 'error', '-i', file, ...maps, '-c', 'copy', '-f', 'streamhash', '-hash', 'sha256', '-'])
-    .toString('utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => line.replace(/^\d+,/, ''))
+  // Only the per-stream sha256: ffmpeg 9.1's streamhash version 2 adds header lines (time bases,
+  // extradata) that a stream copy may change without changing a packet.
+  const hashes = parseStreamHash(tool('ffmpeg', ['-v', 'error', '-i', file, ...maps, '-c', 'copy', '-f', 'streamhash', '-hash', 'sha256', '-']).toString('utf8'))
   const frames = tool('ffmpeg', ['-v', 'error', '-i', file, ...maps, '-c', 'copy', '-f', 'framemd5', '-']).toString('utf8')
   const payloads: string[][] = streams.map(() => [])
   for (const line of frames.split('\n')) {
@@ -227,5 +229,105 @@ test('every video in PRIVACY_VIDEOS_DIR strips losslessly', {skip: !videos || !e
     const dolbyVision = probe(input).some((s) => s.side_data_list?.some((d) => d.side_data_type === 'DOVI configuration record'))
     const {report} = await stripAndCheck(input, {markers: [], dolbyVision: dolbyVision && Boolean(LINUX_FFMPEG)})
     if (dolbyVision) assert.equal(report.muxer, 'mp4', `${name}: written as MP4 to keep Dolby Vision`)
+  }
+})
+
+// ---------------------------------------------------------------------------------------------
+// In place.
+
+/** Every `elst` box of the file, as hex, in file order. */
+function editLists(file: string): string[] {
+  const bytes = readFileSync(file)
+  const found: string[] = []
+  const walk = (start: number, end: number) => {
+    let at = start
+    while (at + 8 <= end) {
+      let size = bytes.readUInt32BE(at)
+      const type = bytes.toString('latin1', at + 4, at + 8)
+      let header = 8
+      if (size === 1) {
+        size = Number(bytes.readBigUInt64BE(at + 8))
+        header = 16
+      } else if (size === 0) size = end - at
+      if (type === 'elst') found.push(bytes.toString('hex', at, at + size))
+      if (['moov', 'trak', 'edts'].includes(type)) walk(at + header, at + size)
+      at += size
+    }
+  }
+  walk(0, bytes.length)
+  return found
+}
+
+/** framemd5 lines of the audio and video streams (time stamps, duration, size and MD5), local ffmpeg. */
+function timedPackets(file: string): string[] {
+  return tool('ffmpeg', ['-v', 'error', '-i', file, '-map', '0:v', '-map', '0:a?', '-c', 'copy', '-f', 'framemd5', '-'])
+    .toString('utf8')
+    .split('\n')
+    .filter((line) => line !== '' && !line.startsWith('#'))
+}
+
+async function inPlaceAndCheck(input: string, options: {markers?: string[]; signatures?: string[]} = {}) {
+  const workDir = path.join(dir, `in-place-${path.basename(input).replace(/[^A-Za-z0-9.]/g, '_')}`)
+  mkdirSync(workDir, {recursive: true})
+  const file = path.join(workDir, path.basename(input))
+  copyFileSync(input, file)
+  const outcome = await stripIsobmffInPlace({ffmpeg: ffmpegRunner([workDir]), file, workDir})
+  assert.equal(outcome.kind, 'stripped', `${input}: has something to strip`)
+
+  assert.equal(readFileSync(file).length, readFileSync(input).length, `${input}: same size`)
+  assert.deepEqual(personalTags(exiftoolTags(file), options.markers ?? MARKERS), [], `${input}: no personal tags left`)
+  const text = readFileSync(file).toString('latin1')
+  for (const signature of options.signatures ?? ['Test']) assert.ok(!text.includes(signature), `${input}: no ${signature} in the file`)
+  const before = probe(input).filter((s) => s.codec_type === 'video' || s.codec_type === 'audio')
+  const after = probe(file)
+  assert.deepEqual(after.map(playback), before.map(playback), `${input}: same streams, codec, colour, rotation and side data (Dolby Vision included)`)
+  assert.deepEqual(timedPackets(file), timedPackets(input), `${input}: every packet with its time stamps, duration, size and MD5`)
+  const lists = editLists(input)
+  const listsAfter = editLists(file)
+  // Edit lists of removed data tracks go with them; those of the kept tracks are byte-identical.
+  for (const list of listsAfter) assert.ok(lists.includes(list), `${input}: edit list kept as it was`)
+  assert.equal(listsAfter.length, before.length === lists.length ? lists.length : listsAfter.length)
+  return {file, outcome}
+}
+
+test('strips QuickTime and MP4 files in place: same container, packets, edit lists and side data', async () => {
+  for (const name of ['tagged.mov', 'tagged.mp4', 'pcm.mov']) {
+    const input = path.join(dir, name)
+    assert.ok(existsSync(input), `${name} was made by the tests above`)
+    await inPlaceAndCheck(input)
+  }
+})
+
+test('strips in place an iOS-like draft movie header left in mdat, which no tool reports', async () => {
+  const bytes = readFileSync(path.join(dir, 'pcm.mov'))
+  // pcm.mov has mdat before moov, so growing mdat moves no chunk offset.
+  const mdat = bytes.indexOf('mdat') - 4
+  const size = bytes.readUInt32BE(mdat)
+  const text = Buffer.from('keys com.apple.quicktime.location.ISO6709 +12.3456+123.4567+010.000/', 'latin1')
+  const hoov = Buffer.concat([Buffer.alloc(8), text])
+  hoov.writeUInt32BE(hoov.length, 0)
+  hoov.write('hoov', 4, 'latin1')
+  const leftover = Buffer.concat([bytes.subarray(0, mdat + size), hoov, bytes.subarray(mdat + size)])
+  leftover.writeUInt32BE(size + hoov.length, mdat)
+  const input = path.join(dir, 'leftover.mov')
+  writeFileSync(input, leftover)
+  assert.deepEqual(timedPackets(input), timedPackets(path.join(dir, 'pcm.mov')), 'players ignore it')
+  const {outcome} = await inPlaceAndCheck(input, {signatures: ['+12.3456', 'com.apple.quicktime.location']})
+  assert.ok(outcome.kind === 'stripped' && outcome.removed.some((r) => r.startsWith('mdat bytes no track uses')))
+})
+
+test('leaves a file with nothing personal untouched: stripping a stripped file again changes nothing', async () => {
+  const {file} = await inPlaceAndCheck(path.join(dir, 'tagged.mp4'))
+  const before = readFileSync(file)
+  const workDir = path.join(dir, 'in-place-again')
+  mkdirSync(workDir, {recursive: true})
+  const outcome = await stripIsobmffInPlace({ffmpeg: ffmpegRunner([path.dirname(file), workDir]), file, workDir})
+  assert.equal(outcome.kind, 'clean', outcome.kind === 'clean' ? '' : outcome.removed.join('; '))
+  assert.ok(readFileSync(file).equals(before), 'not a byte changed')
+})
+
+test('every video in PRIVACY_VIDEOS_DIR strips in place losslessly', {skip: !videos || !existsSync(videos)}, async () => {
+  for (const name of readdirSync(videos!).sort()) {
+    await inPlaceAndCheck(path.join(videos!, name), {markers: [], signatures: []})
   }
 })

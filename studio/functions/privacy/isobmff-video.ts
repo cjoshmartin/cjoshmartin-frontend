@@ -24,6 +24,8 @@
  *   its samples are overwritten with zeros;
  * - the creation and modification times of the movie (`mvhd`), its tracks (`tkhd`) and their media
  *   (`mdhd`): set to zero;
+ * - the names in the kept tracks' handler boxes (free text such as "Core Media Video" or a camera's
+ *   name): set to zero, an empty name;
  * - every byte of `mdat` that no kept track's sample tables reference: set to zero. iOS leaves a
  *   draft movie header (`hoov`, with the location, make, model and creation date) and `moof`
  *   fragment headers inside `mdat`; no player reads them and exiftool and ffprobe do not see them,
@@ -455,7 +457,10 @@ function nonZero(bytes: Uint8Array): number {
   return count
 }
 
-/** Whether a metadata box holds nothing: no children, or only empty containers and a handler. */
+/**
+ * Whether a metadata box holds nothing: no children, or only a handler and empty containers (the
+ * empty `udta/meta/hdlr/ilst` ffmpeg's MP4 muxer writes, for example).
+ */
 function isEmptyMetadata(tree: BoxTree, box: Box): boolean {
   if (box.end - box.start === box.headerSize) return true
   let kids: Box[]
@@ -469,7 +474,13 @@ function isEmptyMetadata(tree: BoxTree, box: Box): boolean {
     if (error instanceof IsobmffUnsupportedError) return false
     throw error
   }
-  return kids.every((kid) => kid.type === 'hdlr' || ((kid.type === 'ilst' || kid.type === 'keys' || kid.type === 'udta') && kid.end - kid.start <= kid.headerSize + (kid.type === 'keys' ? 8 : 0)))
+  return kids.every(
+    (kid) =>
+      kid.type === 'hdlr' ||
+      // `keys` is a FullBox with an entry count: empty at 8 bytes of payload.
+      (kid.type === 'keys' && kid.end - kid.start <= kid.headerSize + 8) ||
+      ((kid.type === 'ilst' || kid.type === 'udta' || kid.type === 'meta') && isEmptyMetadata(tree, kid)),
+  )
 }
 
 const MAX_MOOV_BYTES = 512 * 1024 * 1024
@@ -539,6 +550,21 @@ export async function planIsobmffStrip(reader: ByteReader): Promise<IsobmffVideo
     return true
   }
   let timesZeroed = 0
+  /**
+   * Clears the name of a handler box (after version, flags, pre-defined/component type, handler
+   * type and 12 reserved bytes). It is free text: Apple writes "Core Media Video", cameras their
+   * own name ("GoPro AVC"); players do not read it. Zeroed in place, it reads as an empty name in
+   * both the ISO (null-terminated) and the QuickTime (length-prefixed) form.
+   */
+  const clearHandlerName = (box: Box): boolean => {
+    const from = box.start + box.headerSize + 24
+    if (from >= box.end) return false
+    if (nonZero(original.subarray(tree.local(from), tree.local(box.end))) === 0) return false
+    out.fill(0, tree.local(from), tree.local(box.end))
+    moovChanged.push([from, box.end])
+    return true
+  }
+  let handlerNames = 0
   /** Blanks a metadata box (udta/meta) at `where`. */
   const removeMetadata = (box: Box, where: string) => {
     const empty = isEmptyMetadata(tree, box)
@@ -595,6 +621,9 @@ export async function planIsobmffStrip(reader: ByteReader): Promise<IsobmffVideo
     keptSamples.push(...trackChunkRanges(tree, parts.stbl))
     if (zeroTimes(parts.tkhd)) timesZeroed++
     if (zeroTimes(parts.mdhd)) timesZeroed++
+    for (const hdlr of [parts.hdlr, ...parts.minfKids.filter((b) => b.type === 'hdlr')]) {
+      if (clearHandlerName(hdlr)) handlerNames++
+    }
     for (const [kids, allowed, path] of [
       [parts.kids, TRAK_KEPT, where],
       [parts.mdiaKids, MDIA_KEPT, `${where}/mdia`],
@@ -611,6 +640,7 @@ export async function planIsobmffStrip(reader: ByteReader): Promise<IsobmffVideo
   }
   if (keptTracks.length === 0) throw new IsobmffUnsupportedError('file: no video or audio track')
   if (timesZeroed > 0) removals.push({what: `creation and modification times (${timesZeroed} headers)`, bytes: 0, personal: true})
+  if (handlerNames > 0) removals.push({what: `handler names (${handlerNames}; e.g. the camera's or the system's media framework)`, bytes: 0, personal: true})
 
   // References from kept tracks to removed ones would dangle. A kept track's `tref` that only
   // points at removed tracks (a video track's link to its timecode track, for example) goes with

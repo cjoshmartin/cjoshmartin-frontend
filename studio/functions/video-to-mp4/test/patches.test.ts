@@ -151,6 +151,18 @@ describe('resultOps', () => {
     })
   })
 
+  it('failed or retry after the strip: file becomes the stripped copy, conversion is for the copy', () => {
+    const COPY = 'file-a111111111111111111111111111111111111111-mov'
+    const block: VideoBlock = {_type: 'video', _key: 'v', file: file(MOV), conversion: {status: 'processing', sourceAssetId: MOV}}
+    for (const status of ['failed', 'retry'] as const) {
+      const result: ConversionResult = {status, fileAssetId: MOV, message: 'x', strippedAssetId: COPY, deleteUpload: MOV}
+      const after = applyPatch({_id: 'd', _type: 'blogPost', body: [block]}, resultOps(located(block), result, NOW)) as {body: VideoBlock[]}
+      assert.deepEqual(after.body[0].file, file(COPY))
+      assert.equal(after.body[0].conversion?.status, status === 'failed' ? 'failed' : 'pending')
+      assert.equal(after.body[0].conversion?.sourceAssetId, COPY)
+    }
+  })
+
   it('ready records the settings version the result names', () => {
     const ops = resultOps(located(block), {...ready, settingsVersion: 'h264-older'}, NOW)
     const conversion = ops.set?.['body[_key=="v"].conversion'] as {settingsVersion?: string}

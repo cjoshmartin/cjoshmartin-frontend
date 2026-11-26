@@ -99,3 +99,21 @@ export function fileAssetExtension(assetRef: string): string | null {
   const match = /^file-[a-f0-9]+-([a-z0-9]+)$/i.exec(assetRef)
   return match ? match[1].toLowerCase() : null
 }
+
+/**
+ * File links accept documents only (PDF). No Function strips file assets, and file assets are
+ * served exactly as uploaded, so a photo or video attached as a file link would be public with its
+ * location. Photos and videos have their own blocks, whose Functions remove it.
+ */
+export const FILE_LINK_EXTENSIONS = ['pdf'] as const
+
+/** `options.accept` of the file link's file field. */
+export const FILE_LINK_ACCEPT = '.pdf,application/pdf'
+
+/** The validation message for a file link's asset, or null when it is a PDF. */
+export function fileLinkProblem(assetRef: string | undefined): string | null {
+  if (!assetRef) return 'Upload or select a file'
+  const extension = fileAssetExtension(assetRef)
+  if (extension && (FILE_LINK_EXTENSIONS as readonly string[]).includes(extension)) return null
+  return `Only PDF documents can be linked as files (this file is ${extension ? `a .${extension}` : 'not a file asset'}). Put photos in an image block and videos in a video block: their location and camera data is removed there.`
+}

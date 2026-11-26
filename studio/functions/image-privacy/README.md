@@ -8,7 +8,7 @@ are. Contract: `docs/sanity-migration/schema-contract.md`, "Privacy".
 | File | What it is |
 | --- | --- |
 | `trigger.ts` | Event filter (follows `asset->` to the asset's `privacy` field) and projection, the watched fields per type, the same rule in TypeScript, and the reference path finder. |
-| `orchestrator.ts` | One run: for each image that needs work, lease, download, strip, upload the copy, mark it, repoint, delete. |
+| `orchestrator.ts` | One run: for each image that needs work, lease, download, strip, upload the copy, mark it, repoint, delete. `createImageAssetProcessor` does this for one asset; the upload-privacy Function uses it for uploads no document uses. |
 | `sanity.ts` | The ImageStore on @sanity/client: raw-perspective patches with revision checks, references, guarded delete, download of the stored bytes (`?dlRaw=` with the Function's token), upload of the copy. |
 | `index.ts` | The handler. |
 | `test/` | `npm test`: the filter against the rule (groq-js), the fields against `studio/schema.json`, and the orchestrator with the real stripper on an in-memory store. |
@@ -16,7 +16,8 @@ are. Contract: `docs/sanity-migration/schema-contract.md`, "Privacy".
 ## How it works
 
 1. **Trigger.** `create` and `update` of `blogPost`, `project`, `flexPage`, `testimonial`,
-   `homePage`, `person` and `service`, drafts included, in `production` and `staging`, when an
+   `homePage`, `person` and `service`, drafts and release versions included, in `production` and
+   `staging`, when an
    image in a watched field (single images, hero media, Portable Text image blocks) references an
    asset that was uploaded since `UPLOADED_SINCE` (2026-11-26; older images belong to the
    migration's privacy step) and whose `privacy` is missing, from another strip version,
@@ -34,10 +35,13 @@ are. Contract: `docs/sanity-migration/schema-contract.md`, "Privacy".
    anything points at it, and the upload is marked `replaced` (any `metadata.location`, `exif` or
    `image` Sanity extracted is removed from it).
 5. **Repoint and delete.** Every document that references the upload (raw perspective: drafts,
-   published, release versions) gets `<path>._ref` = the copy, with a revision check; crop,
-   hotspot, alt, caption and layout are untouched. Then the upload is deleted if nothing references
-   it; a reference added meanwhile is moved in the next round (5 rounds), and after that the filter
-   matches `replaced` on that document's next event.
+   published, release versions) gets `<path>._ref` = the copy, with a revision check, and a
+   testimonial's `asciiArtSource` moves with its image (so the ASCII art is not made again from
+   the same pixels); crop, hotspot, alt, caption and layout are untouched. A version in a release
+   that can no longer be edited (scheduled, published, archived) is not written. Then the upload is
+   deleted if nothing references it; a reference added meanwhile is moved in the next round (5
+   rounds), and after that the filter matches `replaced` on that document's next event (or the
+   upload-privacy sweep deletes it once nothing uses it).
 6. **Failures.** A file the stripper cannot handle: `failed` (final for this strip version), shown
    in the Studio as a warning on the field. Download, upload and API problems: `pending`, retried by
    the first event at least 10 minutes later. An unexpected error is also thrown, so it is in the

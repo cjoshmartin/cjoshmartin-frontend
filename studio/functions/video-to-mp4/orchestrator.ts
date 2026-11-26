@@ -16,12 +16,17 @@
  *    video-strip.ts, a stream copy), unless the upload already is such a copy. Then reuse an
  *    earlier conversion of that copy with the current settings (asset `source` and
  *    CONVERTED_ASSET_SETTINGS_FIELD), or convert it and upload a new MP4.
- * 4. Deliver the result to the block and to every other draft or published block that uses the
- *    same upload (a draft published mid-conversion is converted in its published document without
- *    a second conversion), release the lease, then deliver once more to blocks that started
- *    waiting while the lease was held.
+ *    An upload with nothing personal is kept as it is (marked `clean`) and converted itself.
+ * 4. Deliver the result to the block and to every other draft, published or release-version block
+ *    that uses the same upload (a draft published mid-conversion is converted in its published
+ *    document without a second conversion), release the lease, then deliver once more to blocks
+ *    that started waiting while the lease was held. Versions in a release that can no longer be
+ *    edited (scheduled, published or archived) are left alone. Once the copy without location data
+ *    exists, every result moves the block off the upload: `ready` to the MP4 (`original` the copy),
+ *    and `failed` or `pending` to the copy itself (a retry converts the copy).
  * 5. Delete the unstripped upload once nothing references it any more (drafts, published documents
- *    and release versions), so only the copy without location data stays in the dataset.
+ *    and release versions), so only the copy without location data stays in the dataset; that
+ *    happens whatever the conversion's outcome.
  *
  * Every document write is a patch addressed by block `_key` and guarded by the document revision
  * that was read (ifRevisionID), retried after re-reading on a conflict, so a concurrent edit is
@@ -49,6 +54,7 @@ import {
   fileAssetId,
   isFailedForCurrentFile,
   isFreshProcessing,
+  isFreshTimestamp,
   needsConversion,
   nextPendingVideo,
   RETRY_NOTE,
@@ -82,6 +88,15 @@ export function isStrippedOriginal(asset: AssetDocument | null | undefined): boo
   return privacy?.status === 'stripped' && privacy.version === VIDEO_STRIP_VERSION
 }
 
+/**
+ * Whether the asset can be kept as a block's original as it is: a stripped copy, or an upload the
+ * current stripper found without location and personal metadata (`clean`).
+ */
+export function isPrivateOriginal(asset: AssetDocument | null | undefined): boolean {
+  const privacy = asset?.[PRIVACY_FIELD]
+  return privacy?.version === VIDEO_STRIP_VERSION && (privacy.status === 'stripped' || privacy.status === 'clean')
+}
+
 export type DeleteOutcome =
   | {kind: 'deleted'}
   | {kind: 'missing'}
@@ -93,8 +108,14 @@ export interface ContentStore {
   getDocument(id: string): Promise<StoredDocument | null>
   /** Applies the patch only if the document still has `revision`. */
   patchIfRevision(id: string, revision: string, ops: PatchOps): Promise<'ok' | 'conflict'>
-  /** Ids of draft and published documents with a video block whose `file` is this asset. */
+  /** Ids of draft, published and release-version documents with a video block whose `file` is this asset. */
   documentsUsingFile(assetId: string): Promise<string[]>
+  /**
+   * Whether the Function may write to the document: always for drafts and published documents;
+   * for a release version only while its release is active (a scheduled, published or archived
+   * release is locked).
+   */
+  isWritable(id: string): Promise<boolean>
   /**
    * The oldest MP4 asset with source {name: "video-to-mp4", id: sourceAssetId} made with the
    * current settings (CONVERTED_ASSET_SETTINGS_FIELD == SETTINGS_VERSION), or null.
@@ -133,12 +154,14 @@ export interface Converter {
   /** Converts the upload to MP4 and uploads it. Throws ConversionFailure for expected failures. */
   convert(source: AssetDocument): Promise<{outputAssetId: string; message: string}>
   /**
-   * Makes a copy of the upload without location and personal metadata (a stream copy, verified)
-   * and uploads it with source {name: VIDEO_ORIGINAL_SOURCE_NAME, id: upload} and `privacy`
-   * stripped. Throws ConversionFailure when the file cannot be stripped, RetryableConversionError
-   * for problems that are not the file's fault.
+   * Makes a copy of the upload without location and personal metadata (in place for QuickTime/MP4,
+   * otherwise a stream copy; verified), uploads it with source {name: VIDEO_ORIGINAL_SOURCE_NAME,
+   * id: upload} and `privacy` stripped, and marks the upload `replaced`. An upload with nothing
+   * personal is marked `clean` and returned itself (`clean: true`). Throws ConversionFailure when
+   * the file cannot be stripped, RetryableConversionError for problems that are not the file's
+   * fault.
    */
-  strip(upload: AssetDocument): Promise<{assetId: string; message: string}>
+  strip(upload: AssetDocument): Promise<{assetId: string; message: string; clean?: boolean}>
 }
 
 export interface RunOptions {
@@ -175,6 +198,9 @@ export class UnexpectedConversionError extends Error {
 
 const MAX_PATCH_ATTEMPTS = 10
 const MAX_LEASE_ROUNDS = 3
+/** How long a run waits for another run's removal of the location data (60 x 5 s). */
+const MAX_PRIVACY_WAITS = 60
+const PRIVACY_WAIT_MS = 5000
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -285,6 +311,10 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
   async function deliver(result: ConversionResult, origin: Origin): Promise<string[]> {
     const patched: string[] = []
     for (const id of await candidateDocuments(result.fileAssetId, origin)) {
+      if (!(await store.isWritable(id))) {
+        log(`${id}: in a release that can no longer be edited; left as it is`)
+        continue
+      }
       const outcome = await updateDocument(id, (doc) =>
         documentResultOps(doc, result, origin, now()),
       )
@@ -352,13 +382,29 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
       )
     }
 
+    // The original that is kept: the upload without location and personal metadata. Once it is
+    // known, every result moves the block off an unstripped upload (see resultOps).
+    let source: AssetDocument | undefined
     try {
-      // The original that is kept: the upload without location and personal metadata.
-      let source: AssetDocument
       let strippedNote: string
-      if (isStrippedOriginal(asset)) {
-        source = asset
-        strippedNote = 'The upload already is a copy without location and personal metadata.'
+      // The upload-privacy Function may be stripping this upload right now (it handles uploads no
+      // document used when it looked); its copy is used once it is done.
+      let current = asset
+      for (let waits = 0; current[PRIVACY_FIELD]?.status === 'processing' && isFreshTimestamp(current[PRIVACY_FIELD]?.updatedAt, now()); waits++) {
+        if (waits >= MAX_PRIVACY_WAITS) {
+          throw new RetryableConversionError('another run is still removing the location data from this upload')
+        }
+        await sleep(PRIVACY_WAIT_MS)
+        const again = (await store.getDocument(assetId)) as AssetDocument | null
+        if (!again) throw new RetryableConversionError(`${assetId} was deleted while its location data was being removed`)
+        current = again
+      }
+      if (isPrivateOriginal(current)) {
+        source = current
+        strippedNote =
+          current[PRIVACY_FIELD]?.status === 'clean'
+            ? 'The upload has no location or personal metadata; it is kept as it is.'
+            : 'The upload already is a copy without location and personal metadata.'
       } else {
         const earlier = await store.findStrippedOriginal(assetId)
         if (earlier) {
@@ -373,22 +419,23 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
           strippedNote = stripped.message
         }
       }
+      const kept = source
       const ready = (outputAssetId: string, message: string): ConversionResult => ({
         status: 'ready',
         fileAssetId: assetId,
-        sourceAssetId: source._id,
+        sourceAssetId: kept._id,
         outputAssetId,
-        original: source._id === assetId ? 'current-file' : {assetId: source._id},
+        original: kept._id === assetId ? 'current-file' : {assetId: kept._id},
         settingsVersion: SETTINGS_VERSION,
         originalStripped: true,
         stripVersion: VIDEO_STRIP_VERSION,
-        ...(source._id === assetId ? {} : {deleteUpload: assetId}),
+        ...(kept._id === assetId ? {} : {deleteUpload: assetId}),
         message: `${message} ${strippedNote}`,
       })
 
-      const existing = await store.findConvertedAsset(source._id)
+      const existing = await store.findConvertedAsset(kept._id)
       if (existing) {
-        log(`${source._id}: reusing the earlier conversion ${existing._id}`)
+        log(`${kept._id}: reusing the earlier conversion ${existing._id}`)
         return {
           result: ready(
             existing._id,
@@ -396,13 +443,17 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
           ),
         }
       }
-      const output = await converter.convert(source)
+      const output = await converter.convert(kept)
       return {result: ready(output.outputAssetId, output.message)}
     } catch (error) {
-      if (error instanceof ConversionFailure) return {result: failed(error.message)}
-      if (error instanceof RetryableConversionError) return {result: retry(error.message)}
+      // With a copy without location data in hand, the block moves to it and the upload goes,
+      // whatever happened to the conversion (a retry converts the copy).
+      const onCopy = <T extends ConversionResult>(result: T): T =>
+        source && source._id !== assetId ? {...result, strippedAssetId: source._id, deleteUpload: assetId} : result
+      if (error instanceof ConversionFailure) return {result: onCopy(failed(error.message))}
+      if (error instanceof RetryableConversionError) return {result: onCopy(retry(error.message))}
       return {
-        result: retry(`unexpected error while converting (${errorText(error)})`),
+        result: onCopy(retry(`unexpected error while converting (${errorText(error)})`)),
         unexpected: error,
       }
     }
@@ -415,13 +466,18 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
     else if (outcome.kind === 'missing') log(`${uploadId}: unstripped upload already deleted`)
     else {
       log(
-        `${uploadId}: unstripped upload kept for now, still referenced by ${outcome.by.join(', ')}; it is deleted by the run for those blocks`,
+        `${uploadId}: unstripped upload kept for now, still referenced by ${outcome.by.join(', ')}; ` +
+          'the run for those blocks, or the upload-privacy sweep once nothing references it, deletes it',
       )
     }
   }
 
   const doc = await store.getDocument(documentId)
   if (!doc) return {kind: 'document-missing'}
+  if (!(await store.isWritable(documentId))) {
+    log(`${documentId}: in a release that can no longer be edited; nothing is converted in it`)
+    return {kind: 'nothing-to-do'}
+  }
   const video = nextPendingVideo(doc, now())
   if (!video) return {kind: 'nothing-to-do'}
   const assetId = fileAssetId(video.block.file) as string
@@ -488,7 +544,7 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
 
     if (produced) {
       for (const id of await deliver(produced.result, origin)) patched.add(id)
-      if (produced.result.status === 'ready' && produced.result.deleteUpload) {
+      if ((produced.result.status === 'ready' || produced.result.status === 'failed' || produced.result.status === 'retry') && produced.result.deleteUpload) {
         await deleteUpload(produced.result.deleteUpload)
       }
       const outcome: RunOutcome = {

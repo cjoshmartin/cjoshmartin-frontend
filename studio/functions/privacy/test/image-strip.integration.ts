@@ -19,7 +19,7 @@ import os from 'node:os'
 import path from 'node:path'
 import {test} from 'node:test'
 
-import {stripImage} from '../image-strip'
+import {analyzeImage, stripImage} from '../image-strip'
 import {exifOrientation, exiftoolTags, ffmpegFrames, iccSha256, magickSignatures, personalTags, tool} from './media-tools'
 
 const ICC = '/System/Library/ColorSync/Profiles/Display P3.icc'
@@ -134,6 +134,15 @@ const cases: Case[] = [
     },
   },
   {
+    // An image sequence: its frames are samples of a track in mdat, described by moov.
+    name: 'animated AVIF (image sequence) with XMP',
+    file: 'anim.avif',
+    make(file) {
+      tool('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=64x48:rate=5:duration=1', '-c:v', 'libsvtav1', '-pix_fmt', 'yuv420p', '-f', 'avif', file])
+      exiftool(file, XMP_TAGS)
+    },
+  },
+  {
     name: 'LZW TIFF with EXIF, GPS, XMP, IPTC, ICC and orientation',
     file: 'scan.tif',
     make(file) {
@@ -173,6 +182,27 @@ for (const c of cases) {
     assert.equal(stripImage(result.output).output, undefined, 'the stripped file is left alone')
   })
 }
+
+test("the AVIF self-check compares the sequence's samples and movie box with the input's", () => {
+  const input = path.join(dir, 'anim.avif')
+  if (!existsSync(input)) cases.find((c) => c.file === 'anim.avif')!.make(input)
+  const original = new Uint8Array(readFileSync(input))
+  const output = stripImage(original).output!
+  const digest = (bytes: Uint8Array) => Buffer.concat(analyzeImage(bytes).imageData.map((part) => Buffer.from(part))).toString('hex')
+  assert.equal(digest(output), digest(original), 'the stripped file has the same image data')
+  // A changed sample byte (the end of mdat holds the last frame) or a changed sample table entry
+  // must show, whatever the stripper built.
+  const buffer = Buffer.from(output)
+  const mdat = buffer.indexOf('mdat')
+  const mdatEnd = mdat - 4 + buffer.readUInt32BE(mdat - 4)
+  const sample = Buffer.from(buffer)
+  sample[mdatEnd - 1] ^= 0xff
+  assert.notEqual(digest(sample), digest(original), 'a changed sample is noticed')
+  const table = Buffer.from(buffer)
+  const stsz = table.indexOf('stsz')
+  table[stsz + 16] ^= 0x01
+  assert.notEqual(digest(table), digest(original), 'a changed sample table is noticed')
+})
 
 test('leaves images without personal metadata unchanged', () => {
   const jpeg = path.join(dir, 'clean.jpg')

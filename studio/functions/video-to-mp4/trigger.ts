@@ -300,15 +300,16 @@ export function nextPendingVideo(doc: SanityDocumentLike, now: Date): LocatedVid
   return findPendingVideos(doc, now)[0]
 }
 
-/** Document ids of released versions (`versions.<release>.<id>`), which the Function leaves alone. */
+/** Document ids of release versions (`versions.<release>.<id>`). */
 export function isVersionId(id: string): boolean {
   return id.startsWith('versions.')
 }
 
 /**
- * GROQ query (perspective raw) for every draft and published document in which some video block
- * has `file` = $assetId. Used to hand one conversion's result to every block that uses the same
- * upload, e.g. the published document after the draft was published mid-conversion.
+ * GROQ query (perspective raw) for every draft, published and release-version document in which
+ * some video block has `file` = $assetId. Used to hand one conversion's result to every block that
+ * uses the same upload, e.g. the published document after the draft was published mid-conversion,
+ * or a version of the document in a release.
  */
 export function documentsUsingFileQuery(): string {
   const fieldChecks = [...typesByField()]
@@ -318,5 +319,5 @@ export function documentsUsingFileQuery(): string {
       return `(${typeCheck} && count(${field}[_type == "video" && file.asset._ref == $assetId]) > 0)`
     })
     .join(' || ')
-  return `*[_type in ${groqList(VIDEO_DOCUMENT_TYPES)} && !(_id in path("versions.**")) && (${fieldChecks})] | order(_id asc)._id`
+  return `*[_type in ${groqList(VIDEO_DOCUMENT_TYPES)} && (${fieldChecks})] | order(_id asc)._id`
 }

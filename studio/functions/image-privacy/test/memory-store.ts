@@ -7,6 +7,7 @@ import {createHash, randomUUID} from 'node:crypto'
 
 import {evaluate, parse} from 'groq-js'
 
+import {isWritableDocument, releaseDocumentId, releaseOfVersion} from '../../privacy/releases'
 import {applyPatch} from '../../video-to-mp4/test/memory-store'
 import type {DeleteOutcome, ImageStore, PatchOps, StoredDocument} from '../orchestrator'
 import {RetryableImageError} from '../orchestrator'
@@ -79,6 +80,12 @@ export class MemoryImageStore implements ImageStore {
   async referencing(assetId: string): Promise<string[]> {
     const result = await evaluate(parse('*[references($id)]._id'), {dataset: [...this.docs.values()], params: {id: assetId}})
     return (await result.get()) as string[]
+  }
+
+  async isWritable(id: string): Promise<boolean> {
+    const release = releaseOfVersion(id)
+    const state = release === null ? null : ((this.docs.get(releaseDocumentId(release)) as {state?: string} | undefined)?.state ?? null)
+    return isWritableDocument(id, state)
   }
 
   async deleteAssetIfUnreferenced(assetId: string): Promise<DeleteOutcome> {

@@ -11,6 +11,7 @@ import os from 'node:os'
 import {ClientError, type SanityClient} from '@sanity/client'
 
 import {PRIVACY_FIELD, VIDEO_ORIGINAL_SOURCE_NAME, VIDEO_STRIP_VERSION} from '../privacy/constants'
+import {isWritableDocument, releaseDocumentId, releaseOfVersion} from '../privacy/releases'
 import {convertToMp4, removeStaleWorkDirs, type ConvertOptions} from './convert'
 import {
   RetryableConversionError,
@@ -57,6 +58,12 @@ export function createSanityStore(client: SanityClient): ContentStore {
     },
     async documentsUsingFile(assetId) {
       return raw.fetch<string[]>(documentsUsingFileQuery(), {assetId}, {tag: 'video-to-mp4.users'})
+    },
+    async isWritable(id) {
+      const release = releaseOfVersion(id)
+      if (release === null) return true
+      const state = await raw.fetch<string | null>('*[_id == $id][0].state', {id: releaseDocumentId(release)}, {tag: 'video-to-mp4.release'})
+      return isWritableDocument(id, state)
     },
     async findConvertedAsset(sourceAssetId) {
       return raw.fetch<AssetDocument | null>(

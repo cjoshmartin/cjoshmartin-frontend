@@ -22,6 +22,11 @@ import {
   VIDEO_TO_MP4_FILTER,
   VIDEO_TO_MP4_PROJECTION,
 } from './functions/video-to-mp4/trigger'
+import {
+  FUNCTION_TIMEOUT_SECONDS as UPLOAD_PRIVACY_TIMEOUT_SECONDS,
+  UPLOAD_PRIVACY_FILTER,
+  UPLOAD_PRIVACY_PROJECTION,
+} from './functions/upload-privacy/trigger'
 
 export default defineBlueprint({
   projectId: 'j3vdh6ti',
@@ -52,7 +57,8 @@ export default defineBlueprint({
       displayName: 'Video to MP4',
       // Code, its own package.json (ffmpeg-static pinned) and tests live in functions/video-to-mp4.
       // It also keeps each upload's original as a copy without location and personal metadata
-      // (functions/privacy/video-strip.ts) and deletes the unstripped upload.
+      // (functions/privacy/isobmff-video.ts in place, video-strip.ts otherwise) and deletes the
+      // unstripped upload, whatever the conversion's outcome.
       // DEPLOY WITH npm_config_platform=linux npm_config_arch=arm64 in the environment, or the
       // deploy bundles this machine's ffmpeg and every conversion fails its binary check (see
       // functions/video-to-mp4/README.md).
@@ -71,6 +77,10 @@ export default defineBlueprint({
         // Drafts too, so a video is converted while the editor is still writing. A draft published
         // mid-conversion gets its result in the published document (no second conversion).
         includeDrafts: true,
+        // Release versions too (Content Releases and Scheduled Drafts), so a video added in a
+        // release is stripped and converted before the release is published. Versions in a
+        // locked (scheduled) release are left alone; see orchestrator.ts.
+        includeAllVersions: true,
       },
     }),
     defineDocumentFunction({
@@ -92,6 +102,32 @@ export default defineBlueprint({
         // Drafts too, so an image is stripped as soon as the editor adds it. A draft published
         // mid-way is fixed in the published document by the same run (or the next event).
         includeDrafts: true,
+        // Release versions too, so an image added in a release is stripped before it is published.
+        includeAllVersions: true,
+      },
+    }),
+    defineDocumentFunction({
+      name: 'upload-privacy',
+      displayName: 'Upload privacy',
+      // Code, its own package.json (ffmpeg-static pinned, like video-to-mp4) and tests live in
+      // functions/upload-privacy. Strips uploads no document uses (which the two Functions above
+      // never see) and deletes the unstripped upload; sweeps such leftovers on every upload and
+      // every deleted document. See functions/upload-privacy/trigger.ts.
+      // DEPLOY WITH npm_config_platform=linux npm_config_arch=arm64, as for video-to-mp4.
+      // Images are processed in memory and videos edited in /tmp: 2 GB holds a large image
+      // several times over. A run waits up to a minute for a new upload to be used first.
+      memory: 2,
+      timeout: UPLOAD_PRIVACY_TIMEOUT_SECONDS,
+      runtime: 'nodejs24.x',
+      event: {
+        on: ['create', 'delete'],
+        // New image and file assets in production or staging that no Function or the migration
+        // made, and the deletion of any content document (a publish, a discarded draft, an
+        // archived or published release's versions).
+        filter: UPLOAD_PRIVACY_FILTER,
+        projection: UPLOAD_PRIVACY_PROJECTION,
+        includeDrafts: true,
+        includeAllVersions: true,
       },
     }),
   ],

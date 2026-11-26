@@ -126,6 +126,23 @@ describe('planIsobmffStrip', () => {
     assert.deepEqual(plan.removals.filter((r) => r.personal), [])
   })
 
+  it('counts an empty metadata box (the udta/meta/hdlr/ilst ffmpeg writes) as nothing personal', async () => {
+    const {file} = sampleMovie()
+    const stripped = Buffer.from(applyIsobmffPlan(file, await planIsobmffStrip(bufferReader(file))))
+    const hdlr = fullBox('hdlr', u32(0), Buffer.from('mdirappl', 'latin1'), Buffer.alloc(9))
+    const emptyUdta = box('udta', fullBox('meta', hdlr, box('ilst')))
+    // The stripped movie with the empty udta appended to its moov (moov follows mdat, so no chunk
+    // offset moves).
+    const moovAt = stripped.indexOf(Buffer.from('moov')) - 4
+    const moovSize = stripped.readUInt32BE(moovAt)
+    const moov = Buffer.concat([stripped.subarray(moovAt, moovAt + moovSize), emptyUdta])
+    moov.writeUInt32BE(moov.length, 0)
+    const file2 = Buffer.concat([stripped.subarray(0, moovAt), moov, stripped.subarray(moovAt + moovSize)])
+    const plan = await planIsobmffStrip(bufferReader(file2))
+    assert.equal(plan.personal, false)
+    assert.deepEqual(plan.removals.map((r) => `${r.what}:${r.personal}`), ['moov/udta:false'])
+  })
+
   it('counts creation times alone as personal', async () => {
     const {file} = sampleMovie()
     const stripped = Buffer.from(applyIsobmffPlan(file, await planIsobmffStrip(bufferReader(file))))

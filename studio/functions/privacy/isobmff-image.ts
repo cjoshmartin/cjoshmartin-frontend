@@ -481,7 +481,6 @@ export function analyzeIsobmffImage(bytes: Uint8Array): ImageAnalysis {
   }
 
   const keptItems = [...items.values()].filter((item) => !removedIds.has(item.id)).sort((a, b) => a.id - b.id)
-  const expected = removed.length > 0 ? build() : bytes
   const imageData: Uint8Array[] = []
   if (ipco) imageData.push(ipco)
   if (pitm) imageData.push(bytes.subarray(pitm.start, pitm.end))
@@ -490,8 +489,45 @@ export function analyzeIsobmffImage(bytes: Uint8Array): ImageAnalysis {
   for (const item of keptItems) {
     imageData.push(new TextEncoder().encode(`${item.id}:${item.type}`), itemData(item))
   }
+  // The media data and the sequence's movie box, each from this file's own bytes (never from the
+  // built output, or the check would compare the output with itself): mdat with only the removed
+  // items' bytes set to zero, and moov without its metadata boxes and with its creation times
+  // zeroed. Stripping must leave exactly that, so an image sequence's samples or sample tables
+  // touched by mistake, or a removed item's bytes left behind, make the digests differ.
+  const maskedMdat = (box: Box): Uint8Array => {
+    const copy = bytes.slice(box.start, box.end)
+    for (const range of zeroRanges) {
+      const from = Math.max(range.offset, box.start)
+      const to = Math.min(range.offset + range.length, box.end)
+      for (let i = from; i < to; i++) {
+        if (!keptRanges.some((k) => i >= k.offset && i < k.offset + k.length)) copy[i - box.start] = 0
+      }
+    }
+    return copy
+  }
+  const moovParts = (start: number, end: number, parts: Uint8Array[]) => {
+    for (const box of r.boxes(start, end)) {
+      if (box.type === 'udta' || box.type === 'meta' || box.type === 'uuid' || box.type === 'free' || box.type === 'skip') continue
+      if (box.type === 'mvhd' || box.type === 'tkhd' || box.type === 'mdhd') {
+        const copy = bytes.slice(box.start, box.end)
+        const length = r.u8(box.payloadStart) === 1 ? 16 : 8
+        copy.fill(0, box.payloadStart - box.start + 4, box.payloadStart - box.start + 4 + length)
+        parts.push(copy)
+      } else if (box.type === 'trak' || box.type === 'mdia' || box.type === 'minf') {
+        parts.push(new TextEncoder().encode(`${box.type}:`))
+        moovParts(box.payloadStart, box.end, parts)
+      } else {
+        parts.push(bytes.subarray(box.start, box.end))
+      }
+    }
+  }
   for (const box of top) {
-    if (box.type === 'mdat' || box.type === 'moov') imageData.push(expected.subarray(box.start, box.end))
+    if (box.type === 'mdat') imageData.push(maskedMdat(box))
+    if (box.type === 'moov') {
+      const parts: Uint8Array[] = []
+      moovParts(box.payloadStart, box.end, parts)
+      imageData.push(concat(parts))
+    }
   }
 
   return {

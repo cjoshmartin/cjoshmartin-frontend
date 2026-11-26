@@ -119,12 +119,34 @@ describe('runImagePrivacy', () => {
   })
 
   it('points release versions and other documents at the copy too', async () => {
+    store.put({_id: '_.releases.r1', _type: 'system.release', state: 'active'})
     store.put({_id: 'versions.r1.blogPost-1', _type: 'blogPost', contentImage: imageValue(gps)})
     store.put({_id: 'person-1', _type: 'person', image: imageValue(gps, {hotspot: {x: 0.2}})})
     await runImagePrivacy(options())
     const copy = store.uploads[0].id
     assert.equal((store.get('versions.r1.blogPost-1')!.contentImage as {asset: {_ref: string}}).asset._ref, copy)
     assert.deepEqual(store.get('person-1')!.image, imageValue(copy, {hotspot: {x: 0.2}}))
+    assert.equal(store.get(gps), undefined)
+  })
+
+  it('leaves a version in a locked release alone and keeps the upload until it no longer uses it', async () => {
+    store.put({_id: '_.releases.r2', _type: 'system.release', state: 'scheduled'})
+    store.put({_id: 'versions.r2.blogPost-1', _type: 'blogPost', contentImage: imageValue(gps)})
+    await runImagePrivacy(options())
+    const copy = store.uploads[0].id
+    assert.equal((store.get('drafts.blogPost-1')!.contentImage as {asset: {_ref: string}}).asset._ref, copy)
+    assert.equal((store.get('versions.r2.blogPost-1')!.contentImage as {asset: {_ref: string}}).asset._ref, gps, 'the locked version is not written')
+    assert.equal((store.get(gps)!.privacy as {status: string}).status, 'replaced', 'kept, marked replaced')
+  })
+
+  it("moves a testimonial's asciiArtSource with its image, so the art is not made again", async () => {
+    store.put({_id: 'testimonial-1', _type: 'testimonial', image: imageValue(gps), asciiArt: '<pre>art</pre>', asciiArtSource: gps})
+    await runImagePrivacy(options())
+    const copy = store.uploads[0].id
+    const testimonial = store.get('testimonial-1')!
+    assert.equal((testimonial.image as {asset: {_ref: string}}).asset._ref, copy)
+    assert.equal(testimonial.asciiArtSource, copy)
+    assert.equal(testimonial.asciiArt, '<pre>art</pre>')
     assert.equal(store.get(gps), undefined)
   })
 

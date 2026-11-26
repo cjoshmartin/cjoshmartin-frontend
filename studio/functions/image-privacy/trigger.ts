@@ -176,6 +176,18 @@ export function imageAssetIds(doc: Record<string, unknown> & {_type: string}): s
 }
 
 /**
+ * The `set` that moves a document from asset `from` to asset `to`: every reference
+ * (referencePaths) and the testimonial's `asciiArtSource` (the asset its ASCII art was made from,
+ * a plain id). Moving both in one patch keeps the testimonial-ascii-art Function from making the
+ * art again from the same pixels. Empty when the document does not use `from`.
+ */
+export function repointSet(doc: Record<string, unknown>, from: string, to: string): Record<string, string> {
+  const set: Record<string, string> = Object.fromEntries(referencePaths(doc, from).map((p) => [p, to]))
+  if (doc.asciiArtSource === from) set.asciiArtSource = to
+  return set
+}
+
+/**
  * Patch paths of every reference to `assetId` anywhere in a document (`<path>._ref`), addressed by
  * `_key` in arrays (by index only for members without one). Crop, hotspot, alt text, caption and
  * layout are siblings of `asset` and are never touched.
