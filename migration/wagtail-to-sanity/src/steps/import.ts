@@ -48,16 +48,32 @@ export async function sanityCli(args: string[], logName: string, paths: DataPath
   return result.stdout
 }
 
-export async function validateNdjson(paths: DataPaths, dataset: Dataset, file: string): Promise<void> {
-  const out = await sanityCli(
-    ['documents', 'validate', '--workspace', dataset, '--file', file, '--level', 'error', '--yes', '--format', 'json'],
-    `validate-ndjson-${dataset}.log`,
-    paths,
-  )
-  const markers = JSON.parse(out.trim() || '[]') as {documentId: string; markers: {level: string; message: string; path: unknown[]}[]}[]
+/**
+ * Runs `sanity documents validate ... --level error --format json` and returns every error marker
+ * as "<document id> <path>: <message>". The CLI exits 1 when it finds errors; that exit is only
+ * accepted together with JSON output that lists at least one error, anything else fails.
+ */
+export async function studioValidationErrors(args: string[], logName: string, paths: DataPaths): Promise<string[]> {
+  const fullArgs = ['documents', 'validate', ...args, '--level', 'error', '--yes', '--format', 'json']
+  const result = await run('npx', ['--no-install', 'sanity', ...fullArgs], {cwd: STUDIO_DIR, timeoutMs: 30 * 60 * 1000, okExitCodes: [1]})
+  writeText(path.join(paths.reports, 'wp3', logName), `$ sanity ${fullArgs.join(' ')}\n(exit ${result.exitCode})\n\n${result.stdout}\n${result.stderr}`)
+  let markers: {documentId: string; markers: {level: string; message: string; path: unknown[]}[]}[]
+  try {
+    markers = JSON.parse(result.stdout.trim() || '[]') as typeof markers
+  } catch {
+    throw new Error(`sanity ${fullArgs.join(' ')} exited ${result.exitCode} without JSON output:\n${(result.stderr || result.stdout).slice(-4000)}`)
+  }
   const errors = markers.flatMap((doc) =>
     doc.markers.filter((m) => m.level === 'error').map((m) => `${doc.documentId} ${JSON.stringify(m.path)}: ${m.message}`),
   )
+  if (result.exitCode !== 0 && errors.length === 0) {
+    throw new Error(`sanity ${fullArgs.join(' ')} exited ${result.exitCode} but listed no errors:\n${result.stderr.slice(-4000)}`)
+  }
+  return errors
+}
+
+export async function validateNdjson(paths: DataPaths, dataset: Dataset, file: string): Promise<void> {
+  const errors = await studioValidationErrors(['--workspace', dataset, '--file', file], `validate-ndjson-${dataset}.log`, paths)
   if (errors.length) throw new Error(`The NDJSON fails Studio validation:\n- ${errors.join('\n- ')}`)
 }
 

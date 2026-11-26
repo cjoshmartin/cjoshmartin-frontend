@@ -31,16 +31,18 @@ export function readJson<T>(filePath: string): T {
 export interface RunResult {
   stdout: string
   stderr: string
+  exitCode: number
 }
 
 /**
- * Runs a command without a shell and fails with its output when it exits non-zero.
+ * Runs a command without a shell and fails with its output when it exits non-zero, unless the
+ * exit code is one of `okExitCodes` (for tools that report findings with an exit code).
  * `secretValues` are masked in any error message, in case a tool echoes them.
  */
 export function run(
   command: string,
   args: string[],
-  options: {cwd?: string; env?: NodeJS.ProcessEnv; secretValues?: string[]; timeoutMs?: number} = {},
+  options: {cwd?: string; env?: NodeJS.ProcessEnv; secretValues?: string[]; timeoutMs?: number; okExitCodes?: number[]} = {},
 ): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     execFile(
@@ -53,6 +55,10 @@ export function run(
         timeout: options.timeoutMs ?? 0,
       },
       (error, stdout, stderr) => {
+        if (error && typeof error.code === 'number' && !error.killed && (options.okExitCodes ?? []).includes(error.code)) {
+          resolve({stdout: String(stdout), stderr: String(stderr), exitCode: error.code})
+          return
+        }
         if (error) {
           const mask = (text: string) =>
             (options.secretValues ?? []).reduce(
@@ -67,7 +73,7 @@ export function run(
           )
           return
         }
-        resolve({stdout: String(stdout), stderr: String(stderr)})
+        resolve({stdout: String(stdout), stderr: String(stderr), exitCode: 0})
       },
     )
   })

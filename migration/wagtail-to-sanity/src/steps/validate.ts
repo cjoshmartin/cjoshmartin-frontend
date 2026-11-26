@@ -68,7 +68,7 @@ import {liveAsciiArt} from './ascii'
 import type {AssetMap} from './assets'
 import {readMp4Map} from './convert'
 import type {Inventory} from './extract'
-import {sanityCli} from './import'
+import {studioValidationErrors} from './import'
 import {ndjsonPath, readNdjson} from './transform'
 import {originalMimeType, readVideoAssetMap, videoAssetMapPath} from './videos'
 
@@ -869,11 +869,7 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
   // --- studio validation ----------------------------------------------------------------
   {
     const check = new Check('studioValidation')
-    const out = await sanityCli(['documents', 'validate', '--workspace', dataset, '--level', 'error', '--yes', '--format', 'json'], `validate-dataset-${dataset}.log`, paths)
-    const markers = JSON.parse(out.trim() || '[]') as {documentId: string; markers: {level: string; message: string; path: unknown[]}[]}[]
-    for (const doc of markers) {
-      for (const m of doc.markers) if (m.level === 'error') check.fail(`${doc.documentId} ${JSON.stringify(m.path)}: ${m.message}`)
-    }
+    for (const error of await studioValidationErrors(['--workspace', dataset], `validate-dataset-${dataset}.log`, paths)) check.fail(error)
     check.summary = `sanity documents validate --workspace ${dataset} --level error: ${check.failures.length} errors`
     checks.push(check)
   }
