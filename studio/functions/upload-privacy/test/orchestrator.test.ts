@@ -112,6 +112,71 @@ describe('a new upload', () => {
     assert.ok(POLL_SECONDS > 0)
   })
 
+  it('seen in use once stays in use, even when the next reference query misses the draft (recreate fix round 1, finding 4)', async () => {
+    // T1 of the recreate verification: the draft was written 0.5 s after the upload; one query saw
+    // it and ended the wait, the next one a moment later did not, and the upload was stripped here.
+    const png = store.putImage(TINY_JPEG, {_createdAt: new Date(clock).toISOString()})
+    store.put({_id: 'drafts.testimonial-1', _type: 'testimonial', image: imageRef(png)})
+    const real = store.referencing.bind(store)
+    let queries = 0
+    store.referencing = async (id: string) => {
+      queries += 1
+      return queries === 1 ? real(id) : []
+    }
+    const outcome = await runUploadPrivacy(options(created(png)))
+    assert.deepEqual(outcome.outcomes, [{assetId: png, kind: 'in-use'}])
+    assert.deepEqual(outcome.wait, {kind: 'referenced', seconds: 0, by: 1, recheck: 0})
+    assert.equal(store.get(png)![PRIVACY_FIELD], undefined, 'not taken: left to the content Functions')
+    assert.deepEqual(store.uploads, [])
+    assert.ok(logs.some((line) => line.includes('the query index lagged')), 'the disagreement is logged')
+  })
+
+  it('not readable yet when the run starts is waited for, its extracted location removed once readable', async () => {
+    const gps = store.putImage(jpegWithGps(), {_createdAt: new Date(clock).toISOString(), metadata: {dimensions: {width: 8, height: 8}, location: {lat: 1, lng: 2}}})
+    const real = store.getDocument.bind(store)
+    let reads = 0
+    store.getDocument = async (id: string) => {
+      if (id === gps && ++reads <= 2) return null
+      return real(id)
+    }
+    const warnings: string[] = []
+    let polls = 0
+    const outcome = await runUploadPrivacy(
+      options(created(gps), {
+        warn: (m) => warnings.push(m),
+        sleep: async (ms) => {
+          clock += ms
+          polls += 1
+          store.put({_id: 'drafts.blogPost-1', _type: 'blogPost', contentImage: imageRef(gps)})
+        },
+      }),
+    )
+    assert.equal(polls, 1, 'one poll, not handled as unused at once')
+    assert.deepEqual(outcome.outcomes, [{assetId: gps, kind: 'in-use'}])
+    assert.equal(outcome.extractedRemoved, true)
+    assert.equal((store.get(gps)!.metadata as Record<string, unknown>).location, undefined, 'the extracted location went once readable')
+    assert.equal(warnings.length, 1)
+    assert.match(warnings[0], /History API of a public dataset serves it without a token/)
+    assert.doesNotMatch(warnings[0], /lat|lng|\d+\.\d+,/, 'the warning names no coordinates')
+  })
+
+  it('deleted during the wait is not handled; never readable waits the grace period', async () => {
+    const gone = store.putImage(TINY_JPEG, {_createdAt: new Date(clock).toISOString()})
+    const outcome = await runUploadPrivacy(options(created(gone), {sleep: async (ms) => {
+      clock += ms
+      store.delete(gone)
+    }}))
+    assert.equal(outcome.wait?.kind, 'deleted')
+    assert.deepEqual(outcome.outcomes, [{assetId: gone, kind: 'missing'}])
+
+    const start = clock
+    const never = `image-${sha1('never')}-8x8-jpg`
+    const late = await runUploadPrivacy(options(created(never)))
+    assert.equal(late.wait?.kind, 'never-readable')
+    assert.ok(clock - start >= GRACE_SECONDS * 1000)
+    assert.deepEqual(late.outcomes, [{assetId: never, kind: 'missing'}])
+  })
+
   it('without personal metadata is marked clean and kept', async () => {
     const clean = store.putImage(TINY_JPEG, {_createdAt: new Date(clock).toISOString()})
     await runUploadPrivacy(options(created(clean)))

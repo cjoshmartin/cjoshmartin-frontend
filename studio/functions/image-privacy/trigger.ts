@@ -39,6 +39,13 @@ export const FUNCTION_TIMEOUT_SECONDS = 300
  * Images uploaded at or after this time are checked by the Function. Every image of the Wagtail
  * migration was uploaded before it (2026-11-25); those are handled by the migration's privacy step
  * (migration/wagtail-to-sanity, `privacy`).
+ *
+ * Since the datasets were recreated from exports (2026-11-26), every asset's `_createdAt` is its
+ * import time: the asset service sets it at the upload, and it cannot be patched. So this date no
+ * longer tells the migration's images from new ones. A `privacy` mark with the current version
+ * does: the migration's copies are `stripped`, and its other images were checked with this
+ * Function's stripper and marked `clean` (`npm run recreate -- mark-unchecked-images`; recreate fix
+ * round 1, finding 2), so the filter matches none of them.
  */
 export const UPLOADED_SINCE = '2026-11-26T00:00:00Z'
 

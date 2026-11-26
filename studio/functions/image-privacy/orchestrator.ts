@@ -125,6 +125,21 @@ function truncate(message: string): string {
 
 export const RETRY_NOTE = 'It is retried automatically on the next change to a document that uses the image, 10 minutes after this attempt or later.'
 
+/**
+ * The `privacy` of an image the stripper found nothing personal in (`result.output` absent): the
+ * mark this Function sets, and the one migration/wagtail-to-sanity's `recreate --
+ * mark-unchecked-images` sets on images checked the same way (recreate fix round 1, finding 2).
+ */
+export function cleanPrivacy(result: Pick<ImageStripResult, 'removed'>, now: Date): AssetPrivacy {
+  return {
+    status: 'clean',
+    version: IMAGE_STRIP_VERSION,
+    removed: [],
+    message: result.removed.length > 0 ? truncate(`Only technical metadata: ${result.removed.map((r) => r.what).join('; ')}`) : '',
+    updatedAt: now.toISOString(),
+  }
+}
+
 /** What processing one image asset needs: the store, this run's id (the lease holder) and the clock. */
 export type ImageAssetProcessorOptions = Pick<RunOptions, 'store' | 'runId' | 'now' | 'log' | 'sleep' | 'uploadDigest'>
 
@@ -247,13 +262,7 @@ export function createImageAssetProcessor(options: ImageAssetProcessorOptions): 
     }
 
     if (!result.output) {
-      await markUpload(assetId, {
-        status: 'clean',
-        version: IMAGE_STRIP_VERSION,
-        removed: [],
-        message: result.removed.length > 0 ? truncate(`Only technical metadata: ${result.removed.map((r) => r.what).join('; ')}`) : '',
-        updatedAt: now().toISOString(),
-      })
+      await markUpload(assetId, cleanPrivacy(result, now()))
       return {outcome: {assetId, kind: 'clean'}}
     }
 

@@ -31,6 +31,7 @@ export const handler = documentEventHandler<UploadEventData>(async ({context, ev
   const startedAt = Date.now()
   const runId = randomUUID()
   const log = (message: string) => console.log(`[${runId.slice(0, 8)}] ${message}`)
+  const warn = (message: string) => console.warn(`[${runId.slice(0, 8)}] ${message}`)
   const client = createClient({...context.clientOptions, apiVersion: API_VERSION, useCdn: false})
   const deadline = startedAt + (FUNCTION_TIMEOUT_SECONDS - DEADLINE_MARGIN_SECONDS) * 1000
   const store = createSanityUploadStore(client, {deadline})
@@ -52,6 +53,7 @@ export const handler = documentEventHandler<UploadEventData>(async ({context, ev
     runId,
     deadline,
     log,
+    warn,
     processImage: processAsset,
     async stripVideo(upload) {
       try {

@@ -144,3 +144,26 @@ export function prefix(id: string): string {
 export function assetIdsInText(text: string): Set<string> {
   return new Set([...text.matchAll(ASSET_ID)].map((m) => m[0].toLowerCase()))
 }
+
+/**
+ * Checks history-check's `--created-after` time against the History API baseline taken before the
+ * delete, and returns it. It must be the time scripts/recreate-dataset.sh printed before
+ * `datasets create`: the create itself writes the new dataset's `_.groups.*` and
+ * `_.retention.*` documents, so the import start (after the create) makes those look like
+ * history from before the recreate (recreate fix round 1, finding 3). A time that is not after
+ * every transaction the baseline recorded would let old history pass, so it is refused.
+ */
+export function checkCreatedAfter(createdAfter: string, baseline: {current: {transactions: {timestamp: string}[]}[]; deleted: {transactions: {timestamp: string}[]}[]}): string {
+  const at = Date.parse(createdAfter)
+  if (Number.isNaN(at) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(createdAfter)) {
+    throw new Error(`--created-after must be an ISO time in UTC (YYYY-MM-DDTHH:MM:SSZ), got ${JSON.stringify(createdAfter)}`)
+  }
+  let latest: string | null = null
+  for (const doc of [...baseline.current, ...baseline.deleted]) {
+    for (const tx of doc.transactions) if (latest === null || Date.parse(tx.timestamp) > Date.parse(latest)) latest = tx.timestamp
+  }
+  if (latest !== null && at <= Date.parse(latest)) {
+    throw new Error(`--created-after ${createdAfter} is not after the old dataset's last transaction in the baseline (${latest}); pass the time scripts/recreate-dataset.sh printed before \`datasets create\``)
+  }
+  return createdAfter
+}

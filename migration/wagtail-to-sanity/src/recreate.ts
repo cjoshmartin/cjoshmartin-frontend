@@ -32,13 +32,23 @@
  *       ones the export does not keep, such as `mimeType`). Identity fields (`_id`, `sha1hash`,
  *       `size`, `path`, `url`, `assetId`, `extension`) must already be equal; `uploadId` belongs
  *       to the new blob; `_createdAt` cannot be set on an existing document and is counted.
+ *   npm run recreate -- mark-unchecked-images --dataset <ds> --out <file> [--dry-run] [--confirm-production]
+ *       After the import: every asset's `_createdAt` is the import time, so the image-privacy
+ *       Function's date filter (UPLOADED_SINCE) no longer leaves the migration's images out. Each
+ *       image without a `privacy` mark is checked as the Function would check it (its stripper on
+ *       the stored bytes, size and sha1 checked) and with the privacy step's exiftool scan, and
+ *       marked `clean` exactly as the Function marks it when neither finds anything personal. An
+ *       image with anything personal is left unmarked and reported. Afterwards the Function's
+ *       filter must match no document (recreate fix round 1, finding 2).
  *   npm run recreate -- compare --dataset <ds> --snapshot <file> --out <file>
  *       Every document equals the snapshot, ignoring `_rev`, `_createdAt`, `_updatedAt` (and an
  *       asset's `uploadId`); `_createdAt` differences are counted separately.
- *   npm run recreate -- history-check --dataset <ds> --baseline <file> --import-start <iso> --out <file>
+ *   npm run recreate -- history-check --dataset <ds> --baseline <file> --created-after <iso> --out <file>
  *       After the import: the History API knows none of the deleted ids (with a token or
  *       anonymously, at every time and revision the baseline read), and every current document's
- *       history starts at the import.
+ *       history starts at the dataset's creation. `--created-after` is the time
+ *       scripts/recreate-dataset.sh prints before `datasets create` (the create writes the
+ *       system documents, so the import start is too late; recreate fix round 1, finding 3).
  *
  * Secrets come from ~/cjoshmartin-migration/secrets.env (SANITY_READ_TOKEN for reads,
  * SANITY_WRITE_TOKEN for restore-assets); they are never printed. Snapshots, baselines and
@@ -47,11 +57,16 @@
  * uses counts and 8-hex prefixes only.
  */
 import {createHash} from 'node:crypto'
-import {existsSync, readdirSync, readFileSync, statSync} from 'node:fs'
+import {existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync} from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 
 import {createClient, type SanityClient} from '@sanity/client'
 
+import {cleanPrivacy} from '../../../studio/functions/image-privacy/orchestrator'
+import {IMAGE_PRIVACY_FILTER} from '../../../studio/functions/image-privacy/trigger'
+import {PRIVACY_FIELD} from '../../../studio/functions/privacy/constants'
+import {ImageStripError, stripImage as stripImageBytes} from '../../../studio/functions/privacy/image-strip'
 import {API_VERSION, dataPaths, DATASETS, PROJECT_ID, type Dataset} from './config'
 import {danglingAssetPointers} from './privacy/pointers'
 import {scanLocalFile} from './privacy/scan'
@@ -62,6 +77,7 @@ import {
   ASSET_UNRESTORABLE_FIELDS,
   ASSET_UPLOAD_FIELDS,
   assetIdsInText,
+  checkCreatedAfter,
   differingFields,
   EXPORT_ASSET_EXCLUDED,
   exportFileName,
@@ -332,9 +348,10 @@ async function historyBaseline(args: Args): Promise<number> {
 export interface HistoryCheck {
   dataset: string
   checkedAt: string
-  importStart: string
+  /** Time before `datasets create` (scripts/recreate-dataset.sh prints it). */
+  createdAfter: string
   deleted: {ids: number; withTransactions: number; anonymousProbes: number; anonymousContent: number; failures: string[]}
-  current: {ids: number; checked: number; transactionsBeforeImport: number; earliest: string | null; anonymousProbes: number; anonymousContent: number; failures: string[]}
+  current: {ids: number; checked: number; transactionsBeforeCreation: number; earliest: string | null; anonymousProbes: number; anonymousContent: number; failures: string[]}
   pass: boolean
 }
 
@@ -342,8 +359,12 @@ async function historyCheck(args: Args): Promise<number> {
   const dataset = datasetFlag(args)
   const baseline = JSON.parse(readFileSync(flag(args, 'baseline'), 'utf8')) as HistoryBaseline
   if (baseline.dataset !== dataset) throw new Error('the baseline is of another dataset')
-  const importStart = flag(args, 'import-start')
-  if (Number.isNaN(Date.parse(importStart))) throw new Error('--import-start must be an ISO time')
+  if (args.flags.has('import-start')) {
+    throw new Error(
+      '--import-start was replaced by --created-after: the time scripts/recreate-dataset.sh prints before `datasets create` (the create writes the new dataset\'s system documents, so the import start is too late)',
+    )
+  }
+  const createdAfter = checkCreatedAfter(flag(args, 'created-after'), baseline)
   const out = flag(args, 'out')
   const bearer = token('SANITY_READ_TOKEN')
 
@@ -359,7 +380,7 @@ async function historyCheck(args: Args): Promise<number> {
       deletedFailures.push(`${prefix(target.id)}: ${txs.length} transactions`)
     }
     // Every time and revision the baseline read, plus the fixed times.
-    for (const probe of probesOf({transactions: target.transactions, times: [...target.times, importStart]})) {
+    for (const probe of probesOf({transactions: target.transactions, times: [...target.times, createdAfter]})) {
       const {read} = await anonymousRead(dataset, target.id, probe)
       deletedProbes++
       if (read === 'content') {
@@ -369,10 +390,10 @@ async function historyCheck(args: Args): Promise<number> {
     }
   })
 
-  // Every current document: no transaction before the import, and no anonymous read at an old
-  // time or revision (the baseline's) or just before the import.
+  // Every current document: no transaction before the dataset's creation, and no anonymous read
+  // at an old time or revision (the baseline's) or just before the creation.
   const live = await fetchAll(client(dataset, 'SANITY_READ_TOKEN'))
-  const before = new Date(Date.parse(importStart) - 1000).toISOString()
+  const before = new Date(Date.parse(createdAfter) - 1000).toISOString()
   const oldById = new Map(baseline.current.map((c) => [c.id, c.transactions]))
   const currentFailures: string[] = []
   let txBefore = 0
@@ -383,7 +404,7 @@ async function historyCheck(args: Args): Promise<number> {
     const txs = await transactions(dataset, doc._id, bearer)
     for (const tx of txs) {
       if (earliest === null || tx.timestamp < earliest) earliest = tx.timestamp
-      if (Date.parse(tx.timestamp) < Date.parse(importStart)) {
+      if (Date.parse(tx.timestamp) < Date.parse(createdAfter)) {
         txBefore++
         currentFailures.push(`${prefix(doc._id)}: transaction at ${tx.timestamp}`)
       }
@@ -402,14 +423,14 @@ async function historyCheck(args: Args): Promise<number> {
   const result: HistoryCheck = {
     dataset,
     checkedAt: new Date().toISOString(),
-    importStart,
+    createdAfter,
     deleted: {ids: baseline.deleted.length, withTransactions: deletedWithTx, anonymousProbes: deletedProbes, anonymousContent: deletedContent, failures: deletedFailures},
-    current: {ids: live.length, checked: live.length, transactionsBeforeImport: txBefore, earliest, anonymousProbes: currentProbes, anonymousContent: currentContent, failures: currentFailures},
+    current: {ids: live.length, checked: live.length, transactionsBeforeCreation: txBefore, earliest, anonymousProbes: currentProbes, anonymousContent: currentContent, failures: currentFailures},
     pass: deletedFailures.length === 0 && currentFailures.length === 0,
   }
   writeJson(out, result)
   log(`  deleted ids: ${result.deleted.ids}; with transactions ${deletedWithTx}; anonymous probes ${deletedProbes}, with content ${deletedContent}`)
-  log(`  current documents: ${live.length}; transactions before the import ${txBefore}; earliest ${earliest ?? 'none'}; anonymous probes ${currentProbes}, with content ${currentContent}`)
+  log(`  current documents: ${live.length}; transactions before the creation (${createdAfter}) ${txBefore}; earliest ${earliest ?? 'none'}; anonymous probes ${currentProbes}, with content ${currentContent}`)
   for (const failure of [...deletedFailures, ...currentFailures].slice(0, 20)) log(`  FAIL ${failure}`)
   log(`history-check ${dataset}: ${result.pass ? 'PASS' : 'FAIL'}`)
   return result.pass ? 0 : 1
@@ -684,6 +705,126 @@ async function compare(args: Args): Promise<number> {
 }
 
 // ---------------------------------------------------------------------------------------------
+// mark-unchecked-images
+
+interface UncheckedImage {
+  _id: string
+  _rev: string
+  url?: string
+  size?: number
+  sha1hash?: string
+}
+
+export interface UncheckedImagesResult {
+  dataset: string
+  checkedAt: string
+  dryRun: boolean
+  unmarkedBefore: number
+  filterMatchesBefore: number
+  /** Checked and found clean (marked, unless a dry run), with the mark's message. */
+  clean: {id: string; message: string}[]
+  /** Not marked, and why. */
+  notMarked: {id: string; reason: string}[]
+  unmarkedAfter: number
+  filterMatchesAfter: number
+  pass: boolean
+}
+
+async function markUncheckedImages(args: Args): Promise<number> {
+  const dataset = datasetFlag(args)
+  const dryRun = args.flags.has('dry-run')
+  if (dataset === 'production' && !dryRun && !args.flags.has('confirm-production')) throw new Error('production needs --confirm-production')
+  const out = flag(args, 'out')
+  const bearer = token('SANITY_READ_TOKEN')
+  const reader = client(dataset, 'SANITY_READ_TOKEN')
+  const writer = dryRun ? null : client(dataset, 'SANITY_WRITE_TOKEN')
+  const filterMatches = () => reader.fetch<number>(`count(*[${IMAGE_PRIVACY_FILTER}])`, {}, {perspective: 'raw'})
+  const unmarkedQuery = `*[_type == "sanity.imageAsset" && !defined(${PRIVACY_FIELD})] | order(_id asc){_id, _rev, url, size, sha1hash}`
+
+  const unmarked = await reader.fetch<UncheckedImage[]>(unmarkedQuery, {}, {perspective: 'raw'})
+  const filterMatchesBefore = await filterMatches()
+  log(`mark-unchecked-images ${dataset}${dryRun ? ' (dry run)' : ''}: ${unmarked.length} images without ${PRIVACY_FIELD}; the image-privacy filter matches ${filterMatchesBefore} documents`)
+
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'mark-unchecked-images-'))
+  const clean: UncheckedImagesResult['clean'] = []
+  const notMarked: UncheckedImagesResult['notMarked'] = []
+  try {
+    await mapLimit(unmarked, 4, async (asset, index) => {
+      const skip = (reason: string) => {
+        notMarked.push({id: asset._id, reason})
+        log(`  ${prefix(asset._id)}: not marked (${reason})`)
+      }
+      if (!asset.url || asset.size === undefined || !asset.sha1hash) return skip('no url, size or sha1hash')
+      // The stored bytes (dlRaw needs the token); the plain image URL serves a re-encoded rendition.
+      const url = new URL(asset.url)
+      url.searchParams.set('dlRaw', '')
+      const response = await fetch(url, {headers: {'accept-encoding': 'identity', Authorization: `Bearer ${bearer}`, 'User-Agent': 'cjoshmartin-dataset-recreate'}})
+      if (!response.ok) return skip(`download: HTTP ${response.status}`)
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      if (bytes.length !== asset.size) return skip(`download: ${bytes.length} bytes, the asset has ${asset.size}`)
+      if (createHash('sha1').update(bytes).digest('hex') !== asset.sha1hash) return skip('download: sha1 differs from sha1hash')
+
+      let result: ReturnType<typeof stripImageBytes>
+      try {
+        result = stripImageBytes(bytes)
+      } catch (error) {
+        if (error instanceof ImageStripError) return skip(`the image stripper cannot check it: ${error.message}`)
+        throw error
+      }
+      if (result.output || result.personal.length > 0) return skip(`the image stripper finds personal metadata: ${result.personal.join('; ')}`)
+      const file = path.join(dir, `${index}.${asset._id.split('-').at(-1)}`)
+      writeFileSync(file, bytes, {mode: 0o600})
+      const scan = await scanLocalFile(file)
+      rmSync(file)
+      if (scan.unreadable) return skip(`the exiftool scan could not read it: ${scan.unreadable}`)
+      if (scan.findings.length > 0) return skip(`the exiftool scan finds ${scan.findings.length} personal items`)
+
+      const mark = cleanPrivacy(result, new Date())
+      if (writer) {
+        try {
+          await writer.patch(asset._id).ifRevisionId(asset._rev).set({[PRIVACY_FIELD]: mark}).commit({visibility: 'sync', tag: 'recreate.mark-unchecked-images'})
+        } catch (error) {
+          if ((error as {statusCode?: number}).statusCode === 409) return skip('changed meanwhile (revision); run again')
+          throw error
+        }
+      }
+      clean.push({id: asset._id, message: mark.message ?? ''})
+    })
+  } finally {
+    rmSync(dir, {recursive: true, force: true})
+  }
+
+  // Read back.
+  const unmarkedAfter = (await reader.fetch<UncheckedImage[]>(unmarkedQuery, {}, {perspective: 'raw'})).length
+  const filterMatchesAfter = await filterMatches()
+  if (writer) {
+    for (const {id} of clean) {
+      const doc = await reader.getDocument(id)
+      const privacy = doc?.[PRIVACY_FIELD] as {status?: string; version?: string} | undefined
+      if (privacy?.status !== 'clean') notMarked.push({id, reason: `read back: ${PRIVACY_FIELD}.status is ${privacy?.status}`})
+    }
+  }
+  const result: UncheckedImagesResult = {
+    dataset,
+    checkedAt: new Date().toISOString(),
+    dryRun,
+    unmarkedBefore: unmarked.length,
+    filterMatchesBefore,
+    clean: clean.sort((a, b) => a.id.localeCompare(b.id)),
+    notMarked,
+    unmarkedAfter,
+    filterMatchesAfter,
+    pass: notMarked.length === 0 && (dryRun || (unmarkedAfter === 0 && filterMatchesAfter === 0)),
+  }
+  writeJson(out, result)
+  const technical = clean.filter((c) => c.message !== '').length
+  log(`  clean: ${clean.length}${dryRun ? ' (not marked: dry run)' : ' marked'} (${technical} with technical metadata only); not marked: ${notMarked.length}`)
+  log(`  afterwards: ${unmarkedAfter} images without ${PRIVACY_FIELD}; the image-privacy filter matches ${filterMatchesAfter} documents`)
+  log(`mark-unchecked-images ${dataset}: ${result.pass ? 'PASS' : 'FAIL'}`)
+  return result.pass ? 0 : 1
+}
+
+// ---------------------------------------------------------------------------------------------
 
 const COMMANDS: Record<string, (args: Args) => Promise<number>> = {
   snapshot,
@@ -691,6 +832,7 @@ const COMMANDS: Record<string, (args: Args) => Promise<number>> = {
   'history-check': historyCheck,
   'verify-export': verifyExport,
   'restore-assets': restoreAssets,
+  'mark-unchecked-images': markUncheckedImages,
   compare,
 }
 

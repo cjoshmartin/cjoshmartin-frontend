@@ -35,6 +35,7 @@ import {
   renderAsciiArtHtml,
   rgbaToRgb,
 } from '../generate'
+import {IMAGE_METADATA_OPTIONS} from '../../privacy/constants'
 import {pillowResizeBicubic} from '../pillow-resample'
 import {type ArtComparison, compareArt, parseArt} from './art-metrics'
 
@@ -272,7 +273,8 @@ async function main() {
     if (wagtail.file_hash !== sha1)
       throw new Error(`${render.file}: sha1 ${sha1} != Wagtail file_hash ${wagtail.file_hash}`)
 
-    const asset = await client.assets.upload('image', bytes, {filename: render.file})
+    // Only the placeholders and the palette, never location or EXIF (studio/test/upload-metadata.test.ts).
+    const asset = await client.assets.upload('image', bytes, {filename: render.file, extract: [...IMAGE_METADATA_OPTIONS]})
     if (asset.sha1hash !== sha1)
       throw new Error(`${render.file}: uploaded asset sha1hash ${asset.sha1hash} != ${sha1}`)
     const parsed = parseImageAssetId(asset._id)

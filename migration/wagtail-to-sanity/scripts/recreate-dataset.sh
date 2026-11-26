@@ -13,7 +13,9 @@
 #      imported asset documents are created without `source` or `privacy` first, and testimonials
 #      without their image). This script checks it and refuses otherwise.
 # Afterwards: npm run recreate -- restore-assets, a schema deploy for the workspace, validate,
-# npm run recreate -- compare and history-check (with the import start time printed below).
+# npm run recreate -- compare and history-check (with the creation time printed below: taken
+# after the delete and before `datasets create`, because the create itself writes the new
+# dataset's `_.groups.*` and `_.retention.*` documents; recreate fix round 1, finding 3).
 #
 # Delete, create and import run in one invocation, so the dataset is never left deleted because a
 # later command was not run. If the import fails after the create, rerun only the import:
@@ -71,6 +73,10 @@ done
 say "$dataset deleted"
 
 # 4. Create it again (public). A name can be briefly unavailable after a delete, so retry.
+# Every transaction of the new dataset, including the system documents the create writes, is
+# after this time; history-check needs it (not the import start, which is after the create).
+created_after=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+say "creating $dataset; history-check --created-after $created_after"
 deadline=$((SECONDS + WAIT_SECONDS))
 until sanity datasets create "$dataset" --visibility public -p "$PROJECT_ID"; do
   ((SECONDS < deadline)) || die "could not create $dataset within ${WAIT_SECONDS}s; create it by hand, then import $export_file"
@@ -84,4 +90,4 @@ say "$dataset created (public)"
 import_start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 say "import start $import_start"
 sanity datasets import "$export_file" --dataset "$dataset" -p "$PROJECT_ID"
-say "import done; history-check --import-start $import_start"
+say "import done; history-check --created-after $created_after"

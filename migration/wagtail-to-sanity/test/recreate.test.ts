@@ -3,6 +3,7 @@ import {test} from 'node:test'
 
 import {
   assetIdsInText,
+  checkCreatedAfter,
   differingFields,
   exportFileName,
   exportPointer,
@@ -82,4 +83,19 @@ test('assetIdsInText finds asset ids in any inventory format; prefix shortens th
   assert.equal(isAssetId('drafts.blogPost-1'), false)
   assert.equal(prefix(IMAGE), 'image-aaaaaaaa')
   assert.equal(prefix(FILE), 'file-bbbbbbbb')
+})
+
+test('checkCreatedAfter takes the time before the create, never one inside the old history (recreate fix round 1, finding 3)', () => {
+  const baseline = {
+    current: [{transactions: [{timestamp: '2026-11-25T18:30:20.100000Z'}, {timestamp: '2026-11-26T20:10:00.500000Z'}]}],
+    deleted: [{transactions: [{timestamp: '2026-11-26T20:12:00.000000Z'}]}, {transactions: []}],
+  }
+  // The staging run: "staging deleted" at 20:40:45, the create's system documents at 20:40:52.689,
+  // the import start the script printed at 20:40:54. The first is right; the import start was too late.
+  assert.equal(checkCreatedAfter('2026-11-26T20:40:45Z', baseline), '2026-11-26T20:40:45Z')
+  assert.throws(() => checkCreatedAfter('2026-11-26T20:12:00Z', baseline), /not after the old dataset's last transaction/)
+  assert.throws(() => checkCreatedAfter('2026-11-26T20:11:00Z', baseline), /not after the old dataset's last transaction/)
+  assert.throws(() => checkCreatedAfter('2026-11-26 20:40:45', baseline), /ISO time in UTC/)
+  assert.throws(() => checkCreatedAfter('yesterday', baseline), /ISO time in UTC/)
+  assert.equal(checkCreatedAfter('2026-11-26T20:40:45Z', {current: [], deleted: []}), '2026-11-26T20:40:45Z')
 })
