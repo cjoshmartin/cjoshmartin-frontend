@@ -11,6 +11,7 @@
   "scripts": {
     "migrate": "tsx src/cli.ts",
     "compare": "tsx src/compare.ts",
+    "recreate": "tsx src/recreate.ts",
     "test": "tsx --test test/*.test.ts",
     "test:ffmpeg": "tsx --test test/*.integration.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"

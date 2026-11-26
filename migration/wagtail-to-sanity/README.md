@@ -83,14 +83,38 @@ Every step is deterministic. Document ids follow the contract (`blogPost-<pageId
 settings, ffmpeg version and CPU count give byte-identical MP4s, and a rerun reuses them anyway.
 Rerunning the whole pipeline converges to the same dataset.
 
+## Recreate a dataset from a verified export
+
+Both datasets are public, and a public dataset's History API answers without a token. Its old
+revisions name every deleted upload (an asset id is its CDN path). The only way to drop them is to
+delete the dataset and import a clean export, so that the history starts at the import. The
+procedure and its results are in
+[`docs/sanity-migration/reports/dataset-recreate.md`](../../docs/sanity-migration/reports/dataset-recreate.md);
+the tools are [`src/recreate.ts`](src/recreate.ts) (`npm run recreate -- <command>`) and
+[`scripts/recreate-dataset.sh`](scripts/recreate-dataset.sh):
+
+| Command | What it does |
+|---|---|
+| `snapshot --dataset <ds> --out <file>` | Every document (raw: drafts, versions, system documents) with every field, counts per type, asset sha1s |
+| `history-baseline --dataset <ds> --snapshot <file> --ids-from <file>... --out <file>` | The current documents' transactions, and for every deleted id (asset ids named in the local files, `{"ids": [...]}` files verbatim) its transactions and whether an anonymous request reads it |
+| `verify-export --snapshot <file> --dir <unpacked export> --out <file>` | The export equals the snapshot (documents, `assets.json`, every file's sha1 and size) and every file passes the privacy scan of the `privacy` step |
+| `scripts/recreate-dataset.sh <ds> <export.tar.gz> [--confirm-production]` | Refuses while the Blueprint Stack has Functions; deletes the dataset, creates it again (public), imports the export, prints the import start time |
+| `restore-assets --dataset <ds> --snapshot <file> [--confirm-production]` | Patches every asset document back to the snapshot (`_createdAt`, and anything else the import did not restore); identity fields must already be equal |
+| `compare --dataset <ds> --snapshot <file> --out <file>` | Every document equals the snapshot, ignoring `_rev`, `_createdAt`, `_updatedAt` and an asset's `uploadId` |
+| `history-check --dataset <ds> --baseline <file> --import-start <iso> --out <file>` | No deleted id has a transaction or an anonymous read; every current document's history starts at the import |
+
+Snapshots, baselines and exports name deleted assets and hold unpublished drafts: keep them in
+`~/cjoshmartin-migration/dataset-exports/` (mode 700), never in the repository.
+
 ## Tests
 
 `npm test` covers the personal-metadata rules, stripped copies in the plan (no bucket URL), moving asset ids,
 the privacy field and the import-record update of the privacy step, the rich-text conversion
 (allowlist, keys, embeds, links), the document
 helpers (tag order, content fixes, video blocks), the ffprobe and MP4 box helpers, the video asset
-plan, the known conversion deviations, the Studio-edit check of the import and the asset metadata
-check of the `assets` and `videos` steps. `npm run test:ffmpeg` converts synthetic clips with the
+plan, the known conversion deviations, the Studio-edit check of the import, the asset metadata
+check of the `assets` and `videos` steps, and the dataset-recreate helpers (the export's file
+names and asset pointers, snapshot counts, field comparison). `npm run test:ffmpeg` converts synthetic clips with the
 real ffmpeg and checks that the MP4 checks accept good files and reject bad ones, and strips a
 photo, a screenshot and a phone-like video (also with an iOS-like draft movie header in `mdat`)
 with the real exiftool, ffmpeg and ImageMagick, checking that the copies are lossless and clean and
