@@ -213,3 +213,132 @@ All against `next build` + `next start` (port 3000, a credentialed CORS origin) 
 - Vercel env vars (not allowed in this package).
 - The Presentation iframe itself (needs a deployed site; the server-side handshake is tested above).
 - The 19 pending Mux videos (WP3, Mux plan upgrade).
+
+## Work package C (2026-11-26): MP4 videos from Sanity, Mux removed
+
+The owner decided to drop Mux. Every video is now a Sanity file asset converted to MP4 (video
+contract v2, see [schema-contract.md](../schema-contract.md#videos-video-contract-v2)). This
+package changes only the site. It plays each video block's file from the Sanity CDN, and no Mux
+code or package is left. Code commit: `f0f305a`. This section replaces the Mux parts of the
+sections above: the `@mux/mux-video-react` row in "Versions", decisions 2 and 9, the Mux text under
+"Data layer" and "Rendering", and `image.mux.com` under "Config".
+
+### What changed
+
+| Path | Change |
+|---|---|
+| `sanity/lib/queries.ts` | In `portableTextItemProjection`, video blocks return only `_type`, `_key`, `url` (`file.asset->url`), `mimeType` and `filename` (`file.asset->originalFilename`). Every other item type is spread as before (`_type != "video" => {...}`). So `original` (the kept upload) and `conversion` are never queried and never reach the browser. |
+| `app/components/PortableTextBody/PortableTextBody.tsx` | `VideoBlock` renders `<video autoPlay loop muted playsInline controls preload="metadata">` with one `<source src={url}>`. The source has `type="video/mp4"` when the asset is an MP4. A fallback download link follows the source. A block with no file URL renders nothing and logs `PortableTextBody: video block <key> has no video file` on the server. The Mux import is gone. |
+| `next.config.ts` | Removed `image.mux.com` (and its comment) from `images.remotePatterns`. |
+| `package.json`, `package-lock.json` | Removed `@mux/mux-video-react` with `npm uninstall`. The lockfile lost exactly 3 entries: `@mux/mux-video-react`, `@mux/playback-core` and `mux-embed`. `hls.js` stays because `@react-three/drei` needs it. `npm ci --dry-run --userconfig /dev/null` reports "up to date". |
+| `sanity.types.ts` | Regenerated: 16 queries and 46 schema types (was 62), with no `mux.*` type. In every body union, the video member is `{_type: "video", _key, url, mimeType, filename}`. |
+
+`grep -i mux` over `app/`, `components/`, `lib/`, `sanity/`, `next.config.ts`, `package.json`,
+`package-lock.json` and `sanity.types.ts` finds only 3 letters that happen to appear inside one
+lockfile integrity hash.
+
+### Decisions
+
+1. **A `<source>` with a type, not `<video src>`.** The brief asks for `type="video/mp4"`, and that
+   attribute only exists on `<source>`. The type is set only when the asset's `mimeType` is
+   `video/mp4`. A block that is not converted yet, or whose conversion failed, still plays its
+   current file, without a type. Reason: Chromium skips a source typed `video/quicktime` without
+   trying it, but plays an untyped `.mov` it can decode (shown with the fixtures below).
+2. **`key={url}` on the `<video>`.** Changing a `<source>` `src` does not reload a media element.
+   When the converter switches `file` to the MP4, SanityLive re-renders the page. The new key makes
+   React mount a fresh element, which loads the MP4.
+3. **A fallback link inside `<video>`** (`Download <filename>`), as the Next.js video guide
+   (`node_modules/next/dist/docs/01-app/02-guides/videos.md`) recommends. Browsers that support
+   video never show it, so nothing on the page changes. It is the only use of `filename`.
+4. **No conversion-status logic on the page.** The page plays whatever `file` points to. Status is
+   the Studio's concern (the block preview and a validation warning).
+5. **TypeGen without rewriting `studio/schema.json`.** `npm run typegen` in `studio/` starts by
+   re-extracting `studio/schema.json`, which this package does not own. Instead, the schema was
+   extracted to a temp path, which matched `studio/schema.json` byte for byte. Then
+   `npx sanity typegen generate` ran in `studio/` (the second half of the same script). The output
+   is the same as `npm run typegen`'s.
+6. **Comparison with the old site.** The live Wagtail-fed site renders
+   `<video src=".../images-for-cms/media/<file>.mov" autoPlay="" loop="" playsInline="" controls="" muted="">`.
+   The new markup has the same attributes plus `preload="metadata"`. The file is the MP4 at
+   `cdn.sanity.io/files/j3vdh6ti/<dataset>/`, which answers range requests (`206`, `accept-ranges: bytes`).
+   `app/globals.css` still styles `video` (block, full width, at most 550 px high). React 19.2
+   server-renders `muted=""`, so the server HTML can autoplay before hydration.
+
+### Verification
+
+Logs and scripts are outside git, in `~/cjoshmartin-migration/reports/wpc-frontend/` and
+`~/cjoshmartin-migration/tmp/wpc-frontend/`. Every route with a video:
+
+| Route | Videos |
+|---|---|
+| `/projects/squid-games-nerf-gun` | 8 |
+| `/projects/v2-of-mobile-app-for-ios-and-andriod` | 10 |
+| `/projects/sba-power-badge` | 4 |
+| `/projects/mazda-key-holder` | 1 |
+| `/blog/bluetooth-low-energy-ble-with-react-native-and-arduino` | 3 |
+| `/blog/ios-universal-links-with-expo-react-navigation-and-react-native` | 3 |
+
+That is 29 in total, the same in both datasets.
+
+| Check | Result |
+|---|---|
+| `npm run lint` | 0 errors, the same 2 old warnings |
+| `npm run typecheck` | passes |
+| `npm test` | 13 of 13 |
+| `next build` with `.env.local` (`production`) | passes, same routes as before |
+| Smoke test, `production`, before the data package rewrote the blocks (`smoke-production-before-data.log`) | 54 of 54 route checks pass. No `<video>` and no Mux markup. The server logged "has no video file" exactly 29 times, once per old-shape block. |
+| Smoke test, `staging` build after the data package (`smoke-staging-v2.log`) | 54 of 54 route checks pass. Exactly 29 `<video>` elements, the expected number on each page. Each one has `autoplay`, `loop`, `muted`, `playsinline`, `controls` and `preload="metadata"`, one `<source>` with a `staging` file-asset URL ending in `.mp4` and `type="video/mp4"`, and the fallback link. |
+| Smoke test, `production` build, same checks (`smoke-production-v2.log`) | 54 of 54 route checks pass, 29 of 29 videos, and 0 video errors in the server log |
+| Real browsers, `production` (`browser-production-{webkit,brave}.{log,json}`): the 6 video routes plus `/`, `/blog`, `/projects`, `/blog/interview-practice` and `/projects/simon-malls-mills-outlets` | **29 of 29 in WebKit and 29 of 29 in Brave.** Each video starts on its own (autoplay; the script never calls `play()` on these pages). Each is muted (property and attribute) and loops: after a seek to 0.6 s before the end, the time wraps to the start and keeps playing. Each plays inline (`playsinline`, never fullscreen), has controls and no media error, and its `currentSrc` is the `production` MP4 with `type="video/mp4"`. 0 page errors from the site. The only cancelled Sanity requests were MP4 byte ranges, replaced after the loop check's seek. Every other failed request is third-party: Plausible TLS (known finding 7), Disqus/viglink/pippio on localhost, and YouTube or ad cancellations. In WebKit, Disqus's own iframe throws "Blocked a frame with origin https://disqus.com" against `http://localhost`. That cannot happen over https. |
+| Real browsers, `staging` (same pages minus Simon) | 29 of 29 in WebKit and 29 of 29 in Brave, with the same results |
+| Phone width, WebKit at 390x844 (`mobile-layout-production.log`) | On all 6 video pages: no horizontal scroll, each video 326 px wide and at most 550 px high |
+| Fixtures (`fixture-{webkit,brave}.log`): an original converted with `buildFfmpegArgs`, an H.264 `.mov` and a VP9 `.mov` without a type, and an H.264 `.mov` typed `video/quicktime` | The converted MP4 plays and loops in both engines. The untyped H.264 `.mov` plays in both. The untyped VP9 `.mov` plays in Brave and fails to decode in WebKit; that is the case conversion exists for. The `video/quicktime`-typed copy plays in WebKit but **Brave skips it**, which is why decision 1 leaves the type off unconverted files. |
+
+**Browsers used.** Google Chrome is not installed on this Mac, and Playwright's bundled Chromium
+cannot decode H.264. So the checks used:
+- Playwright's WebKit 27.2, downloaded for this check into `~/Library/Caches/ms-playwright/webkit-2388`.
+- Brave, a Chromium build with H.264, launched through Playwright with its own temporary profile.
+
+Real Safari through `safaridriver` was not used, because it needs "Allow remote automation" turned
+on in Safari's settings, and it is off.
+
+Playwright's WebKit did not autoplay the static fixture pages after a navigation, including the
+old site's exact markup. It did autoplay all 29 videos on the real, hydrated pages. So in the
+fixture run, WebKit videos were started with `play()`. In the site runs, they started on their own.
+
+### Findings for other packages
+
+1. **Medium (WP4 design, not changed here): content published while no browser has the site open
+   stays cached until a live event or a cache purge.**
+   - **How it works.** `defineLive`'s `sanityFetch` caches each query result with
+     `revalidate: false` and Sanity sync tags. Only `<SanityLive>`'s server action expires those
+     tags, and only when a browser that is connected at the moment of the change receives the live
+     event. Nothing on `welcome` catches up on missed changes (`next-sanity` 13.5.1,
+     `dist/SanityLive.js`).
+   - **What happened here.** My first production run cached the pages before the data package
+     rewrote the videos. After the rewrite, at 06:14:41 UTC, the same server kept serving cached
+     responses dated 05:27:55, with no video URLs. The API and API CDN already returned the MP4s
+     (`smoke-production-v2-stale-cache.log`).
+   - **The fix used for this test.** Deleting the local `.next/cache/fetch-cache` and restarting
+     the server fixed it at once.
+   - **Risk.** The same can happen to any deployment whose Data Cache was filled before the rewrite
+     (for example the `sanity-migration` Preview), and later to any editor change published while
+     nobody is on the site.
+   - **Options for the owner:**
+     - purge the Vercel Data Cache after the data migration;
+     - add tag revalidation from a Sanity webhook (Sanity's "Revalidate Next.js pages with Sanity
+       webhooks" guide);
+     - or add a time-based upper bound.
+2. **Low (converter/settings): anamorphic sources stay anamorphic.**
+   - **The files.** `Screen_Recording_2021-11-10_at_11.44.10_AM.mp4` (SAR 9:10) and
+     `IMG_3240.mp4` (SAR 27:64, a 3:4 portrait picture stored as a 1280x720 frame) keep their
+     non-square pixels after conversion, because the source files have them.
+   - **Display.** Both browsers show the right aspect ratio, so the page looks right. They report
+     different `videoWidth`/`videoHeight` (Brave 1280x1707, WebKit 540x720 for `IMG_3240`).
+   - **A possible change.** If square pixels are wanted (`setsar=1` with a width that keeps the
+     display aspect), that is a settings change and needs a new `SETTINGS_VERSION`.
+
+### Not done here
+
+- Nothing was pushed. Vercel will build `f0f305a` once the branch is pushed.
+- No Vercel setting or Data Cache was touched (finding 1).
