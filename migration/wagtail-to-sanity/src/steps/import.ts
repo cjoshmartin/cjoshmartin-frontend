@@ -37,7 +37,7 @@ import {
   type StudioEdits,
 } from '../import-guard'
 import {sanityClient} from '../sanity'
-import {log, readJson, run, writeJson, writeText} from '../util'
+import {log, readJson, run, sleep, writeJson, writeText} from '../util'
 import {ndjsonPath, readNdjson} from './transform'
 
 export {MIGRATION_ID_PATTERN}
@@ -75,6 +75,26 @@ export async function studioValidationErrors(args: string[], logName: string, pa
 export async function validateNdjson(paths: DataPaths, dataset: Dataset, file: string): Promise<void> {
   const errors = await studioValidationErrors(['--workspace', dataset, '--file', file], `validate-ndjson-${dataset}.log`, paths)
   if (errors.length) throw new Error(`The NDJSON fails Studio validation:\n- ${errors.join('\n- ')}`)
+}
+
+/** How long the import waits for the dataset to read back as imported. */
+const READ_BACK_TIMEOUT_MS = 60_000
+
+/**
+ * Runs `read` until it succeeds, every 2 s, for at most READ_BACK_TIMEOUT_MS, then throws its last
+ * error. For reads that check what a write just did, because queries can lag behind writes.
+ */
+async function untilConsistent<T>(read: () => Promise<T>): Promise<T> {
+  const deadline = Date.now() + READ_BACK_TIMEOUT_MS
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await read()
+    } catch (error) {
+      if (Date.now() > deadline) throw error
+      if (attempt === 1) log(`import: the dataset does not read back as imported yet, retrying for up to ${READ_BACK_TIMEOUT_MS / 1000} s`)
+      await sleep(2000)
+    }
+  }
 }
 
 export function importRecordPath(paths: DataPaths, dataset: Dataset): string {
@@ -169,8 +189,16 @@ export async function importDataset(
   log(`import: sanity datasets import --replace into ${dataset}`)
   await sanityCli(['datasets', 'import', file, '--dataset', dataset, '--replace'], `import-${dataset}.log`, paths)
 
+  // `sanity datasets import` writes references weak first and strengthens them in a second pass,
+  // and queries can lag a few seconds behind both. Every read below therefore waits until the
+  // dataset reads back as imported (or fails after READ_BACK_TIMEOUT_MS with the last difference).
   const wanted = new Set(documents.map((d) => d._id))
-  const present = await client.fetch<string[]>(`*[!(_id in path("_.**")) && !(_id in path("versions.**"))]._id`)
+  const present = await untilConsistent(async () => {
+    const ids = await client.fetch<string[]>(`*[!(_id in path("_.**")) && !(_id in path("versions.**"))]._id`)
+    const missing = [...wanted].filter((id) => !ids.includes(id))
+    if (missing.length) throw new Error(`import: ${missing.length} documents are missing after the import: ${missing.join(', ')}`)
+    return ids
+  })
   const stale = present.filter((id) => MIGRATION_ID_PATTERN.test(id) && !wanted.has(id)).sort()
   if (stale.length) {
     log(`import: deleting ${stale.length} documents an earlier run created that the transform no longer produces: ${stale.join(', ')}`)
@@ -178,16 +206,11 @@ export async function importDataset(
     for (const id of stale) tx.delete(id)
     await tx.commit({visibility: 'sync'})
   }
-  const missing = [...wanted].filter((id) => !present.includes(id))
-  if (missing.length) throw new Error(`import: ${missing.length} documents are missing after the import: ${missing.join(', ')}`)
 
-  const record = buildImportRecord({
-    dataset,
-    source: 'import',
-    ndjsonSha256: fileSha256(file),
-    expected: documents,
-    stored: await fetchStoredDocuments(client),
-  })
+  const ndjsonSha256 = fileSha256(file)
+  const record = await untilConsistent(async () =>
+    buildImportRecord({dataset, source: 'import', ndjsonSha256, expected: documents, stored: await fetchStoredDocuments(client)}),
+  )
   writeJson(importRecordPath(paths, dataset), record)
   log(
     `import: ${documents.length} documents in ${dataset}, ${stale.length} stale documents removed; ` +
