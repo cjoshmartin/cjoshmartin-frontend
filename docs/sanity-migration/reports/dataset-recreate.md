@@ -274,3 +274,285 @@ All in `~/cjoshmartin-migration/dataset-exports/` (mode 700):
 | `cdn/` | The probe, the still-served files and their scan, and the email draft |
 | `blueprint/` | The saved Stack configuration and the empty blueprint |
 | `logs/` | Every run |
+
+---
+
+## Fix round 1 (2026-11-26, about 21:50 to 22:40 UTC)
+
+This round fixes the five findings of [recreate-verification.md](recreate-verification.md), which
+checked the recreate the main session ran after this report was written (staging import from
+20:40:54 UTC, production from 21:00:07 UTC). The sections above still describe the plan, not that
+run.
+
+- **Code:** commit `ed8a6bc`.
+- **Functions:** redeployed as operation `OP-8uruppvaci` (22:23:41 to 22:24:37 UTC), built with
+  `npm_config_platform=linux npm_config_arch=arm64`, with 4 updates and nothing destroyed.
+  `PRIVACY_LINK_KEY` is still set on `video-to-mp4`, `image-privacy` and `upload-privacy`, and the
+  deployed value equals the one in `secrets.env` (see finding 4).
+- **Data:** a `privacy` mark was added to 40 image assets in each dataset (finding 2). The staging
+  test data of this round was deleted.
+- **Not changed:** no dataset was deleted or created, and no Function was removed. Nothing was
+  pushed.
+
+| # | Severity | Finding | Verdict | Fix |
+|---|---|---|---|---|
+| 1 | medium | A location an API client requests stays readable without a token in the History API | Confirmed again, with harmless data | Prevented in the repository and made visible in the Function logs. The History API side is the owner's call. |
+| 2 | medium | 40 images per dataset have no privacy mark; 25 documents match image-privacy's filter | Confirmed | Fixed: all 40 checked with the Functions' stripper and marked `clean` in both datasets. Every Function filter now matches 0 documents. |
+| 3 | low | `history-check` reports FAIL because of the system documents the dataset creation writes | Confirmed | Fixed at the cause, the time the script printed. Both datasets now PASS. |
+| 4 | low | upload-privacy stripped two referenced uploads itself | Confirmed, cause narrowed | Fixed: a reference seen during the wait is final. Deployed and tested live. |
+| 5 | low | Deleted uploads' asset documents stay readable without a token in the History API | Confirmed as described | Not a defect in the code. Same owner decision as finding 1. |
+
+### Finding 1: a location requested by an API client stays in the History API
+
+**Confirmed again, without putting any location into history.**
+
+- **The test** (staging, 22:26:43 UTC): a synthetic 32×32 JPEG whose only EXIF tags are
+  `Orientation` and `Software` (a synthetic string with the test's nonce) was uploaded through the
+  HTTP API with `meta=image`.
+- **What upload-privacy did:** it removed `metadata.image` from the asset document 0.28 s later.
+- **What the History API still serves:** without a token, it returns the first revision (HTTP
+  200) with `metadata.image.Software`. The three later revisions are returned without it, and the
+  deleted state returns nothing.
+
+**What the docs say** (Sanity docs, read 2026-11-26):
+
+- "Image metadata": `location`, `exif` and `image` are excluded by default. Sanity extracts them
+  only when an upload asks for them.
+- "History experience": retention depends on the plan (Free 3 days, Growth 90, Enterprise 365).
+  The datasets' own `_.retention._maximum_project` says 90 days.
+- Document-level access control (custom roles and content resources) is an Enterprise feature.
+  Nothing documented makes a public dataset's History API require a token.
+
+**Why it cannot be found later:** the History API's transaction log needs document ids. A request
+for the whole dataset's transactions returns nothing (checked). So such a revision cannot be
+found later by a scan. Only upload-privacy sees it happen, because it runs on every upload the
+Studio and the Functions did not make.
+
+**Changes:**
+
+- **`studio/test/upload-metadata.test.ts`** (new) checks three things:
+  - every image field of the Studio schema extracts exactly `IMAGE_METADATA_OPTIONS`;
+  - no source file in the repository asks for `location`, `exif` or `image` (the HTTP API's
+    `meta=`, @sanity/client's `extract`, a schema's `metadata`);
+  - every @sanity/client upload that can be an image names its `extract` list.
+
+  A positive control, a temporary file with `extract: ['lqip', 'location']`, `?meta=exif` and an
+  image upload without `extract`, failed both source checks. It was then removed.
+- **What the test found:** `studio/functions/testimonial-ascii-art/scripts/compare-with-python.ts`
+  uploaded Wagtail originals as images without `extract`. Sanity's default leaves location out, but
+  the script now names `IMAGE_METADATA_OPTIONS`.
+- **upload-privacy now warns.** When it removes extracted location, EXIF or camera data, it also
+  logs a WARN (`console.warn`). The warning says that the first revision keeps the data in the
+  History API for the retention period, and that only deleting and creating the dataset again
+  removes it. The warning names key names only, never values. Live: the WARN line was logged 0.6 s
+  after the test upload.
+
+**Still open (owner):**
+
+- Any client with a write token can still ask for `meta=location`. Two things would close it:
+  - make the datasets private, with a read token in the frontend. That changes Vercel's
+    environment, which is outside this package;
+  - Sanity's answer to the drafted support email, which asks whether a public dataset's History
+    API can require a token.
+- Until then, check `npx sanity@latest functions logs upload-privacy` for `WARN` lines.
+
+**What stays in staging's History API:**
+
+- **T4's first revision** (the verification's synthetic fake coordinates, serial number and owner)
+  stays until the retention ends: 90 days after 21:38:38 UTC, so about 2027-02-24. It names no real
+  place or person.
+- **This round's warning test** added a first revision with only the synthetic `Software` string.
+
+### Finding 2: images without a privacy mark
+
+**Confirmed.** Each dataset had the same 40 images without `privacy`:
+
+- all have `source.name` `wagtail`;
+- 18 JPEG, 12 PNG, 6 GIF, 3 WebP and 1 AVIF;
+- 36 of them are used by documents.
+
+image-privacy's filter matched 25 documents in each dataset.
+
+**What was done:** the "accept" option of finding 1 above, done now rather than at the next edit.
+Each image was checked the way image-privacy checks it and marked the way it marks it. Why this
+and not letting the Function skip `source.name == "wagtail"`:
+
+- a mark makes each image's state explicit, and independent of `_createdAt`;
+- the mark is the one the Function itself would have written;
+- skipping by source would leave these images unmarked for good and add a rule to the filter.
+
+**The tool:** `npm run recreate -- mark-unchecked-images --dataset <ds> --out <file> [--dry-run]
+[--confirm-production]` (in `migration/wagtail-to-sanity`). For each image without a mark it:
+
+- downloads the stored bytes (`dlRaw` with the token) and checks their size and sha1;
+- runs the Functions' stripper (`stripImage`) and the privacy step's exiftool scan;
+- marks the image only when neither finds anything personal, with a revision-checked patch.
+
+The mark comes from `cleanPrivacy` in `studio/functions/image-privacy/orchestrator.ts`. The
+Function now uses the same helper, so the marks are identical. The tool then reads every mark back
+and counts the documents that `IMAGE_PRIVACY_FILTER` matches.
+
+| Run (UTC) | Unmarked before | Clean | Not marked | Unmarked after | Filter matches |
+|---|---|---|---|---|---|
+| staging, dry run, 22:14 | 40 | 40 (2 with technical metadata only) | 0 | 40 | 25 |
+| staging, 22:15 | 40 | 40 marked | 0 | 0 | 25 → **0** |
+| production, 22:15 to 22:16 | 40 | 40 marked, the same ids and messages as staging | 0 | 0 | 25 → **0** |
+
+**About the marks:**
+
+- The 2 "technical metadata only" messages read "EXIF (technical tags only); Apple's decoding hint
+  (iDOT)".
+- Patches to asset documents start no Function. The filters watch content documents, and
+  upload-privacy watches only asset creates.
+
+**Checks afterwards:**
+
+- **Function filters, both datasets:** `testimonial-ascii-art` 0, `image-privacy` 0, `video-to-mp4`
+  0, upload-privacy's sweep 0, images without `privacy` 0.
+- **Validation, 13 of 13:** production 22:18 to 22:20 (`privacy`: 173 assets, 0 with personal
+  metadata, 99/99 copies marked), staging 22:29 to 22:31.
+- `npm run recreate -- compare` against the pre-recreate snapshots would now differ by these 40
+  `privacy` fields. That is expected.
+- The `UPLOADED_SINCE` comment in `image-privacy/trigger.ts` now says that the date no longer
+  separates the migration's images from new ones, and that the marks do.
+
+### Finding 3: `history-check` reported FAIL on clean datasets
+
+**Confirmed.** `datasets create` writes the 10 `_.groups.*` documents and
+`_.retention._maximum_project` (staging 20:40:52.689, production 21:00:05.337 UTC). The script took
+the import start after the create.
+
+**Fix at the cause:**
+
+- **`scripts/recreate-dataset.sh`** now takes `created_after` after the delete and before
+  `datasets create`, prints it, and its last line names `history-check --created-after <time>`.
+- **`history-check`** takes `--created-after`. It refuses `--import-start` with an explanation. It
+  also refuses a time that is not after every transaction in the pre-delete baseline, so a time
+  that is too early cannot let old history pass, and a time that is not ISO UTC
+  (`checkCreatedAfter` in `recreate-lib.ts`, with a unit test).
+- The check itself was not loosened for system documents.
+
+**Rerun** with the times the script printed between the delete and the create ("staging deleted"
+20:40:45, "production deleted" 20:59:58 UTC):
+
+| | staging (22:12 to 22:23) | production (22:23 to 22:29) |
+|---|---|---|
+| Deleted ids / with transactions | 356 / 0 | 356 / 0 |
+| Anonymous probes of deleted ids / with content | 2,654 / 0 | 1,764 / 0 |
+| Current documents | 295 (281 + this round's 14 scratch documents, present then) | 283 |
+| Transactions before the creation | **0** | **0** |
+| Earliest transaction | 20:40:52.689 | 21:00:05.337 |
+| Anonymous probes of current documents / with content | 8,567 / 0 | 4,123 / 0 |
+| **Result** | **PASS** | **PASS** |
+
+### Finding 4: upload-privacy stripped two referenced uploads itself
+
+**Evidence.** The times are from the History API's transactions. Function console lines are
+logged about 1 s after the transactions they report.
+
+- **T1, image A:** uploaded 21:32:17.382. The draft referenced it at 17.922 (+0.54 s), and
+  upload-privacy took the lease at 18.792 (+1.41 s). Run `cad94aec` was the first upload-privacy
+  run after the 21:07 redeploy, so its container was cold.
+- **T1, image B:** uploaded 24.177. The draft referenced it at 24.760 (+0.58 s), and the lease
+  came at 25.703 (+1.53 s). Run `d62869be` started while A's run was still going, so most likely
+  in another new container.
+- **What the old code allowed.** The wait could end on its first pass only if `getDocument`
+  returned null or the reference query found the draft. `handleUpload` then queried the
+  references again, and handled the upload as unused only if that second query found none. Both
+  leases came before any 5 s poll. So in both runs the first pass ended the wait, and the second
+  query did not see the draft.
+
+**Reproduced on staging** (synthetic 64×64 PNGs; testimonial drafts, and one blog post draft,
+written as the live test wrote them):
+
+| Run | Code | Rounds | Draft after the upload | upload-privacy |
+|---|---|---|---|---|
+| 22:00 and 22:02, warm | old | 7 | 0.33 to 1.0 s | all polled once and found the reference ("used by a document", 5.2 to 5.3 s) |
+| 22:22, after 19 min idle, 2 rounds 7 s apart (like T1) | old | 2 | 0.33 to 0.35 s | round 1: its first pass came after the draft, found the reference, and the run ended in 0.3 s with "used by a document". The second query agreed this time. Round 2: normal. |
+| 22:25, the new version's first runs, 2 rounds 7 s apart, PNGs with a `tIME` chunk | new | 2 | 0.35 to 0.4 s | round 1: "wait ended after 0.1 s: used by 1 document(s)"; round 2: "wait ended after 5.1 s: a Function took the upload". Both were left to image-privacy, which stripped `tIME`, moved the reference and deleted the upload. |
+
+**Cause.** After a cold start, the first check comes after the draft. The old wait stopped at a
+reference seen once, and then let a second query decide. In T1 that second query missed a draft
+written about 0.9 s earlier, most likely because the query index lagged. The draft was written
+with `visibility=sync`.
+
+A missing asset (`getDocument` null) would also have ended the old wait early. The warm runs, which
+check earliest, never showed it, but the fix covers it too. The second query missing the draft did
+not happen again in this round's 11 runs with a draft. The new log line names it if it does.
+
+**Fix** (`upload-privacy/orchestrator.ts`, `waitForUse`):
+
+- A reference seen during the wait is final: the upload is left to the content Functions without
+  `handleUpload`. One more query is only recorded, and logged when it finds none ("the query index
+  lagged").
+- An upload that is not readable yet is waited for, and its extracted metadata is removed once it
+  is readable.
+- An upload is handled as unused only when nothing used it for the whole grace period.
+- Every run logs how the wait ended.
+
+**Tests:** 3 new. The first two reproduce the two possible causes. Run against the code at `HEAD`
+before this round, all 3 fail. Run against the new code, all pass.
+
+**Key check:** the two copies made at 22:25 carry HMAC-SHA256(key from `secrets.env`, upload id)
+as `source.id` and `privacy.strippedFromDigest`. So the deployed `PRIVACY_LINK_KEY` is the same.
+
+### Finding 5: deleted uploads stay readable in the History API
+
+**Confirmed as described.** The warning test's deleted upload answered without a token at every
+revision before the delete.
+
+**Not a defect in the code.** For an upload the Functions delete, its history holds nothing the
+dataset does not already serve publicly, apart from its own id (its sha1). That id's CDN path
+answers 404, because the Functions read uploads privately.
+
+- **Previews:** the previews (`lqip`, BlurHash, ThumbHash, `palette`) and the dimensions come from
+  the pixels. The stripped copy keeps those pixels byte for byte and serves them publicly.
+  upload-privacy keeps the copy of an unused upload too.
+- **File name:** `originalFilename` is copied to the copy.
+- **The frontend** uses none of the previews. It reads `originalFilename` for file downloads.
+
+The history keeps more than the dataset only when someone deletes the copy too, for example to
+withdraw an image: its name and previews stay for the retention period. The remedy is the same as
+for finding 1.
+
+### Staging test data of this round
+
+- **Created:** 11 scratch drafts (`drafts.recreate-fix-…`, testimonials and one blog post) and 12
+  synthetic uploads (random-pixel PNGs and the JPEG of the warning test). The Functions made 3
+  copies and deleted 3 uploads.
+- **Deleted:** at 22:28:58 UTC, the 11 drafts and the 12 remaining assets, each checked
+  unreferenced first. No other asset had been created since 22:00. The deletions started 11
+  upload-privacy runs, each with "nothing to do".
+- **Afterwards:** staging has 110 images, 63 files and 0 scratch documents, and validation passes
+  13 of 13.
+- **Function logs since 22:00:**
+  - upload-privacy: 23 runs, one `WARN` (the warning test's);
+  - image-privacy: 11 runs; testimonial-ascii-art: 10 runs; video-to-mp4: none;
+  - no `ERROR`.
+- **History:** these documents' revisions stay in the History API for the retention period
+  (finding 5). None holds a location.
+
+### Blocked steps
+
+None. One local scan command was refused by Claude Code's safety check because it combined a shell
+indirection with `rm`. It was rewritten without either and run.
+
+### Still open
+
+1. **Finding 1 (owner):** decide whether to make the datasets private with a read token in the
+   frontend, or wait for Sanity's answer. The support email still has to be sent.
+2. **Docs written before the recreate:** the sections above, the privacy reports, the morning
+   report and the plan still describe the plan, not the completed recreate.
+3. **Local commits:** this round's 2 commits are ahead of `origin/sanity-migration`, like the
+   main session's, and were not pushed.
+
+### Local files (not committed)
+
+`~/cjoshmartin-migration/recreate-fix/` (mode 700):
+
+| Path | What |
+|---|---|
+| `scripts/` | the transaction timeline (`tx.mjs`), the visibility probe, the T1 repro, the key check, the cleanup |
+| `data/` | the Function logs (JSON, millisecond times), the repro records, the mark results (they name the 40 image ids), the history-check results, the Blueprint info before and after |
+| `logs/` | every run |
+| `fixtures/` | the warning test's synthetic JPEG |
