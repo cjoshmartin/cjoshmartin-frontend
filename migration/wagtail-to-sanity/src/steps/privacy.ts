@@ -44,6 +44,7 @@ import path from 'node:path'
 
 import type {SanityClient} from '@sanity/client'
 
+import {uploadAsset} from '../../../../studio/functions/privacy/upload'
 import {CONVERTED_ASSET_SOURCE_NAME} from '../../../../studio/functions/video-to-mp4/settings'
 import {ASSET_SOURCE_NAME, type Dataset, type DataPaths, type Secrets} from '../config'
 import {updateRecordAfterPatch, type StoredDocument} from '../import-guard'
@@ -345,7 +346,7 @@ async function uploadCopy(client: SanityClient, paths: DataPaths, replacement: R
   let current = existing
   if (!current) {
     const body = await readFile(copyPath(paths, copy))
-    const uploaded = await client.assets.upload(old._type === 'sanity.imageAsset' ? 'image' : 'file', body, {
+    const uploaded = await uploadAsset(client, old._type === 'sanity.imageAsset' ? 'image' : 'file', body, {
       filename: old.originalFilename ?? path.basename(copy.file),
       ...(old.mimeType ? {contentType: old.mimeType} : {}),
       ...(typeof old.title === 'string' ? {title: old.title} : {}),

@@ -10,6 +10,7 @@ import {ClientError, type SanityClient} from '@sanity/client'
 
 import {IMAGE_METADATA_OPTIONS, IMAGE_PRIVACY_SOURCE_NAME} from '../privacy/constants'
 import {isWritableDocument, releaseDocumentId, releaseOfVersion} from '../privacy/releases'
+import {uploadAsset} from '../privacy/upload'
 import {RetryableImageError, type DeleteOutcome, type ImageStore, type PatchOps, type StoredDocument} from './orchestrator'
 import type {ImageAssetDocument} from './trigger'
 
@@ -100,11 +101,11 @@ export function createSanityImageStore(client: SanityClient, options: {deadline:
     async uploadStripped(bytes, upload, mimeType, sourceId) {
       let asset: ImageAssetDocument
       try {
-        asset = (await client.assets.upload('image', Buffer.from(bytes), {
+        asset = (await uploadAsset(client, 'image', Buffer.from(bytes), {
           filename: upload.originalFilename ?? upload._id,
           contentType: mimeType,
           source: {name: IMAGE_PRIVACY_SOURCE_NAME, id: sourceId},
-          extract: [...IMAGE_METADATA_OPTIONS],
+          extract: IMAGE_METADATA_OPTIONS,
           tag: 'image-privacy.upload',
         })) as unknown as ImageAssetDocument
       } catch (error) {

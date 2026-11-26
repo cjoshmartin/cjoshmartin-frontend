@@ -281,7 +281,7 @@ export async function runUploadPrivacy(options: RunOptions): Promise<RunOutcome>
       extractedRemoved = true
       log(`${id}: removed the location and EXIF data extracted into the asset document`)
       warn(
-        `${id}: the upload asked Sanity to extract ${keys.join(', ')} (the Studio never does). Its first revision keeps that data, and the History API of a public dataset serves it without a token for the dataset's history retention period: removing it from the asset document cannot change that revision, only deleting and creating the dataset again does (docs/sanity-migration/reports/dataset-recreate.md, fix round 1). Upload without meta=location, exif or image.`,
+        `${id}: the upload asked Sanity to extract ${keys.join(', ')} (the Studio never does). Its first revision keeps that data, and the History API of a public dataset serves it without a token for the dataset's history retention period: removing it from the asset document cannot change that revision, only deleting and creating the dataset again does (docs/sanity-migration/reports/dataset-recreate.md, fix round 1). Never ask an upload for location, exif or image (@sanity/client's extract, the HTTP API's meta parameter).`,
       )
     }
     return removed

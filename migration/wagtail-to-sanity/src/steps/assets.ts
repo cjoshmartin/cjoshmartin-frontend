@@ -30,6 +30,7 @@
 import {createReadStream, existsSync} from 'node:fs'
 import path from 'node:path'
 
+import {uploadAsset} from '../../../../studio/functions/privacy/upload'
 import {ASSET_SOURCE_NAME, gcsPublicUrl, type Dataset, type DataPaths, type Secrets} from '../config'
 import {copyFor, requirePrivacyMap, withStrippedCopy, type PrivacyMap, type StrippedSource} from '../privacy/copies'
 import {assetIdWithSha1, PRIVACY_FIELD, strippedMarker} from '../privacy/marker'
@@ -309,7 +310,8 @@ export async function uploadAssets(
   const results = await mapLimit(planned, 4, async (asset) => {
     let current = existingByKey.get(`${asset.type}:${asset.sha1}`)
     if (!current) {
-      const doc = await client.assets.upload(
+      const doc = await uploadAsset(
+        client,
         asset.type,
         createReadStream(asset.strippedCopy ? path.join(paths.privacy, asset.strippedCopy.file) : path.join(paths.gcs, asset.primaryPath)),
         {
@@ -317,7 +319,7 @@ export async function uploadAssets(
           title: asset.title,
           ...(asset.description ? {description: asset.description} : {}),
           source: asset.source,
-          ...(asset.type === 'image' ? {extract: [...IMAGE_METADATA]} : {}),
+          ...(asset.type === 'image' ? {extract: IMAGE_METADATA} : {}),
         },
       )
       uploaded++
