@@ -27,7 +27,8 @@
  *    video-to-mp4 with personal metadata stops the step (it would have to be converted again).
  *    A copy made by an earlier version of this step is replaced by the current copy of the same
  *    bucket original (never by a copy of the copy), so every dataset and every rerun ends with the
- *    same asset ids, and its `privacy.strippedFrom` names the Wagtail upload.
+ *    same asset ids, and its `privacy.strippedFromDigest` is the keyed digest of the Wagtail
+ *    upload's id (never the id: it names the deleted upload's CDN URL).
  * 4. Brings the state the later steps read up to date (the asset, video and ASCII-art maps and the
  *    NDJSON, by running the assets, videos, ascii and transform logic, which find everything in
  *    place and upload nothing), and moves the import record's entries of the documents it patched
@@ -48,7 +49,7 @@ import {ASSET_SOURCE_NAME, type Dataset, type DataPaths, type Secrets} from '../
 import {updateRecordAfterPatch, type StoredDocument} from '../import-guard'
 import {copyPath, ensureStrippedCopy, readPrivacyMap, stripperVersions, toolVersions, withoutUrl, writePrivacyMap, type PrivacyMap, type StrippedCopy} from '../privacy/copies'
 import {downloadAsset} from '../privacy/download'
-import {assetIdWithSha1, PRIVACY_FIELD, strippedMarker} from '../privacy/marker'
+import {assetIdWithSha1, migrationUploadDigest, PRIVACY_FIELD, strippedMarker} from '../privacy/marker'
 import {findAssetIdOccurrences, replacementSet, applyReplacementSet, type Occurrence} from '../privacy/repoint'
 import {classifyTag, PRIVACY_RULES_VERSION, type Finding} from '../privacy/rules'
 import {scanLocalFile, type FileScan} from '../privacy/scan'
@@ -331,16 +332,16 @@ interface Replacement {
   copy: StrippedCopy
   newId: string
   /**
-   * The asset id of the upload the copy was made from (the marker's `strippedFrom`): the Wagtail
+   * The asset id of the upload the copy was made from (the marker records its digest): the Wagtail
    * upload's id for a copy of a bucket file, otherwise the old asset itself.
    */
-  strippedFrom: string
+  uploadId: string
 }
 
 async function uploadCopy(client: SanityClient, paths: DataPaths, replacement: Replacement, existing: AssetDocument | undefined): Promise<AssetDocument> {
   const {old, copy} = replacement
   const fields = descriptiveFields(old)
-  const marker = strippedMarker({kind: copy.kind, removed: copy.removed, strippedFrom: replacement.strippedFrom, strippedAt: copy.strippedAt})
+  const marker = strippedMarker({kind: copy.kind, removed: copy.removed, uploadId: replacement.uploadId, strippedAt: copy.strippedAt})
   let current = existing
   if (!current) {
     const body = await readFile(copyPath(paths, copy))
@@ -369,18 +370,28 @@ async function uploadCopy(client: SanityClient, paths: DataPaths, replacement: R
 }
 
 /**
- * The bucket file an asset's bytes come from: the file with the asset's sha1, or, for a copy an
- * earlier version of this step made (source "wagtail", `privacy` stripped), the file whose sha1 is
- * in `privacy.strippedFrom`. Null for assets that did not come from the bucket.
+ * The bucket file an asset's bytes come from: the file with the asset's sha1, or, for a copy this
+ * step made (source "wagtail", `privacy` stripped), the file whose upload id has the copy's
+ * `privacy.strippedFromDigest` (the upload id is the copy's id with the bucket file's sha1). Copies
+ * made before the digest (round 1) named the upload in `privacy.strippedFrom`; that is read too, so
+ * the next run can mark them with the digest. Null for assets that did not come from the bucket.
  */
 export function bucketOrigin(
   asset: Pick<AssetDocument, '_id' | 'sha1hash' | 'source' | typeof PRIVACY_FIELD>,
   bucketBySha1: ReadonlyMap<string, {sha1: string; path: string}>,
+  digest: (uploadId: string) => string = migrationUploadDigest(),
 ): {sha1: string; path: string} | null {
   const own = bucketBySha1.get(asset.sha1hash)
   if (own) return own
-  const privacy = asset[PRIVACY_FIELD] as {status?: unknown; strippedFrom?: unknown} | undefined
-  if (asset.source?.name !== ASSET_SOURCE_NAME || privacy?.status !== 'stripped' || typeof privacy.strippedFrom !== 'string') return null
+  const privacy = asset[PRIVACY_FIELD] as {status?: unknown; strippedFrom?: unknown; strippedFromDigest?: unknown} | undefined
+  if (asset.source?.name !== ASSET_SOURCE_NAME || privacy?.status !== 'stripped') return null
+  if (typeof privacy.strippedFromDigest === 'string') {
+    for (const file of bucketBySha1.values()) {
+      if (digest(assetIdWithSha1(asset._id, asset.sha1hash, file.sha1)) === privacy.strippedFromDigest) return file
+    }
+    return null
+  }
+  if (typeof privacy.strippedFrom !== 'string') return null
   const match = /^(?:image|file)-([0-9a-f]{40})-/.exec(privacy.strippedFrom)
   return match ? (bucketBySha1.get(match[1]!) ?? null) : null
 }
@@ -440,7 +451,7 @@ export async function planPrivacy(paths: DataPaths, dataset: Dataset, secrets: S
       if (asset._type === 'sanity.imageAsset') extractOptionsFor(asset)
       const origin = bucketOrigin(asset, bucketBySha1)
       let copy: StrippedCopy
-      let strippedFrom: string
+      let uploadId: string
       if (origin) {
         // A bucket file, or a copy an earlier version of this step made of one: the current copy of
         // that bucket file (made and verified against it in part 1), never a copy of a copy.
@@ -450,7 +461,7 @@ export async function planPrivacy(paths: DataPaths, dataset: Dataset, secrets: S
           continue
         }
         copy = current
-        strippedFrom = assetIdWithSha1(asset._id, asset.sha1hash, origin.sha1)
+        uploadId = assetIdWithSha1(asset._id, asset.sha1hash, origin.sha1)
       } else {
         copy = await ensureStrippedCopy(paths, map, {
           file: localFiles.get(asset._id)!,
@@ -459,14 +470,14 @@ export async function planPrivacy(paths: DataPaths, dataset: Dataset, secrets: S
           kind: scan.kind,
           findings: scan.findings,
         })
-        strippedFrom = asset._id
+        uploadId = asset._id
       }
       if (copy.sha1 === asset.sha1hash) {
         problems.push(`${asset._id} is the current stripped copy of its original but the scan finds personal metadata in it (${describeFindings(scan.findings)})`)
         continue
       }
       const newId = assetIdWithSha1(asset._id, asset.sha1hash, copy.sha1)
-      replacements.push({old: asset, copy, newId, strippedFrom})
+      replacements.push({old: asset, copy, newId, uploadId})
     } catch (error) {
       problems.push(error instanceof Error ? error.message : String(error))
     }

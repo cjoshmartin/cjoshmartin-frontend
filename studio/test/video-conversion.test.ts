@@ -101,6 +101,16 @@ describe('videoConversionState and videoConversionLabel', () => {
     assert.equal(label(undefined), 'No video file')
   })
 
+  it("shows why the Function took an upload out of the block (its location data could not be removed)", () => {
+    const message = 'The video is too large. The upload was removed from this block and deleted: a file whose location data cannot be removed is not kept in the public dataset. Upload another file.'
+    const state = videoConversionState(undefined, {status: 'failed', message, settingsVersion: SETTINGS_VERSION}, SETTINGS_VERSION)
+    assert.deepEqual(state, {kind: 'removed', message})
+    assert.equal(videoConversionLabel(state), `Upload removed: ${message}`)
+    assert.equal(videoNeedsConversion({conversion: {status: 'failed', message}}), false, 'nothing to convert, so no nudge and no run')
+    // A failure the editor cleared by removing the file still names that file: just empty.
+    assert.deepEqual(videoConversionState(undefined, {status: 'failed', message: 'bad', sourceAssetId: 'file-x-mov'}, SETTINGS_VERSION), {kind: 'empty'})
+  })
+
   it('shows "Converting to MP4..." while the file waits for or is in conversion', () => {
     assert.equal(label(ORIGINAL), 'Converting to MP4...')
     assert.equal(

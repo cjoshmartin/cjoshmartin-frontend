@@ -95,6 +95,12 @@ export interface ContainerDescription {
 
 const INPUT_LINE = /^Input #0, ([^ ]+), from /
 const STREAM_LINE = /^\s*Stream #0:(\d+)(?:\[[^\]]*\])?(?:\([^)]*\))?: (Video|Audio|Data|Subtitle|Attachment): (.*)$/
+/**
+ * A stream group (printed by newer ffmpeg, e.g. 9.1, not 7.0.2; for QuickTime/MP4 a "Track Reference", e.g. an iPhone's
+ * video track and the timed-metadata track that refers to it). The group lists its streams again,
+ * indented; a stream that belongs to a group may appear only there, not at the top level.
+ */
+const STREAM_GROUP_LINE = /^\s*Stream group #0:\d+/
 const META_LINE = /^(\s*)([^:]+?)\s*: ?(.*)$/
 
 /** Splits ffmpeg's comma-separated stream description at the top level (not inside parentheses). */
@@ -121,6 +127,11 @@ function splitFields(text: string): string[] {
 /**
  * Parses `ffmpeg -hide_banner -i <file>` (stderr). Metadata values are never kept, only the keys:
  * they may be coordinates.
+ *
+ * Each stream is described once, in index order, wherever ffmpeg prints it first: at the top level
+ * or inside a stream group (STREAM_GROUP_LINE). A stream printed again in another group, with its
+ * metadata and side data, is the same stream and is skipped. A group's own metadata counts as file
+ * metadata, so a check of the output reports it.
  */
 export function describeContainer(text: string): ContainerDescription {
   const lines = text.split(/\r?\n/)
@@ -131,11 +142,26 @@ export function describeContainer(text: string): ContainerDescription {
   /** Where metadata lines currently go: global, a stream, or nowhere (side data, chapters). */
   let target: string[] | null = null
   let current: ContainerStream | null = null
+  /** True after a stream that was already described (printed again in a stream group). */
+  let repeated = false
   for (const line of lines.slice(inputIndex + 1)) {
     if (/^(Input|Output) #\d+/.test(line) || line.startsWith('At least one output')) break
+    if (STREAM_GROUP_LINE.test(line)) {
+      current = null
+      repeated = false
+      target = null
+      continue
+    }
     const stream = STREAM_LINE.exec(line)
     if (stream) {
       const [, index, kind, rest] = stream
+      if (result.streams.some((s) => s.index === Number(index))) {
+        current = null
+        repeated = true
+        target = null
+        continue
+      }
+      repeated = false
       const streamKind = kind.toLowerCase() as StreamKind
       const fields = splitFields(rest.replace(/\s*\((?:default|attached pic|forced|dependent)\)/g, ''))
       const codec = rest.split(/[ ,(]/)[0]
@@ -158,9 +184,12 @@ export function describeContainer(text: string): ContainerDescription {
     const trimmed = line.trim()
     if (/^Chapter #\d+:\d+/.test(trimmed)) {
       result.chapters += 1
+      current = null
+      repeated = false
       target = null
       continue
     }
+    if (repeated) continue
     if (trimmed === 'Metadata:') {
       // Global metadata comes before the chapters and streams; a chapter's title is not stored.
       target = current ? current.metadataKeys : result.chapters === 0 ? result.globalMetadataKeys : null
@@ -190,6 +219,7 @@ export function describeContainer(text: string): ContainerDescription {
       }
     }
   }
+  result.streams.sort((a, b) => a.index - b.index)
   return result
 }
 

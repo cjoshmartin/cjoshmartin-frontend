@@ -3,6 +3,11 @@ import {describe, it} from 'node:test'
 
 import {buildImportRecord, contentHash, updateRecordAfterPatch, type StoredDocument} from '../src/import-guard'
 import {assetIdWithSha1, strippedMarker} from '../src/privacy/marker'
+import {PRIVACY_LINK_KEY_ENV, uploadDigest} from '../../../studio/functions/privacy/provenance'
+
+// The key the markers' digests are made with (secrets.env in a real run).
+const TEST_KEY = '5a'.repeat(32)
+process.env[PRIVACY_LINK_KEY_ENV] = TEST_KEY
 import {applyReplacementSet, findAssetIdOccurrences, replacementSet} from '../src/privacy/repoint'
 import {classifyTag, findDataTracks, findPersonalTags, findStlHeaderFindings, parseTagKey, readStlHeader} from '../src/privacy/rules'
 import {removedNames, withStrippedCopy, type PrivacyMap} from '../src/privacy/copies'
@@ -192,7 +197,10 @@ describe('stripped copies in the plan', () => {
       source: {name: 'wagtail', id: 'media-1'},
       privacy: {status: 'stripped', strippedFrom: `file-${'a'.repeat(40)}-mov`},
     }
-    assert.deepEqual(bucketOrigin(v1Copy, bucket), {sha1: 'a'.repeat(40), path: 'media/IMG_0001.MOV'})
+    assert.deepEqual(bucketOrigin(v1Copy, bucket), {sha1: 'a'.repeat(40), path: 'media/IMG_0001.MOV'}, 'a round-1 copy names its upload')
+    const digestCopy = {...v1Copy, privacy: {status: 'stripped', strippedFromDigest: uploadDigest(`file-${'a'.repeat(40)}-mov`, TEST_KEY)}}
+    assert.deepEqual(bucketOrigin(digestCopy, bucket), {sha1: 'a'.repeat(40), path: 'media/IMG_0001.MOV'}, 'a copy with the digest is matched by it')
+    assert.equal(bucketOrigin({...digestCopy, privacy: {status: 'stripped', strippedFromDigest: uploadDigest(`file-${'a'.repeat(40)}-mov`, '6b'.repeat(32))}}, bucket), null, 'another key matches nothing')
     assert.equal(bucketOrigin({...v1Copy, source: {name: 'image-privacy', id: 'x'}}, bucket), null, 'a Function copy is not the migration\'s')
     assert.equal(bucketOrigin({_id: `file-${'e'.repeat(40)}-mov`, sha1hash: 'e'.repeat(40)}, bucket), null)
   })
@@ -284,10 +292,11 @@ describe('the privacy field and copied asset fields', () => {
   })
 
   it('writes the same marker for the same copy', () => {
-    const facts = {kind: 'image' as const, removed: ['EXIF GPS'], strippedFrom: 'image-x', strippedAt: '2026-11-26T11:20:00.000Z'}
+    const facts = {kind: 'image' as const, removed: ['EXIF GPS'], uploadId: `image-${'c'.repeat(40)}-10x10-jpg`, strippedAt: '2026-11-26T11:20:00.000Z'}
     const marker = strippedMarker(facts)
     assert.equal(marker.status, 'stripped')
-    assert.equal(marker.strippedFrom, 'image-x')
+    assert.equal(marker.strippedFromDigest, uploadDigest(facts.uploadId, TEST_KEY))
+    assert.ok(!JSON.stringify(marker).includes('c'.repeat(40)), 'the marker never names the upload (its id is its CDN URL)')
     assert.equal(marker.updatedAt, facts.strippedAt)
     assert.deepEqual(strippedMarker(facts), marker)
   })
@@ -353,5 +362,21 @@ describe('updateRecordAfterPatch', () => {
     const update = updateRecordAfterPatch({record, before: clean, after: after.map((d) => ({...d, title: undefined})), expected, ndjsonSha256: 'new-ndjson'})
     assert.deepEqual(update.updated, ['project-7', 'project-8'])
     assert.equal(update.record.ndjsonSha256, 'new-ndjson')
+  })
+})
+
+describe('pointers to missing assets', () => {
+  it('finds asset ids of missing assets in any string, never the present ones or digests', async () => {
+    const {danglingAssetPointers} = await import('../src/privacy/pointers')
+    const present = `file-${'1'.repeat(40)}-mov`
+    const missing = `image-${'2'.repeat(40)}-3024x4032-jpg`
+    const docs = [
+      {_id: present, _type: 'sanity.fileAsset', privacy: {status: 'stripped', strippedFromDigest: uploadDigest(missing, TEST_KEY)}},
+      {_id: 'blogPost-1', _type: 'blogPost', body: [{_type: 'video', conversion: {sourceAssetId: `file-${'3'.repeat(40)}-mov`}, file: {asset: {_ref: present}}}], note: `see ${missing} here`},
+    ]
+    assert.deepEqual(danglingAssetPointers(docs, new Set([present])), [
+      {documentId: 'blogPost-1', path: 'body[].conversion.sourceAssetId', sha1Prefix: '333333333333'},
+      {documentId: 'blogPost-1', path: 'note', sha1Prefix: '222222222222'},
+    ])
   })
 })

@@ -1,9 +1,10 @@
 /**
  * Makes the original a video block keeps private: a copy of the upload without location and
  * personal metadata, uploaded as a file asset with source {name: VIDEO_ORIGINAL_SOURCE_NAME, id:
- * <upload>} and `privacy` = {status: "stripped", version: VIDEO_STRIP_VERSION, strippedFrom,
- * removed, ...}. The upload is then marked `replaced` (replacementAssetId: the copy), so every
- * part of the privacy setup knows it can be deleted once nothing references it.
+ * <the upload's digest>} and `privacy` = {status: "stripped", version: VIDEO_STRIP_VERSION,
+ * strippedFromDigest, removed, ...} (privacy/provenance.ts: the copy never names the upload's id).
+ * The upload is then marked `replaced` (replacementAssetId: the copy), so every part of the
+ * privacy setup knows it can be deleted once nothing references it.
  *
  * QuickTime/MP4 uploads are stripped in place (privacy/video-strip.ts stripIsobmffInPlace): the
  * container, edit lists, time stamps and samples stay exactly as they were. Other containers, and
@@ -15,6 +16,10 @@
  * free space; the stream copy fallback reads it through the range proxy when the copy fits but the
  * upload does not fit next to it. Uploads too large for /tmp cannot be stripped in the Function and
  * fail with a message.
+ *
+ * Every read of the upload goes through `fetchImpl`, which the callers make with
+ * privacy/private-fetch.ts, so the unstripped bytes never enter the asset CDN's public cache under
+ * the upload's plain URL (a deleted asset stays cached there for up to 30 days).
  */
 import {createReadStream} from 'node:fs'
 import {mkdir, rm, stat, statfs} from 'node:fs/promises'
@@ -30,6 +35,7 @@ import {
   type AssetPrivacy,
 } from '../privacy/constants'
 import {IsobmffUnsupportedError, looksLikeIsobmff} from '../privacy/isobmff-video'
+import {copySourceId, type UploadDigester} from '../privacy/provenance'
 import {
   stripIsobmffInPlace,
   stripVideo,
@@ -50,7 +56,10 @@ export interface StripOriginalOptions {
   deadline: number
   log: (message: string) => void
   tmpDir?: string
-  fetchImpl?: typeof fetch
+  /** Reads the upload's bytes: privacy/private-fetch.ts privateAssetFetch in the Functions. */
+  fetchImpl: typeof fetch
+  /** The keyed digest recorded on the copy instead of the upload's id; undefined without the key. */
+  uploadDigest: UploadDigester | undefined
 }
 
 /** What stripOriginal did: a stripped copy, or the upload left as it is because it is clean. */
@@ -90,7 +99,7 @@ export async function stripOriginal(
   if (upload.mimeType !== undefined && !upload.mimeType.startsWith('video/')) {
     throw new ConversionFailure(`This file is not a video (${upload.mimeType}). Upload a video file.`)
   }
-  const fetchImpl = options.fetchImpl ?? fetch
+  const fetchImpl = options.fetchImpl
   const tmpDir = options.tmpDir ?? os.tmpdir()
   const workDir = path.join(tmpDir, `${WORK_DIR_PREFIX}strip-${process.pid}-${Date.now()}`)
   await mkdir(workDir, {recursive: true})
@@ -183,7 +192,7 @@ export async function stripOriginal(
       asset = (await client.assets.upload('file', createReadStream(output), {
         filename: uploadAs.filename,
         ...(uploadAs.contentType ? {contentType: uploadAs.contentType} : {}),
-        source: {name: VIDEO_ORIGINAL_SOURCE_NAME, id: upload._id},
+        source: {name: VIDEO_ORIGINAL_SOURCE_NAME, id: copySourceId(upload._id, options.uploadDigest)},
       })) as unknown as AssetDocument
     } catch (error) {
       throw new RetryableConversionError(`the copy without metadata could not be uploaded (${(error as Error).message})`)
@@ -193,10 +202,11 @@ export async function stripOriginal(
       throw new RetryableConversionError(`the uploaded copy became ${asset._id} (${asset.size} bytes), expected ${expectedId} (${bytes} bytes)`)
     }
     const now = new Date().toISOString()
+    const link = options.uploadDigest?.(upload._id)
     const privacy: AssetPrivacy = {
       status: 'stripped',
       version: VIDEO_STRIP_VERSION,
-      strippedFrom: upload._id,
+      ...(link ? {strippedFromDigest: link} : {}),
       removed,
       message: notes.join(' '),
       updatedAt: now,

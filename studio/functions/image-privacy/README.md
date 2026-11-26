@@ -26,11 +26,15 @@ are. Contract: `docs/sanity-migration/schema-contract.md`, "Privacy".
    asset before it patches the reference in, and by the time the document's event arrives the
    reference exists. The live test waited 8 s between upload and reference: nothing ran before.
 2. **Lease.** `privacy` = `processing` with this run as `holder`, revision-checked on the asset.
-3. **Check.** The stored bytes come from `<url>?dlRaw=` with the Function's token: the plain image
-   URL serves a re-encoded rendition, not the upload. Size and sha1 are checked. No personal
-   metadata: `privacy` = `clean`, nothing else changes.
+3. **Check.** The stored bytes come from `<url>?dlRaw=` with the Function's token (that response
+   is `private, no-store`, so it is never cached). The plain image URL usually serves a re-encoded
+   rendition, but not always: it returns the stored bytes for all GIFs and for some PNGs and
+   JPEGs (22 of the 110 migrated images), so the stored file itself must be clean. Size and sha1
+   are checked. No personal metadata: `privacy` = `clean`, nothing else changes.
 4. **Copy.** The stripped bytes are uploaded with the upload's file name, `source: {name:
-   "image-privacy", id: <upload>}` and only the placeholders and palette extracted. The copy must
+   "image-privacy", id: <the upload's digest>}` (`privacy/provenance.ts`: HMAC-SHA256 of the
+   upload's id with `PRIVACY_LINK_KEY`, a Function environment variable; never the id, which names
+   the deleted upload's CDN URL) and only the placeholders and palette extracted. The copy must
    have the upload's dimensions (crops and hotspots are fractions). It is marked `stripped` before
    anything points at it, and the upload is marked `replaced` (any `metadata.location`, `exif` or
    `image` Sanity extracted is removed from it).
@@ -43,7 +47,9 @@ are. Contract: `docs/sanity-migration/schema-contract.md`, "Privacy".
    rounds), and after that the filter matches `replaced` on that document's next event (or the
    upload-privacy sweep deletes it once nothing uses it).
 6. **Failures.** A file the stripper cannot handle: `failed` (final for this strip version), shown
-   in the Studio as a warning on the field. Download, upload and API problems: `pending`, retried by
+   in the Studio as an error on the field (the file stays public with its metadata while a document
+   uses it, so the document cannot be published with it; once nothing uses it, the upload-privacy
+   Function deletes it). Download, upload and API problems: `pending`, retried by
    the first event at least 10 minutes later. An unexpected error is also thrown, so it is in the
    Function logs.
 

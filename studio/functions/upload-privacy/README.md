@@ -34,12 +34,18 @@ or release discarded first, an upload by an API client. Contract:
    video through the video-to-mp4 Function's stripper (in place for QuickTime/MP4; the copy is kept
    in the media library, the upload deleted; a clean upload is marked `clean`), an image uploaded as
    a file asset (served as stored) through the image stripper into a file copy (`image-file.ts`). A
-   file the strippers cannot handle is marked `failed`; any other problem `pending` (a later sweep
+   file the strippers cannot handle is marked `failed` and deleted (a file with its location is
+   never kept in the public dataset); any other problem `pending` (a later sweep
    retries it). Other files (PDF, STL) are not stripped by any Function and are left as they are.
 4. **Sweep.** Every run then handles up to 5 earlier uploads (older than the grace period, used by
    no document, not made by the migration or a Function) that still have their metadata: never
-   checked, `replaced` but not deleted, a due `pending`, a stale `processing`, or checked by an
-   older stripper.
+   checked, `replaced` but not deleted, `failed` (deleted; or stripped again when an older stripper
+   failed), a due `pending`, a stale `processing`, or checked by an older stripper.
+
+Uploads are read with a unique `privacyFetch` query parameter and the Function's token
+(`privacy/private-fetch.ts`), never through their plain public URL: the asset CDN keeps a deleted
+file cached for up to 30 days. Copies record their upload only as a keyed digest
+(`privacy/provenance.ts`, the `PRIVACY_LINK_KEY` environment variable).
 
 There is no scheduled sweep: scheduled Functions need the Blueprint stack promoted to the
 organization (one-way) and a robot token, which is the owner's decision. Until then a leftover

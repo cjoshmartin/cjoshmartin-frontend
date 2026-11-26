@@ -4,6 +4,7 @@
  * check the results independently of the strippers' own checks.
  */
 import {execFileSync} from 'node:child_process'
+import {readFileSync} from 'node:fs'
 import {createHash} from 'node:crypto'
 
 export function tool(command: string, args: string[], input?: Buffer): Buffer {
@@ -106,10 +107,34 @@ export function personalTags(
   return found
 }
 
-/** Decoded frames as ffmpeg sees them, without applying the orientation (one MD5 per frame). */
+function isJpeg(file: string): boolean {
+  const head = readFileSync(file).subarray(0, 3)
+  return head.length === 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff
+}
+
+/**
+ * Decoded frames as ffmpeg sees them, without applying the orientation (one MD5 per frame).
+ *
+ * A JPEG is read with ffmpeg's plain JPEG reader (`jpeg_pipe`), as the migration's pixel check does:
+ * from ffmpeg 9.1 the default reader follows the MPF index and decodes the primary image's last row
+ * of blocks differently ("overread 8"), while djpeg, ImageMagick and jpeg_pipe agree. jpeg_pipe
+ * returns the primary image as the first frame and each image stored after it (MPF secondary
+ * images such as an HDR gain map) as a further frame; see sameImageFrames.
+ */
 export function ffmpegFrames(file: string): string[] {
-  const out = tool('ffmpeg', ['-v', 'error', '-noautorotate', '-i', file, '-map', '0:v', '-f', 'framemd5', '-']).toString('utf8')
+  const input = isJpeg(file) ? ['-f', 'jpeg_pipe', '-i', file] : ['-i', file]
+  const out = tool('ffmpeg', ['-v', 'error', '-noautorotate', ...input, '-map', '0:v', '-f', 'framemd5', '-']).toString('utf8')
   return out.split('\n').filter((line) => line !== '' && !line.startsWith('#'))
+}
+
+/**
+ * Whether the stripped file decodes to the input's frames. The stripper removes everything after a
+ * JPEG's primary image by design (`afterImageRemoved`: MPF secondary images, motion photos), so
+ * then the output must be exactly the input's first frame; otherwise every frame must be the same.
+ */
+export function sameImageFrames(input: string[], output: string[], afterImageRemoved: boolean): boolean {
+  if (afterImageRemoved) return input.length >= 1 && output.length === 1 && output[0] === input[0]
+  return input.length === output.length && input.every((frame, i) => frame === output[i])
 }
 
 /** ImageMagick's pixel signature of every frame (sha256 of the decoded pixel values). */

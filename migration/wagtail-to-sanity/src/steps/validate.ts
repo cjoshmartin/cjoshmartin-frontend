@@ -53,6 +53,9 @@ import {requirePrivacyMap} from '../privacy/copies'
 import {downloadAsset} from '../privacy/download'
 import {pixelHashes} from '../privacy/image'
 import {assetIdWithSha1, PRIVACY_FIELD, strippedMarker} from '../privacy/marker'
+import {danglingAssetPointers} from '../privacy/pointers'
+import {IMAGE_PRIVACY_SOURCE_NAME, VIDEO_ORIGINAL_SOURCE_NAME} from '../../../../studio/functions/privacy/constants'
+import {isUploadDigest, UNLINKED_SOURCE_ID} from '../../../../studio/functions/privacy/provenance'
 import {PRIVACY_RULES_VERSION} from '../privacy/rules'
 import {scanLocalFile} from '../privacy/scan'
 import {compareMediaPackets} from '../privacy/video'
@@ -955,12 +958,27 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
       if (originalsOfCopies.has(String(asset.sha1hash))) check.fail(`${asset._id}: an upload with personal metadata is still in the dataset (its stripped copy has sha1 ${privacy.copies[String(asset.sha1hash)]!.sha1})`)
       const copy = copiesBySha1.get(String(asset.sha1hash))
       if (copy) {
-        const expected = strippedMarker({kind: copy.kind, removed: copy.removed, strippedFrom: assetIdWithSha1(asset._id, copy.sha1, copy.originalSha1), strippedAt: copy.strippedAt})
+        const expected = strippedMarker({kind: copy.kind, removed: copy.removed, uploadId: assetIdWithSha1(asset._id, copy.sha1, copy.originalSha1), strippedAt: copy.strippedAt})
         if (stableStringify(asset[PRIVACY_FIELD] ?? null) === stableStringify(expected)) marked++
         else check.fail(`${asset._id}: stripped copy without the expected ${PRIVACY_FIELD} field`)
       }
     }
-    check.summary = `${scanned} assets downloaded and scanned (exiftool -ee, the Functions' image and video strippers, tracks, unused mdat bytes, STL headers; rules ${PRIVACY_RULES_VERSION}): ${results.filter((r) => r.scan.findings.length).length} with personal metadata; ${marked}/${assets.filter((a) => copiesBySha1.has(String(a.sha1hash))).length} stripped copies marked; ${assets.filter((a) => originalsOfCopies.has(String(a.sha1hash))).length} unstripped uploads left; ${linked} source URLs, each serving the asset's own bytes`
+    // No document names an asset that is not in the dataset: an asset id is its CDN URL, and the
+    // CDN keeps serving a deleted asset for up to 30 days (studio/functions/privacy/provenance.ts).
+    // Copies record their upload only as a keyed digest.
+    const versions = await client.fetch<Doc[]>(`*[_id in path("versions.**")]`)
+    const pointers = danglingAssetPointers([...all, ...versions].filter((d) => !d._id.startsWith('secrets.')), new Set(assets.map((a) => a._id)))
+    for (const p of pointers) check.fail(`${p.documentId}: ${p.path} names an asset that is not in the dataset (sha1 ${p.sha1Prefix}...)`)
+    for (const asset of assets) {
+      const assetPrivacy = asset[PRIVACY_FIELD] as {strippedFrom?: unknown; strippedFromDigest?: unknown} | undefined
+      if (assetPrivacy?.strippedFrom !== undefined) check.fail(`${asset._id}: ${PRIVACY_FIELD}.strippedFrom names the upload; copies record strippedFromDigest`)
+      if (assetPrivacy?.strippedFromDigest !== undefined && !isUploadDigest(assetPrivacy.strippedFromDigest)) check.fail(`${asset._id}: ${PRIVACY_FIELD}.strippedFromDigest is not a digest`)
+      const source = asset.source as {name?: unknown; id?: unknown} | undefined
+      if ((source?.name === IMAGE_PRIVACY_SOURCE_NAME || source?.name === VIDEO_ORIGINAL_SOURCE_NAME) && !isUploadDigest(source.id) && source.id !== UNLINKED_SOURCE_ID) {
+        check.fail(`${asset._id}: a Function's copy whose source.id is not the upload's digest`)
+      }
+    }
+    check.summary = `${scanned} assets downloaded and scanned (exiftool -ee, the Functions' image and video strippers, tracks, unused mdat bytes, STL headers; rules ${PRIVACY_RULES_VERSION}): ${results.filter((r) => r.scan.findings.length).length} with personal metadata; ${marked}/${assets.filter((a) => copiesBySha1.has(String(a.sha1hash))).length} stripped copies marked; ${assets.filter((a) => originalsOfCopies.has(String(a.sha1hash))).length} unstripped uploads left; ${linked} source URLs, each serving the asset's own bytes; ${pointers.length} documents naming a missing asset (${all.length + versions.length} documents searched)`
     checks.push(check)
   }
 

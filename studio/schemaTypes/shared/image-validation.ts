@@ -2,7 +2,7 @@ import type {ImageRule, ValidationContext} from 'sanity'
 
 import type {AssetPrivacy} from '../../functions/privacy/constants'
 import {API_VERSION} from '../../lib/constants'
-import {imageFormatProblem, imagePrivacyState, imagePrivacyWarning} from './image-privacy'
+import {imageFormatProblem, imagePrivacyError, imagePrivacyState, imagePrivacyWarning} from './image-privacy'
 
 interface ImageValueLike {
   asset?: {_ref?: string}
@@ -22,8 +22,9 @@ async function assetInfo(value: ImageValueLike | undefined, context: ValidationC
 
 /**
  * Validation of every image field and type: an error for a format whose metadata cannot be removed
- * losslessly (an SVG or HEIC picked from the media browser, for example), and a warning while the
- * image-privacy Function could not remove the location and camera data yet.
+ * losslessly (an SVG or HEIC picked from the media browser, for example) and for an image whose
+ * location and camera data the image-privacy Function cannot remove, and a warning while it could
+ * not remove them yet.
  */
 export function privateImageValidation(rule: ImageRule): ImageRule[] {
   return [
@@ -31,7 +32,7 @@ export function privateImageValidation(rule: ImageRule): ImageRule[] {
       .custom(async (value, context) => {
         const info = await assetInfo(value as ImageValueLike | undefined, context)
         if (!info) return true
-        return imageFormatProblem(info.mimeType) ?? true
+        return imageFormatProblem(info.mimeType) ?? imagePrivacyError(imagePrivacyState(info.privacy)) ?? true
       })
       .error(),
     rule

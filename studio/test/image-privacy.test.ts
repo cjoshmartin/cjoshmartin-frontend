@@ -10,6 +10,7 @@ import {
   imageFormatProblem,
   imagePrivacyLabel,
   imagePrivacyState,
+  imagePrivacyError,
   imagePrivacyWarning,
   PRIVATE_IMAGE_OPTIONS,
 } from '../schemaTypes/shared/image-privacy'
@@ -48,7 +49,8 @@ describe('imagePrivacyState, label and warning', () => {
   it('warns about failures and retries', () => {
     const failed = imagePrivacyState({status: 'failed', version: v, message: 'BigTIFF is not supported.'})
     assert.deepEqual(failed, {kind: 'failed', message: 'BigTIFF is not supported.'})
-    assert.match(imagePrivacyWarning(failed) ?? '', /could not be removed from this image: BigTIFF is not supported\. Replace it/)
+    assert.match(imagePrivacyError(failed) ?? '', /could not be removed from this image: BigTIFF is not supported\. The uploaded file stays public, with that data, for as long as a document uses it\. Replace it/)
+    assert.equal(imagePrivacyWarning(failed), null, 'an error, not a warning')
     assert.equal(imagePrivacyLabel(failed, false)?.tone, 'critical')
     const pending = imagePrivacyState({status: 'pending', version: v, message: 'HTTP 503'})
     assert.match(imagePrivacyWarning(pending) ?? '', /waiting to be retried: HTTP 503/)

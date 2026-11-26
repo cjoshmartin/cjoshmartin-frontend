@@ -18,7 +18,10 @@ import {
  */
 async function validateVideoFile(value: FileValue | undefined, context: ValidationContext) {
   const assetId = value?.asset?._ref
-  if (!assetId) return 'Upload or select a video'
+  if (!assetId) {
+    const state = videoConversionState(undefined, (context.parent as VideoValue | undefined)?.conversion, SETTINGS_VERSION)
+    return state.kind === 'removed' ? `Upload another video. ${state.message}` : 'Upload or select a video'
+  }
   const asset = await context
     .getClient({apiVersion: API_VERSION})
     .fetch<{mimeType?: string} | null>(
@@ -52,7 +55,7 @@ export const video = defineType({
       title: 'Video file',
       type: 'file',
       description:
-        'Upload any video. It is converted to MP4 automatically; this field then holds the MP4 the site plays, and your upload is kept under "Original upload".',
+        'Upload any video. It is converted to MP4 automatically; this field then holds the MP4 the site plays, and your upload is kept under "Original upload" without its location and personal metadata. An upload whose location data cannot be removed is taken out of the block and deleted.',
       options: {accept: 'video/*'},
       // The custom rule also runs when the field is empty, so it doubles as the required check.
       validation: (rule) => rule.custom(validateVideoFile),
@@ -62,7 +65,7 @@ export const video = defineType({
       title: 'Original upload',
       type: 'file',
       description:
-        'The uploaded file, kept for reference without its location and personal metadata (same video and audio). The site never serves it.',
+        'The uploaded file without its location and personal metadata (same video and audio, not re-encoded). The site never links it, but like every file in this dataset it can be downloaded by anyone who finds it. Location that a camera writes into the video picture data itself (some dash cams and drones) is part of the video and is kept: turn it off in the camera, or remove it with the camera maker\'s software, before uploading.',
       readOnly: true,
       hidden: ({value}) => !(value as FileValue | undefined)?.asset?._ref,
     }),
@@ -133,6 +136,7 @@ export const video = defineType({
         value?.conversion,
         SETTINGS_VERSION,
       )
+      if (state.kind === 'removed') return `The upload was not kept: ${state.message}`
       return state.kind === 'failed'
         ? `MP4 conversion failed: ${state.message}. Upload another file or remove the video.`
         : true

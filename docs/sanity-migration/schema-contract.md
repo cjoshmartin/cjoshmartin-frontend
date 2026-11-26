@@ -291,11 +291,11 @@ Video contract v2; the full rules are in [Videos](#videos-video-contract-v2).
 | Field | Type | Req. | Studio | Notes |
 |---|---|---|---|---|
 | `file` | file, `accept: "video/*"` | yes | editable | The file the site plays. After conversion it is the converted MP4. Must reference an asset whose `mimeType` starts with `video/`. |
-| `original` | file | | read-only, hidden while empty | The upload, kept but never served. Since 2026-11-26 a copy of it without location and personal metadata (same video and audio packets); set by the converter. |
+| `original` | file | | read-only, hidden while empty | The upload, kept but never linked by the site (like every file of a public dataset it can be downloaded by anyone who finds it). Since 2026-11-26 a copy of it without location and personal metadata (same video and audio packets); set by the converter. An upload whose metadata cannot be removed is not kept: `file` and `original` are removed (see Privacy). |
 | `conversion` | object | | read-only, collapsed | Set by the converter. |
 | `conversion.status` | string `pending` \| `processing` \| `ready` \| `failed` | | | Titles Pending, Processing, Ready, Failed. Other values are a validation error. `pending` with a message for the current file is a retryable problem (not the video's fault) that the converter retries. |
 | `conversion.message` | string | | | Failure reason, retry reason, or other converter details. |
-| `conversion.sourceAssetId` | string | | | `_id` of the original asset that was (or is being) converted. |
+| `conversion.sourceAssetId` | string | | | `_id` of the original asset that was (or is being) converted. Unset when the converter removed an upload it could not strip (it never names a deleted upload). |
 | `conversion.outputAssetId` | string | | | `_id` of the MP4 asset produced. |
 | `conversion.settingsVersion` | string | | | `SETTINGS_VERSION` the MP4 was made with, `h264-crf23-max1920-v2` today. |
 | `conversion.originalStripped` | boolean | | | `true` when `original` is the upload's copy without location and personal metadata. The video-to-mp4 Function writes it on every ready result (`false` only for an adopted MP4 whose original was never stripped). |
@@ -421,8 +421,9 @@ checked; a scheduled sweep would need a one-way Blueprint stack promotion (owner
 
 **Site.** The site only plays a block whose `file` is its converted MP4 (`conversion.status` is
 `ready`, `file.asset._ref == conversion.outputAssetId`, `video/mp4`). A block that is still being
-converted, or whose conversion failed, renders nothing: its `file` is the original upload, which
-is never served.
+converted, or whose conversion failed, renders nothing: its `file` is the original upload (or the
+copy without metadata), which the site never links. An upload the converter cannot strip is
+removed from the block (no `file`).
 
 ### MP4 settings
 
@@ -502,7 +503,7 @@ field.
 **Asset `privacy` field** (`PRIVACY_FIELD`, on `sanity.imageAsset` and `sanity.fileAsset`):
 
 ```json
-{"status": "stripped", "version": "image-strip-v1", "strippedFrom": "image-<sha1>-4032x3024-jpg",
+{"status": "stripped", "version": "image-strip-v1", "strippedFromDigest": "hmac-sha256:<64 hex digits>",
  "removed": ["EXIF: Make, Model, GPS, MakerNote, thumbnail (IFD1)", "XMP"], "updatedAt": "..."}
 ```
 
@@ -510,17 +511,31 @@ field.
 |---|---|
 | `processing` | A run is checking or stripping this upload; also its lease (`holder`, `expiresAt`). |
 | `pending` | A problem that is not the file's fault (download, upload, API); retried by the first event 10 minutes or more later. `message` says why. |
-| `failed` | The file cannot be stripped with this `version` (corrupt, BigTIFF, old-style JPEG-in-TIFF, SVG, not a video). Final until the version changes. |
+| `failed` | The file cannot be stripped with this `version` (corrupt, BigTIFF, old-style JPEG-in-TIFF, SVG, not a video, too large for the Function, a check that fails). Final until the version changes. The upload is never kept once nothing uses it: a video upload is taken out of every block at once and deleted; an image stays only while a document uses it (a validation error, so the document cannot be published with it); an unused one is deleted by the upload-privacy Function. |
 | `clean` | Checked: nothing personal. Left as it is (a video's `original` is then the upload itself). |
-| `stripped` | A copy without personal metadata (`strippedFrom`: the upload it was made from; `removed`: what went, names only). |
+| `stripped` | A copy without personal metadata (`strippedFromDigest`: the keyed digest of the upload it was made from, see "Provenance" below; `removed`: what went, names only). |
 | `replaced` | An upload with personal metadata; `replacementAssetId` is its copy. References are moved and it is deleted once nothing references it. |
 
 `version` is `IMAGE_STRIP_VERSION` (`image-strip-v1`) for images and `VIDEO_STRIP_VERSION`
 (`video-strip-v2`: in place; `video-strip-v1` was the ffmpeg stream copy) for videos. A new version
 re-checks images on the next change of a document that uses them. Copies made by the Functions have
-`source: {name: "image-privacy", id: <upload>}` or `source: {name: "video-to-mp4-original", id:
-<upload>}`; the migration's copies keep `source: {name: "wagtail", id}` without `url` (the bucket
-URL would link to the unstripped original).
+`source: {name: "image-privacy", id: <the upload's digest>}` or `source: {name:
+"video-to-mp4-original", id: <the upload's digest>}`; the migration's copies keep `source: {name:
+"wagtail", id}` without `url` (the bucket URL would link to the unstripped original).
+
+**Provenance without pointers** (privacy review round 2). An asset id is the asset's
+content-addressed CDN path, and the asset CDN keeps serving a deleted asset for up to 30 days (see
+"Asset CDN" below). So no public document names an unstripped upload: a copy records its upload
+only as `hmac-sha256:<hex>`, HMAC-SHA256 of the upload's asset id with the owner's key
+`PRIVACY_LINK_KEY` (`studio/functions/privacy/provenance.ts`; a Function environment variable of
+image-privacy, video-to-mp4 and upload-privacy, set with `npx sanity@latest functions env add`, and
+in the migration's `secrets.env`). With the key the Functions find an upload's earlier copy and the
+migration finds a copy's bucket original; without it nobody can get from the digest to the id or
+confirm a guessed id. Without the key a Function writes `source.id: "unlinked"` and no digest. The
+migration's `validate` fails on any document that names an asset id not in the dataset, on any
+`privacy.strippedFrom` (the round-1 field that held the id) and on a Function copy whose
+`source.id` is not a digest. A video block whose upload was removed does not name it either
+(`conversion.sourceAssetId` is unset).
 
 **What counts as personal** (one policy for migrated assets and new uploads): anything except what
 displaying the picture or playing the video needs. Personal: location of any kind, camera, phone or
@@ -542,8 +557,9 @@ matrix (rotation), edit lists and the technical data a decoder needs.
   can be uploaded. SVG, HEIC/HEIF (Sanity itself cannot process HEVC images) and BMP are refused,
   and an existing asset of another format is a validation error.
 - The input shows the Function's progress under the image ("Checking...", "Removing location and
-  camera data...", "Location and camera data removed...", or a warning when it failed or waits to
-  retry).
+  camera data...", "Location and camera data removed...", a warning while it waits to retry, or an
+  error when it failed: the file stays public with that data while a document uses it, so replace
+  it).
 - Trigger: create and update of the watched document types (drafts and release versions included)
   with an image whose asset was uploaded since 2026-11-26T00:00:00Z and still needs work (no
   `privacy`, another version, `replaced`, a stale `processing`, a due `pending`). The filter follows
@@ -556,8 +572,13 @@ matrix (rotation), edit lists and the technical data a decoder needs.
   then the upload is deleted. A version in a release that can no longer be edited (scheduled,
   published, archived) is not written; the upload stays `replaced` until the release is published
   (the published document's event moves it) or archived (the upload-privacy sweep deletes it).
-- The plain image CDN URL serves a re-encoded rendition without any metadata; the stored file is
-  only available with `?dlRaw=` and a token. The Function reads the stored file that way.
+- The plain image CDN URL usually serves a re-encoded rendition without any metadata, but not
+  always: for 22 of the 110 images per dataset (all 8 GIFs, 5 JPEGs and 9 PNGs) it returns the
+  stored bytes exactly, and anonymous `?dl=` does the same for 18 (privacy review round 2,
+  measured 2026-11-26). So the stored file itself must be clean, which is why a failed image is a
+  validation error and is deleted once unused. `?dlRaw=` returns the stored file and requires a
+  token (anonymous requests get 401); the Function reads the stored file that way, and that
+  response is `private, no-store`.
 
 **Videos** (video-to-mp4 Function; strippers `studio/functions/privacy/isobmff-video.ts` and
 `video-strip.ts`): `original` is the upload with its metadata removed in place for QuickTime/MP4:
@@ -576,20 +597,63 @@ points `file` at the MP4 and `original` at the copy, `failed` and `pending` poin
 versions are converted like drafts while their release is active. The converted MP4 is checked to
 carry no metadata boxes besides ffmpeg's encoder name.
 
+An upload the strippers cannot handle (larger than about 480 MB, which does not fit in the
+Function's `/tmp`; a file the in-place stripper and the stream copy both refuse; a check that
+fails; a timeout) is marked `failed` and taken out of every block that uses it: `file` and
+`original` are removed and `conversion` is `{status: "failed", message}` without `sourceAssetId`,
+where the message says why and asks for another file. The Studio shows "Upload removed: ..." on
+the block and an error on its file field. The upload is then deleted (a version in a locked
+release keeps it until the release is published or archived; the upload-privacy sweep deletes it
+then). A later run for another block with the same upload uses the recorded failure without
+stripping again.
+
+**Residual limit: location inside the video stream.** The streams are kept bit for bit (owner
+decision), so location that a camera writes into the coded video or audio samples themselves (for
+example H.264/HEVC SEI user data from some dash cams and drones) stays in `original`, which, like
+every file in a public dataset, can be downloaded by anyone who finds it. The checks only look for
+location outside the kept samples. The 29 Wagtail originals have no location fingerprint anywhere
+in their bytes. The converted MP4 is re-encoded and does not carry it. The Studio's help text on
+`original` says so.
+
 **Uploads no document uses** (upload-privacy Function, `studio/functions/upload-privacy`): on the
 creation of an image or file asset (not one the migration or a Function made) it removes any
 location or EXIF data Sanity extracted into the asset document at once, waits a minute for a
 document to use the upload (then the Functions above handle it), and otherwise strips it the same
-way (a copy, then the upload is deleted; an image uploaded as a file asset gets a file copy). On every upload and every deleted document (a publish, a
+way (a copy, then the upload is deleted; an image uploaded as a file asset gets a file copy; an
+upload the strippers fail on is deleted). On every upload and every deleted document (a publish, a
 discarded draft, an archived release) it also sweeps up to five earlier unused uploads that still
-have their metadata (never checked, `replaced` but not deleted, a due retry). There is no scheduled
-sweep (it would need the Blueprint stack promoted to the organization and a robot token: the
-owner's call).
+have their metadata (never checked, `replaced` but not deleted, `failed`, a due retry). There is no
+scheduled sweep (it would need the Blueprint stack promoted to the organization and a robot token:
+the owner's call).
+
+**Asset CDN** (privacy review round 2). Deleting an asset does not remove it from the asset CDN
+(`cdn.sanity.io`, Google Cloud CDN): files and renditions are cached with `cache-control: public,
+max-age=31536000, s-maxage=2592000`, so an edge that served a file keeps serving it for up to 30
+days after the deletion (Sanity: "the CDN might have your asset cached, so it may not disappear
+immediately"; there is no purge API, only Sanity support). Measured on staging with fresh assets:
+after an anonymous GET of the plain URL and the deletion, the plain URL still answered 200; after a
+GET with a unique query parameter or with a token, it answered 404. So:
+
+- the Functions read every upload with a unique `privacyFetch` query parameter and their token
+  (`studio/functions/privacy/private-fetch.ts`), so the unstripped bytes never enter the public
+  cache under the guessable URL;
+- no public document names a deleted upload (see "Provenance without pointers");
+- the uploads the privacy work deleted on 2026-11-26 may still be cached where something fetched
+  them before (the verification scans, the Functions' round-1 code). The owner's purge request to
+  Sanity support lists every path (kept outside the repository, because it names where the
+  unstripped bytes were), and `migration/verify/src/deleted-asset-cdn-probe.mjs` re-probes them;
+  run it until 2026-12-26 (30 days after the last deletion).
+- an editor's own browser fetches an upload's plain URL only if the editor opens it (the Studio's
+  file input shows the name, not the file).
 
 **Files**: `fileLink` annotations accept PDF documents only (`options.accept: ".pdf,application/pdf"`
 and a validation error for any other file): a photo or video attached as a file would be served
-exactly as uploaded. `stlModel` accepts `.stl` only. No Function strips PDF or STL files; the
-migration's privacy step checks STL headers and PDF metadata for people's names.
+exactly as uploaded. `stlModel` accepts `.stl` only. No Function strips PDF or STL files yet (open
+point of the privacy review, round 2 finding 7): a new PDF keeps its document information (author,
+creating application, dates) and XMP, and an STL its 80-byte header. The migration's privacy step
+checks STL headers and PDF metadata for people's names; the two résumé PDFs keep the printing
+browser, the PDF producer and their dates, and the three STL headers name the CAD exporter and its
+version.
 
 ## Validation
 

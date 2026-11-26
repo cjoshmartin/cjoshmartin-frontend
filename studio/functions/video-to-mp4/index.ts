@@ -15,6 +15,7 @@ import {randomUUID} from 'node:crypto'
 import {createClient} from '@sanity/client'
 import {documentEventHandler} from '@sanity/functions'
 
+import {PRIVACY_LINK_KEY_ENV, uploadDigesterFromEnv} from '../privacy/provenance'
 import {FFMPEG_LINUX_ARM64_SHA256, ffmpegStaticPath, verifyFfmpegBinary} from './ffmpeg'
 import {runVideoToMp4} from './orchestrator'
 import {createSanityConverter, createSanityStore} from './sanity'
@@ -38,7 +39,8 @@ export const handler = documentEventHandler<VideoEventData>(async ({context, eve
   const documentId = event.data._id
   const log = (message: string) => console.log(`[${runId.slice(0, 8)}] ${message}`)
   const client = createClient({...context.clientOptions, apiVersion: API_VERSION, useCdn: false})
-  const store = createSanityStore(client)
+  const uploadDigest = uploadDigesterFromEnv()
+  const store = createSanityStore(client, {uploadDigest})
 
   if (context.local === true) {
     // `sanity functions test`: report what a deployed run would do, without writing or converting
@@ -55,12 +57,14 @@ export const handler = documentEventHandler<VideoEventData>(async ({context, eve
     return
   }
 
+  if (!uploadDigest) log(`${PRIVACY_LINK_KEY_ENV} is not set: stripped copies are not linked to their uploads`)
   const deadline = startedAt + (FUNCTION_TIMEOUT_SECONDS - DEADLINE_MARGIN_SECONDS) * 1000
   const converter = createSanityConverter(client, {
     ffmpeg: async () => verifyFfmpegBinary(await ffmpegStaticPath(), FFMPEG_LINUX_ARM64_SHA256),
     preset: PRESET,
     deadline,
     log,
+    uploadDigest,
   })
 
   const outcome = await runVideoToMp4({store, converter, documentId, runId, log})

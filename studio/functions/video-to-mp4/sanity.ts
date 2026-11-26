@@ -2,7 +2,9 @@
  * The orchestrator's ContentStore and Converter on top of @sanity/client: revision-checked
  * patches, the queries for other blocks using the same upload and for an earlier conversion with
  * the current settings, and the upload of a converted MP4 as a file asset with
- * source {name: "video-to-mp4", id: <upload>} and the settings version recorded on it.
+ * source {name: "video-to-mp4", id: <the original it was converted from>} and the settings version
+ * recorded on it. The original is always the stripped copy (or an upload with nothing personal),
+ * so that id names nothing private. Asset bytes are read with privacy/private-fetch.ts.
  */
 import {createReadStream} from 'node:fs'
 import {rm} from 'node:fs/promises'
@@ -11,6 +13,8 @@ import os from 'node:os'
 import {ClientError, type SanityClient} from '@sanity/client'
 
 import {PRIVACY_FIELD, VIDEO_ORIGINAL_SOURCE_NAME, VIDEO_STRIP_VERSION} from '../privacy/constants'
+import {privateAssetFetch} from '../privacy/private-fetch'
+import type {UploadDigester} from '../privacy/provenance'
 import {isWritableDocument, releaseDocumentId, releaseOfVersion} from '../privacy/releases'
 import {convertToMp4, removeStaleWorkDirs, type ConvertOptions} from './convert'
 import {
@@ -38,7 +42,7 @@ function isRevisionConflict(error: unknown): boolean {
   return error instanceof ClientError && (error.statusCode === 409 || error.statusCode === 404)
 }
 
-export function createSanityStore(client: SanityClient): ContentStore {
+export function createSanityStore(client: SanityClient, options: {uploadDigest: UploadDigester | undefined}): ContentStore {
   const raw = client.withConfig({perspective: 'raw', useCdn: false})
   return {
     async getDocument(id) {
@@ -78,9 +82,12 @@ export function createSanityStore(client: SanityClient): ContentStore {
       )
     },
     async findStrippedOriginal(uploadAssetId) {
+      // Copies record the upload's digest, never its id (privacy/provenance.ts); without the key
+      // no copy can be found, and the upload is stripped again (to the same bytes, so the same asset).
+      if (!options.uploadDigest) return null
       return raw.fetch<AssetDocument | null>(
         `*[_type == "sanity.fileAsset" && source.name == $name && source.id == $id && ${PRIVACY_FIELD}.status == "stripped" && ${PRIVACY_FIELD}.version == $version] | order(_createdAt asc)[0]`,
-        {name: VIDEO_ORIGINAL_SOURCE_NAME, id: uploadAssetId, version: VIDEO_STRIP_VERSION},
+        {name: VIDEO_ORIGINAL_SOURCE_NAME, id: options.uploadDigest(uploadAssetId), version: VIDEO_STRIP_VERSION},
         {tag: 'video-to-mp4.stripped'},
       )
     },
@@ -113,6 +120,10 @@ export interface SanityConverterOptions {
   log: (message: string) => void
   tmpDir?: string
   downloadLimitBytes?: ConvertOptions['downloadLimitBytes']
+  /** The keyed digest a stripped copy records instead of the upload's id (privacy/provenance.ts). */
+  uploadDigest: UploadDigester | undefined
+  /** Reads asset bytes; privateAssetFetch with the client's token by default. */
+  fetchImpl?: typeof fetch
 }
 
 const megabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`
@@ -141,6 +152,9 @@ export function createSanityConverter(
       options.log(`removed work directories of an earlier run: ${removed.join(', ')}`)
     }
   }
+  // Every read of an asset's bytes has its own cache key and the token, so an unstripped upload
+  // never enters the asset CDN's public cache under its plain URL (privacy/private-fetch.ts).
+  const fetchImpl = options.fetchImpl ?? privateAssetFetch(client.config().token)
   return {
     async strip(upload: AssetDocument) {
       const ffmpegPath = await verifiedFfmpeg()
@@ -150,6 +164,8 @@ export function createSanityConverter(
         deadline: options.deadline,
         log: options.log,
         tmpDir: options.tmpDir,
+        fetchImpl,
+        uploadDigest: options.uploadDigest,
       })
     },
     async convert(source: AssetDocument) {
@@ -173,6 +189,7 @@ export function createSanityConverter(
           log: options.log,
           tmpDir: options.tmpDir,
           downloadLimitBytes: options.downloadLimitBytes,
+          fetchImpl,
         },
       )
       try {

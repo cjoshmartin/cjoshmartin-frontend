@@ -163,6 +163,22 @@ describe('resultOps', () => {
     }
   })
 
+  it('failed with removeUpload: file and original go, conversion says why and names no upload', () => {
+    const OLD = 'file-b111111111111111111111111111111111111111-mov'
+    const block: VideoBlock = {_type: 'video', _key: 'v', file: file(MOV), original: file(OLD), conversion: {status: 'processing', sourceAssetId: MOV}}
+    const result: ConversionResult = {status: 'failed', fileAssetId: MOV, message: 'Too large. The upload was removed.', removeUpload: true, deleteUpload: MOV}
+    const after = applyPatch({_id: 'd', _type: 'blogPost', body: [block]}, resultOps(located(block), result, NOW)) as {body: VideoBlock[]}
+    assert.deepEqual(after.body[0], {
+      _type: 'video',
+      _key: 'v',
+      conversion: {status: 'failed', message: 'Too large. The upload was removed.', settingsVersion: SETTINGS_VERSION, updatedAt: NOW.toISOString()},
+    })
+    // It goes to every block that uses the upload, not only the origin and waiting ones.
+    const doc = {_id: 'p', _type: 'project', body: [{_type: 'video', _key: 'origin', file: file(MOV)}, {_type: 'video', _key: 'untouched', file: file(MOV)}, {_type: 'video', _key: 'other', file: file(MP4), conversion: {outputAssetId: MP4}}]}
+    const ops = documentResultOps(doc, result, {documentId: 'drafts.p', field: 'body', key: 'origin'}, NOW)
+    assert.deepEqual(ops?.unset?.sort(), ['body[_key=="origin"].file', 'body[_key=="origin"].original', 'body[_key=="untouched"].file', 'body[_key=="untouched"].original'])
+  })
+
   it('ready records the settings version the result names', () => {
     const ops = resultOps(located(block), {...ready, settingsVersion: 'h264-older'}, NOW)
     const conversion = ops.set?.['body[_key=="v"].conversion'] as {settingsVersion?: string}

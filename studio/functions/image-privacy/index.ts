@@ -14,6 +14,7 @@ import {randomUUID} from 'node:crypto'
 import {createClient} from '@sanity/client'
 import {documentEventHandler} from '@sanity/functions'
 
+import {PRIVACY_LINK_KEY_ENV, uploadDigesterFromEnv} from '../privacy/provenance'
 import {createSanityImageStore} from './sanity'
 import {describeOutcome, runImagePrivacy} from './orchestrator'
 import {FUNCTION_TIMEOUT_SECONDS, imageAssetIds, type ImageEventData} from './trigger'
@@ -39,7 +40,9 @@ export const handler = documentEventHandler<ImageEventData>(async ({context, eve
     return
   }
 
-  const outcome = await runImagePrivacy({store, documentId, runId, deadline, log})
+  const uploadDigest = uploadDigesterFromEnv()
+  if (!uploadDigest) log(`${PRIVACY_LINK_KEY_ENV} is not set: stripped copies are not linked to their uploads`)
+  const outcome = await runImagePrivacy({store, documentId, runId, deadline, log, uploadDigest})
   const elapsed = `${((Date.now() - startedAt) / 1000).toFixed(1)} s`
   if (outcome.kind === 'document-missing') log(`${documentId}: no longer exists (published or discarded meanwhile)`)
   else if (outcome.kind === 'nothing-to-do') log(`${documentId}: no image needs work`)

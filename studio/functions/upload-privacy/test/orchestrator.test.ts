@@ -11,7 +11,8 @@ import {beforeEach, describe, it} from 'node:test'
 
 import {evaluate, parse} from 'groq-js'
 
-import {PRIVACY_FIELD, VIDEO_STRIP_VERSION} from '../../privacy/constants'
+import {IMAGE_STRIP_VERSION, PRIVACY_FIELD, VIDEO_STRIP_VERSION} from '../../privacy/constants'
+import {uploadDigest} from '../../privacy/provenance'
 import {createImageAssetProcessor} from '../../image-privacy/orchestrator'
 import {jpegWithGps, TINY_JPEG} from '../../image-privacy/test/fixtures'
 import {MemoryImageStore} from '../../image-privacy/test/memory-store'
@@ -38,7 +39,8 @@ const imageRef = (ref: string) => ({_type: 'imageWithAlt', asset: {_type: 'refer
 const fakeStripVideo: VideoStripper = async (upload) => {
   videoCalls.push(upload._id)
   const copy = `file-${sha1(`copy of ${upload._id}`)}-mov`
-  store.put({_id: copy, _type: 'sanity.fileAsset', _createdAt: new Date(clock).toISOString(), mimeType: 'video/quicktime', source: {name: 'video-to-mp4-original', id: upload._id}, [PRIVACY_FIELD]: {status: 'stripped', version: VIDEO_STRIP_VERSION, strippedFrom: upload._id}})
+  const link = uploadDigest(upload._id, 'cd'.repeat(32))
+  store.put({_id: copy, _type: 'sanity.fileAsset', _createdAt: new Date(clock).toISOString(), mimeType: 'video/quicktime', source: {name: 'video-to-mp4-original', id: link}, [PRIVACY_FIELD]: {status: 'stripped', version: VIDEO_STRIP_VERSION, strippedFromDigest: link}})
   store.put({...store.get(upload._id)!, [PRIVACY_FIELD]: {status: 'replaced', version: VIDEO_STRIP_VERSION, replacementAssetId: copy}})
   return {assetId: copy, clean: false, message: 'The original is kept without its location.'}
 }
@@ -125,12 +127,13 @@ describe('a new upload', () => {
     assert.equal(store.get(mov), undefined)
   })
 
-  it('a video the stripper cannot handle is marked failed; an unexpected error pending, and reported', async () => {
+  it('a video the stripper cannot handle is deleted (its location data cannot be removed); an unexpected error pending, and reported', async () => {
     const broken = putVideo('broken.mov')
-    await runUploadPrivacy(options(created(broken), {stripVideo: async () => {
+    const outcome = await runUploadPrivacy(options(created(broken), {stripVideo: async () => {
       throw new UploadStripFailure('ffmpeg could not read the file as a video')
     }}))
-    assert.equal((store.get(broken)![PRIVACY_FIELD] as {status: string}).status, 'failed')
+    assert.deepEqual(outcome.outcomes[0], {assetId: broken, kind: 'deleted', reason: 'its location data cannot be removed'})
+    assert.equal(store.get(broken), undefined, 'not kept in the public dataset')
     const flaky = putVideo('flaky.mov')
     await assert.rejects(
       runUploadPrivacy(options(created(flaky), {stripVideo: async () => {
@@ -179,6 +182,27 @@ describe('the sweep', () => {
     assert.ok(store.get(used), 'a used upload is left to the content Functions')
     assert.ok(store.get(migrated), "the migration's assets are not touched")
     assert.ok(store.get(copy))
+  })
+
+  it('deletes an unused upload the current stripper failed on; strips one an older stripper failed on', async () => {
+    const failedNow = putVideo('failed-now', {[PRIVACY_FIELD]: {status: 'failed', version: VIDEO_STRIP_VERSION, message: 'too large'}}, GRACE_SECONDS + 60)
+    const failedBefore = putVideo('failed-before', {[PRIVACY_FIELD]: {status: 'failed', version: 'video-strip-v1', message: 'old stripper'}}, GRACE_SECONDS + 50)
+    const failedImage = store.putImage(new Uint8Array(Buffer.from('not an image at all')), {_createdAt: new Date(clock - (GRACE_SECONDS + 40) * 1000).toISOString(), [PRIVACY_FIELD]: {status: 'failed', version: IMAGE_STRIP_VERSION, message: 'not a JPEG'}})
+    const outcome = await runUploadPrivacy(options({operation: 'delete', id: 'drafts.blogPost-9', type: 'blogPost'}))
+    assert.deepEqual(
+      outcome.outcomes.map((o) => `${o.assetId === failedNow ? 'now' : o.assetId === failedBefore ? 'before' : o.assetId === failedImage ? 'image' : o.assetId}:${o.kind}`),
+      ['now:deleted', 'before:video', 'image:deleted'],
+    )
+    assert.equal(store.get(failedNow), undefined)
+    assert.equal(store.get(failedImage), undefined)
+    assert.deepEqual(videoCalls, [failedBefore], 'stripped again by the current stripper')
+  })
+
+  it('an unused image the image stripper fails on is deleted', async () => {
+    const broken = store.putImage(new Uint8Array(Buffer.from('GIF89a but not really a GIF')), {_createdAt: new Date(clock).toISOString(), mimeType: 'image/gif'})
+    const outcome = await runUploadPrivacy(options(created(broken)))
+    assert.deepEqual(outcome.outcomes, [{assetId: broken, kind: 'deleted', reason: 'its location data cannot be removed'}])
+    assert.equal(store.get(broken), undefined)
   })
 
   it('stops starting new uploads near the deadline', async () => {

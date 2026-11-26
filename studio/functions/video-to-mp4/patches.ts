@@ -137,8 +137,12 @@ export type ConversionResult =
    * The video cannot be converted with these settings; final until the file changes. With
    * `strippedAssetId` (the copy without location data was made before the conversion failed),
    * `file` moves to that copy and `deleteUpload` names the unstripped upload to delete.
+   * With `removeUpload` (its location and personal metadata could not be removed, so no copy
+   * exists), the upload is taken out of the block (`file` and `original` removed, `conversion`
+   * says why, without naming the upload) and `deleteUpload` deletes it: an upload whose location
+   * data cannot be removed is never kept in the public dataset (privacy review round 2, finding 2).
    */
-  | {status: 'failed'; fileAssetId: string; message: string; strippedAssetId?: string; deleteUpload?: string}
+  | {status: 'failed'; fileAssetId: string; message: string; strippedAssetId?: string; deleteUpload?: string; removeUpload?: boolean}
   /**
    * A problem that is not the video's fault (the converter's setup, a download, an API error):
    * recorded as `pending` and retried by the first event after RETRY_DELAY_SECONDS. With
@@ -161,6 +165,12 @@ export type ConversionResult =
  */
 export function resultOps(video: LocatedVideo, result: ConversionResult, now: Date): PatchOps {
   const path = (child: string) => blockPath(video.field, video.key, child)
+  if (result.status === 'failed' && result.removeUpload) {
+    return {
+      set: {[path('conversion')]: conversionValue('failed', {message: result.message}, now)},
+      unset: [path('file'), path('original')],
+    }
+  }
   if (result.status === 'failed' || result.status === 'retry') {
     const file = result.strippedAssetId ?? result.fileAssetId
     return {
@@ -208,9 +218,10 @@ export function resultOps(video: LocatedVideo, result: ConversionResult, now: Da
 
 /**
  * Whether `result` should be written to this block. A ready or restart result goes to every block
- * whose `file` is still that upload and not yet converted. A failure or retry only goes to the
- * block this run started from and to blocks that are waiting for this run (`processing` for the
- * same upload); other blocks with the same upload get their own run.
+ * whose `file` is still that upload and not yet converted, and so does a failure that removes the
+ * upload (it cannot be used anywhere, and it is deleted once no block uses it). Another failure or
+ * a retry only goes to the block this run started from and to blocks that are waiting for this run
+ * (`processing` for the same upload); other blocks with the same upload get their own run.
  */
 export function shouldReceiveResult(
   video: LocatedVideo,
@@ -222,6 +233,7 @@ export function shouldReceiveResult(
   if (fileAssetId(video.block.file) !== result.fileAssetId) return false
   if (!needsConversion(video.block)) return false
   if (result.status === 'ready' || result.status === 'restart') return true
+  if (result.status === 'failed' && result.removeUpload) return true
   // Already recorded (by this run's first delivery, or another run): writing it again would only
   // cause another update event.
   if (isFailedForCurrentFile(video.block)) return false

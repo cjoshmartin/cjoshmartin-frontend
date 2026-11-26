@@ -8,6 +8,7 @@ import {randomUUID} from 'node:crypto'
 import {evaluate, parse} from 'groq-js'
 
 import {PRIVACY_FIELD, VIDEO_ORIGINAL_SOURCE_NAME, VIDEO_STRIP_VERSION} from '../../privacy/constants'
+import {uploadDigest, type UploadDigester} from '../../privacy/provenance'
 import {isWritableDocument, releaseDocumentId, releaseOfVersion} from '../../privacy/releases'
 import type {AssetDocument, ContentStore, DeleteOutcome, StoredDocument} from '../orchestrator'
 import type {PatchOps} from '../patches'
@@ -20,6 +21,9 @@ import {
 import {documentsUsingFileQuery} from '../trigger'
 
 type Doc = Record<string, unknown> & {_id: string; _type: string}
+
+/** The digest the tests' copies record instead of their upload's id (a fixed test key). */
+export const testUploadDigest: UploadDigester = (id) => uploadDigest(id, 'ab'.repeat(32))
 
 const SEGMENT = /^([A-Za-z_][A-Za-z0-9_]*)(?:\[_key==("(?:[^"\\]|\\.)*")\])?$/
 
@@ -172,7 +176,7 @@ export class MemoryStore implements ContentStore {
   async findStrippedOriginal(uploadAssetId: string): Promise<AssetDocument | null> {
     return this.query<AssetDocument | null>(
       `*[_type == "sanity.fileAsset" && source.name == $name && source.id == $id && ${PRIVACY_FIELD}.status == "stripped" && ${PRIVACY_FIELD}.version == $version] | order(_createdAt asc)[0]`,
-      {name: VIDEO_ORIGINAL_SOURCE_NAME, id: uploadAssetId, version: VIDEO_STRIP_VERSION},
+      {name: VIDEO_ORIGINAL_SOURCE_NAME, id: testUploadDigest(uploadAssetId), version: VIDEO_STRIP_VERSION},
     )
   }
 

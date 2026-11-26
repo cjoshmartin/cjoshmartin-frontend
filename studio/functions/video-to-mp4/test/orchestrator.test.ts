@@ -31,7 +31,7 @@ import {
   type VideoBlock,
 } from '../trigger'
 import {evaluate, parse} from 'groq-js'
-import {MemoryStore} from './memory-store'
+import {MemoryStore, testUploadDigest} from './memory-store'
 
 const MOV = 'file-1111111111111111111111111111111111111111-mov'
 const MP4 = 'file-2222222222222222222222222222222222222222-mp4'
@@ -84,8 +84,8 @@ const convertedAsset = (id: string, sourceId: string, settingsVersion?: string) 
 /** A copy of `uploadId` without metadata, as the stripper uploads it. */
 const strippedAsset = (uploadId: string) =>
   fileAsset(stripped(uploadId), {
-    source: {name: VIDEO_ORIGINAL_SOURCE_NAME, id: uploadId},
-    [PRIVACY_FIELD]: {status: 'stripped', version: VIDEO_STRIP_VERSION, strippedFrom: uploadId},
+    source: {name: VIDEO_ORIGINAL_SOURCE_NAME, id: testUploadDigest(uploadId)},
+    [PRIVACY_FIELD]: {status: 'stripped', version: VIDEO_STRIP_VERSION, strippedFromDigest: testUploadDigest(uploadId)},
   })
 
 /** A converter whose conversions finish when the test says so. */
@@ -257,7 +257,7 @@ describe('runVideoToMp4', () => {
     store.put({
       ...strippedAsset(MOV),
       _id: 'file-7777777777777777777777777777777777777777-mov',
-      [PRIVACY_FIELD]: {status: 'stripped', version: 'video-strip-v0', strippedFrom: MOV},
+      [PRIVACY_FIELD]: {status: 'stripped', version: 'video-strip-v0', strippedFromDigest: testUploadDigest(MOV)},
     })
     const converter = new FakeConverter(store)
     await runVideoToMp4(options({converter}))
@@ -369,7 +369,7 @@ describe('runVideoToMp4', () => {
     assert.equal(converter.calls.length, 1)
   })
 
-  it('records a failure to strip on the upload itself (no copy exists) and keeps it', async () => {
+  it('takes an upload that cannot be stripped out of the block and deletes it (no copy exists)', async () => {
     const converter = new FakeConverter(
       store,
       'immediate',
@@ -378,11 +378,15 @@ describe('runVideoToMp4', () => {
     )
     await runVideoToMp4(options({converter}))
     const after = videoOf(store, 'drafts.blogPost-1')!
-    assert.deepEqual(after.file, file(MOV))
+    assert.equal(after.file, undefined, 'the upload is out of the block')
+    assert.equal(after.original, undefined)
     assert.equal(after.conversion?.status, 'failed')
-    assert.equal(after.conversion?.sourceAssetId, MOV)
-    assert.ok(store.get(MOV), 'nothing replaces it')
+    assert.equal(after.conversion?.sourceAssetId, undefined, 'the block does not name the deleted upload')
+    assert.match(after.conversion?.message ?? '', /not a video\. The upload was removed from this block and deleted/)
+    assert.ok(!JSON.stringify(store.get('drafts.blogPost-1')).includes(MOV.split('-')[1]), 'nothing names the upload')
+    assert.equal(store.get(MOV), undefined, 'the upload with its location is deleted')
     assert.deepEqual(converter.calls, [])
+    assert.equal(await filterMatches(store, 'drafts.blogPost-1'), false, 'no new run for the block')
   })
 
   it('waits for the upload sweep that is stripping the same upload and converts its copy', async () => {
@@ -760,7 +764,9 @@ describe('runVideoToMp4', () => {
       'the new file gets its own run',
     )
   })
-  it('records failed when the original cannot be stripped, and does not convert or delete it', async () => {
+  it('takes an unstrippable upload out of every document that uses it, then deletes it', async () => {
+    // A published document uses the same upload but does not wait for this run.
+    store.put({_id: 'blogPost-2', _type: 'blogPost', title: 'U', body: [{_type: 'video', _key: 'w', file: file(MOV)}]})
     const converter = new FakeConverter(
       store,
       'immediate',
@@ -769,13 +775,35 @@ describe('runVideoToMp4', () => {
     )
     const outcome = await runVideoToMp4(options({converter}))
     assert.equal(outcome.kind, 'done')
-    const after = videoOf(store, 'drafts.blogPost-1')!
-    assert.equal(after.conversion?.status, 'failed')
-    assert.match(after.conversion?.message ?? '', /could not be removed/)
-    assert.deepEqual(after.file, file(MOV))
+    assert.deepEqual(outcome.kind === 'done' && outcome.patchedDocuments, ['blogPost-2', 'drafts.blogPost-1'])
+    assert.equal(videoOf(store, 'drafts.blogPost-1')!.file, undefined)
+    const other = videoOf(store, 'blogPost-2', 'w')!
+    assert.equal(other.file, undefined)
+    assert.match(other.conversion?.message ?? '', /unsupported stream\. The upload was removed/)
+    assert.equal(store.get(MOV), undefined, 'deleted once nothing uses it')
+    assert.equal(await filterMatches(store, 'blogPost-2'), false)
+  })
+
+  it('uses a failure the current stripper already recorded on the upload, without stripping again', async () => {
+    store.put({...store.get(MOV)!, [PRIVACY_FIELD]: {status: 'failed', version: VIDEO_STRIP_VERSION, message: 'The location and personal metadata could not be removed: unsupported stream.'}})
+    const converter = new FakeConverter(store)
+    await runVideoToMp4(options({converter}))
+    assert.deepEqual(converter.stripCalls, [], 'no second strip')
     assert.deepEqual(converter.calls, [])
-    assert.ok(store.get(MOV), 'the upload stays while the block references it')
-    assert.equal(await filterMatches(store, 'drafts.blogPost-1'), false)
+    const after = videoOf(store, 'drafts.blogPost-1')!
+    assert.equal(after.file, undefined)
+    assert.match(after.conversion?.message ?? '', /^The location and personal metadata could not be removed: unsupported stream\. The upload was removed/)
+    assert.equal(store.get(MOV), undefined)
+  })
+
+  it('keeps an unstrippable upload a locked release still uses, marked failed, for the sweep', async () => {
+    store.put({_id: 'versions.rLocked.blogPost-1', _type: 'blogPost', title: 'T', body: [{_type: 'video', _key: 'v', file: file(MOV)}]})
+    store.put({_id: '_.releases.rLocked', _type: 'system.release', state: 'scheduled'})
+    const converter = new FakeConverter(store, 'immediate', undefined, new ConversionFailure('The video is too large for the converter to remove its location data.'))
+    await runVideoToMp4(options({converter}))
+    assert.equal(videoOf(store, 'drafts.blogPost-1')!.file, undefined)
+    assert.deepEqual(videoOf(store, 'versions.rLocked.blogPost-1')!.file, file(MOV), 'a locked release is never written')
+    assert.equal((store.get(MOV)![PRIVACY_FIELD] as {status: string}).status, 'failed')
   })
 
   it('records a strip problem that is not the file\'s fault as pending', async () => {

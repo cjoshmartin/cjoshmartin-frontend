@@ -3,8 +3,9 @@
  * an API client). File assets are served exactly as stored at /files/, so its location would be
  * public. The image-privacy Function's stripper makes the copy (coded image, orientation and ICC
  * profile byte for byte), which is uploaded as a file asset with source {name: "image-privacy",
- * id: <upload>} and marked `stripped`; the upload is marked `replaced`. An image with nothing
- * personal is marked `clean`.
+ * id: <the upload's digest>} (privacy/provenance.ts) and marked `stripped`; the upload is marked
+ * `replaced`. An image with nothing personal is marked `clean`. The upload is read with
+ * privacy/private-fetch.ts (the caller's `fetchImpl`), never through its plain public URL.
  */
 import {createHash} from 'node:crypto'
 
@@ -12,6 +13,7 @@ import type {SanityClient} from '@sanity/client'
 
 import {IMAGE_PRIVACY_SOURCE_NAME, IMAGE_STRIP_VERSION, PRIVACY_FIELD, type AssetPrivacy} from '../privacy/constants'
 import {IMAGE_MIME_TYPES, ImageStripError, stripImage} from '../privacy/image-strip'
+import {copySourceId, type UploadDigester} from '../privacy/provenance'
 import type {StoredDocument} from '../image-privacy/orchestrator'
 import {UploadStripFailure} from './orchestrator'
 
@@ -23,14 +25,13 @@ type FileAsset = StoredDocument & {url?: string; size?: number; sha1hash?: strin
 export async function stripImageFile(
   client: SanityClient,
   upload: FileAsset,
-  options: {deadline: number; fetchImpl?: typeof fetch},
+  options: {deadline: number; fetchImpl: typeof fetch; uploadDigest: UploadDigester | undefined},
 ): Promise<{assetId: string; clean: boolean; message: string}> {
   if (!upload.url) throw new Error(`${upload._id} has no URL yet`)
   if (upload.size !== undefined && upload.size > MAX_IMAGE_FILE_BYTES) {
     throw new UploadStripFailure(`The image is ${(upload.size / 1e6).toFixed(0)} MB, more than the Function reads; upload a smaller file.`)
   }
-  const fetchImpl = options.fetchImpl ?? fetch
-  const response = await fetchImpl(upload.url, {headers: {'accept-encoding': 'identity'}, signal: AbortSignal.timeout(Math.max(1, options.deadline - Date.now()))})
+  const response = await options.fetchImpl(upload.url, {headers: {'accept-encoding': 'identity'}, signal: AbortSignal.timeout(Math.max(1, options.deadline - Date.now()))})
   if (!response.ok) throw new Error(`the file could not be downloaded (HTTP ${response.status})`)
   const bytes = new Uint8Array(await response.arrayBuffer())
   if (upload.size !== undefined && bytes.length !== upload.size) throw new Error(`downloaded ${bytes.length} bytes, the asset has ${upload.size}`)
@@ -53,13 +54,14 @@ export async function stripImageFile(
   const copy = (await client.assets.upload('file', Buffer.from(result.output), {
     filename: upload.originalFilename ?? upload._id,
     contentType: IMAGE_MIME_TYPES[result.format],
-    source: {name: IMAGE_PRIVACY_SOURCE_NAME, id: upload._id},
+    source: {name: IMAGE_PRIVACY_SOURCE_NAME, id: copySourceId(upload._id, options.uploadDigest)},
   })) as unknown as FileAsset
   const copySha1 = createHash('sha1').update(result.output).digest('hex')
   if (copy.sha1hash !== copySha1 || copy.size !== result.output.length) {
     throw new Error(`the uploaded copy ${copy._id} is not the stripped file (sha1 ${copy.sha1hash}, expected ${copySha1})`)
   }
-  const stripped: AssetPrivacy = {status: 'stripped', version: IMAGE_STRIP_VERSION, strippedFrom: upload._id, removed: result.personal, updatedAt: now}
+  const link = options.uploadDigest?.(upload._id)
+  const stripped: AssetPrivacy = {status: 'stripped', version: IMAGE_STRIP_VERSION, ...(link ? {strippedFromDigest: link} : {}), removed: result.personal, updatedAt: now}
   await client.patch(copy._id).set({[PRIVACY_FIELD]: stripped}).commit({visibility: 'sync'})
   const replaced: AssetPrivacy = {status: 'replaced', version: IMAGE_STRIP_VERSION, replacementAssetId: copy._id, removed: result.personal, updatedAt: now}
   await client.patch(upload._id).set({[PRIVACY_FIELD]: replaced}).commit({visibility: 'sync'})

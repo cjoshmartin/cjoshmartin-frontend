@@ -82,4 +82,17 @@ describe('the sweep', () => {
     const result = await evaluate(parse(SWEEP_QUERY), {dataset, params: sweepParams([id(4)]), timestamp: NOW})
     assert.deepEqual(await result.get(), [id(1), id(2), id(4, 'mov')], 'id(4) is the event\'s own upload, excluded')
   })
+
+  it('finds unused uploads the stripper failed on, with any version (they are deleted or stripped again)', async () => {
+    const old = GRACE_SECONDS + 30
+    const dataset = [
+      {_id: 'image-1111111111111111111111111111111111111111-8x8-gif', _type: 'sanity.imageAsset', _createdAt: ago(old + 2), privacy: {status: 'failed', version: IMAGE_STRIP_VERSION}},
+      {_id: 'file-2222222222222222222222222222222222222222-mov', _type: 'sanity.fileAsset', _createdAt: ago(old + 1), mimeType: 'video/quicktime', privacy: {status: 'failed', version: 'video-strip-v1'}},
+      // A failed upload a document still uses is not a candidate (the Studio shows the error).
+      {_id: 'file-3333333333333333333333333333333333333333-mov', _type: 'sanity.fileAsset', _createdAt: ago(old), mimeType: 'video/quicktime', privacy: {status: 'failed', version: VIDEO_STRIP_VERSION}},
+      {_id: 'versions.r1.blogPost-1', _type: 'blogPost', body: [{_type: 'video', _key: 'v', file: {asset: {_type: 'reference', _ref: 'file-3333333333333333333333333333333333333333-mov'}}}]},
+    ]
+    const result = await evaluate(parse(SWEEP_QUERY), {dataset, params: sweepParams([]), timestamp: NOW})
+    assert.deepEqual(await result.get(), ['image-1111111111111111111111111111111111111111-8x8-gif', 'file-2222222222222222222222222222222222222222-mov'])
+  })
 })

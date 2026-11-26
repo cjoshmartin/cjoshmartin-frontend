@@ -13,6 +13,7 @@ import {
   VIDEO_STRIP_VERSION,
   type AssetPrivacy,
 } from '../../../../studio/functions/privacy/constants'
+import {PRIVACY_LINK_KEY_ENV, uploadDigesterFromEnv, type UploadDigester} from '../../../../studio/functions/privacy/provenance'
 import {PRIVACY_RULES_VERSION} from './rules'
 
 export {PRIVACY_FIELD}
@@ -21,10 +22,24 @@ export interface StrippedCopyFacts {
   kind: 'image' | 'video'
   /** What was removed (group or box names, never values). */
   removed: readonly string[]
-  /** The id the unstripped upload has (or would have) in a dataset: the asset it was made from. */
-  strippedFrom: string
+  /**
+   * The id the unstripped upload has (or would have) in a dataset: the asset it was made from. The
+   * marker records only its keyed digest (strippedFromDigest): the id names the deleted upload's
+   * CDN URL, which may still serve it (privacy review round 2, finding 1).
+   */
+  uploadId: string
   /** When the local copy was made. */
   strippedAt: string
+}
+
+/**
+ * The digest of the Functions' key (PRIVACY_LINK_KEY, loaded from secrets.env by loadSecrets), so
+ * the migration's copies and the Functions' copies record their uploads the same way.
+ */
+export function migrationUploadDigest(): UploadDigester {
+  const digest = uploadDigesterFromEnv()
+  if (!digest) throw new Error(`${PRIVACY_LINK_KEY_ENV} is not set: add it to secrets.env (the key the Functions have)`)
+  return digest
 }
 
 export function strippedMarker(copy: StrippedCopyFacts): AssetPrivacy {
@@ -35,7 +50,7 @@ export function strippedMarker(copy: StrippedCopyFacts): AssetPrivacy {
       `Stripped by the Wagtail migration's privacy step (rules ${PRIVACY_RULES_VERSION}, ` +
       `${copy.kind === 'image' ? "the image-privacy Function's stripper" : 'in-place ISO BMFF box removal, as in the video-to-mp4 Function'}, no re-encoding).`,
     removed: [...copy.removed],
-    strippedFrom: copy.strippedFrom,
+    strippedFromDigest: migrationUploadDigest()(copy.uploadId),
     updatedAt: copy.strippedAt,
   }
 }

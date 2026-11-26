@@ -234,7 +234,7 @@ export function expectedPrivacyMarker(map: PrivacyMap, asset: Pick<PlannedAsset,
   return strippedMarker({
     kind: copy.kind,
     removed: copy.removed,
-    strippedFrom: assetIdWithSha1(assetId, asset.sha1, copy.originalSha1),
+    uploadId: assetIdWithSha1(assetId, asset.sha1, copy.originalSha1),
     strippedAt: copy.strippedAt,
   })
 }

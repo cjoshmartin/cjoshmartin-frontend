@@ -30,12 +30,15 @@ export const VIDEO_STRIP_VERSION = 'video-strip-v2'
  */
 export const PRIVACY_FIELD = 'privacy'
 
-/** `source.name` of a stripped image uploaded by the image-privacy Function (`source.id`: the upload). */
+/**
+ * `source.name` of a stripped image uploaded by the image-privacy Function (`source.id`: the
+ * upload's digest, provenance.ts; never the upload's asset id).
+ */
 export const IMAGE_PRIVACY_SOURCE_NAME = 'image-privacy'
 
 /**
  * `source.name` of a stripped video original uploaded by the video-to-mp4 Function (`source.id`:
- * the upload it was made from).
+ * the digest of the upload it was made from, provenance.ts; never the upload's asset id).
  */
 export const VIDEO_ORIGINAL_SOURCE_NAME = 'video-to-mp4-original'
 
@@ -77,10 +80,13 @@ export const ASSET_PRIVACY_STATUSES = [
  * - `processing`: a run is checking or stripping this upload (also the lease: `holder`, `expiresAt`).
  * - `pending`: the last attempt hit a problem that is not the file's fault; retried after
  *   RETRY_DELAY_SECONDS on the next event.
- * - `failed`: the file cannot be stripped with this `version` (unsupported or corrupt); final until
- *   the version changes. The Studio shows a warning.
+ * - `failed`: the file cannot be stripped with this `version` (unsupported or corrupt, too large, a
+ *   check that fails); final until the version changes. Never kept once unused: video-to-mp4 takes
+ *   a failed video upload out of its blocks and deletes it, the Studio shows an error on a failed
+ *   image (the file is public while a document uses it), and upload-privacy deletes unused ones.
  * - `clean`: checked, no personal metadata; the asset is left as it is.
- * - `stripped`: a copy without personal metadata made by a Function (`strippedFrom`: the upload).
+ * - `stripped`: a copy without personal metadata made by a Function or the migration
+ *   (`strippedFromDigest`: the upload's digest, provenance.ts).
  * - `replaced`: an upload with personal metadata whose stripped copy is `replacementAssetId`; every
  *   reference is moved to the copy and this asset is deleted once nothing references it.
  */
@@ -93,8 +99,12 @@ export interface AssetPrivacy {
   message?: string
   /** What was (or would be) removed, e.g. "EXIF GPS", "XMP". */
   removed?: string[]
-  /** On `stripped`: the asset `_id` of the upload it was made from. */
-  strippedFrom?: string
+  /**
+   * On `stripped`: the keyed digest of the asset `_id` of the upload it was made from
+   * (provenance.ts, `hmac-sha256:<hex>`). Never the id itself: an id names the deleted upload's
+   * URL, which the asset CDN may still serve. Absent when the copy was made without the key.
+   */
+  strippedFromDigest?: string
   /** On `replaced`: the asset `_id` of the stripped copy. */
   replacementAssetId?: string
   /** On `processing`: the run that holds the lease and when the lease ends. */

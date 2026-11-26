@@ -15,6 +15,8 @@ network.
 | `isobmff-video.ts` | `planIsobmffStrip(reader)`: the in-place strip of a QuickTime/MP4 video (metadata boxes, data tracks and their samples, creation times, handler names, every unused `mdat` byte); `applyIsobmffPlan`/`applyIsobmffPlanToFile`; `checkStrippedIsobmff` (nothing personal left, no location or device signature outside the samples). Also used by the Wagtail migration's privacy step. |
 | `video-strip.ts` | `stripIsobmffInPlace(...)`: the in-place strip of a file on disk, checked with ffmpeg (same streams and side data, every packet with its time stamps) and byte by byte. `stripVideo(...)`: the fallback ffmpeg stream copy without metadata, data tracks, subtitles, chapters and creation times, with its checks. Also `checkIsobmffBoxes`, used on the converted MP4s. |
 | `releases.ts` | Release versions: which release a `versions.*` id belongs to, and when a Function may write to it (the release is `active`). |
+| `provenance.ts` | The keyed digest a stripped copy records instead of its upload's id (`privacy.strippedFromDigest`, the copy's `source.id`): HMAC-SHA256 with `PRIVACY_LINK_KEY` (a Function environment variable; the migration's `secrets.env`). An asset id names its CDN URL, which may serve a deleted upload for 30 days. |
+| `private-fetch.ts` | `privateAssetFetch(token)`: how the Functions read an upload: a unique `privacyFetch` query parameter and the token on every request, so the unstripped bytes never enter the asset CDN's public cache under the upload's plain URL. |
 | `test/` | Unit tests (`npm test`) and media tests (`npm run test:media`). |
 
 ## Images
@@ -81,3 +83,17 @@ PRIVACY_ORIGINALS_DIR=~/cjoshmartin-migration/gcs/original_images npm run test:m
 
 The linux-arm64 binary can be fetched with `npm_config_platform=linux npm_config_arch=arm64 npm i
 ffmpeg-static@5.3.0` in an empty directory (sha256 `6bb182d0...fb8ce`).
+
+Without `PRIVACY_VIDEOS_DIR` and `PRIVACY_ORIGINALS_DIR` the corpus tests are skipped (node:test
+reports them as skipped); a report must say which of them ran. With a newer local ffmpeg:
+
+- Newer ffmpeg (9.1; not the Function's 7.0.2) prints QuickTime track references as stream groups, listing a stream again
+  in each group and sometimes only there; `describeContainer` reads each stream once.
+- ffmpeg 9.1 decodes a JPEG's primary image differently through the MPF index ("overread 8"), so
+  the tests decode JPEGs with `jpeg_pipe` (djpeg, ImageMagick and jpeg_pipe agree) and accept that
+  the stripped file has only the primary image (MPF secondary images are removed by design).
+- ffmpeg 9.1's muxer changes the duration of the packet before a run of packets with the same
+  decode time stamp (7 macOS screen recordings): the stream-copy fallback's packet check refuses
+  those copies (it fails closed). The corpus test accepts only that refusal, only for such files
+  and only with another ffmpeg than the Function's 7.0.2, which copies them within the rules. The
+  in-place strip (the Function's path for QuickTime/MP4) is not affected.

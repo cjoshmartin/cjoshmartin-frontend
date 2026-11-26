@@ -23,8 +23,12 @@
  * bytes, and so their content-addressed asset ids, without touching any media data, so the check
  * never shares (or deletes) an asset with the migration's own upload of the same original.
  *
+ * The stripped copies are found by the keyed digest of their upload (privacy/provenance.ts), so
+ * PRIVACY_LINK_KEY must be the key the deployed Functions have; step 1 also checks that the copy
+ * records the digest and never the upload's id.
+ *
  * Usage (from this function's directory; needs ffmpeg and ffprobe on PATH):
- *   SANITY_PROJECT_ID=... SANITY_WRITE_TOKEN=... npx tsx scripts/live-check.ts \
+ *   SANITY_PROJECT_ID=... SANITY_WRITE_TOKEN=... PRIVACY_LINK_KEY=... npx tsx scripts/live-check.ts \
  *     --first <hevc.mov> --second <video> [--dataset staging] [--json <result.json>]
  */
 import {execFile} from 'node:child_process'
@@ -37,6 +41,7 @@ import {parseArgs, promisify} from 'node:util'
 import {createClient, type SanityClient} from '@sanity/client'
 
 import {VIDEO_ORIGINAL_SOURCE_NAME, VIDEO_STRIP_VERSION} from '../../privacy/constants'
+import {PRIVACY_LINK_KEY_ENV, uploadDigesterFromEnv, type UploadDigester} from '../../privacy/provenance'
 import {sha1File} from '../ffmpeg'
 import {inspectMp4} from '../mp4'
 import {LEASE_FIELD} from '../patches'
@@ -153,11 +158,14 @@ async function upload(client: SanityClient, file: string, contentType: string): 
   return asset._id
 }
 
+/** The keyed digest of an upload's id (set in main from PRIVACY_LINK_KEY). */
+let digest: UploadDigester
+
 /** The upload's copy without location and personal metadata, made by the Function. */
 async function strippedCopy(client: SanityClient, uploadId: string) {
-  return client.fetch<{_id: string; privacy?: {status?: string; version?: string}} | null>(
-    '*[_type == "sanity.fileAsset" && source.name == $name && source.id == $id][0]{_id, privacy}',
-    {name: VIDEO_ORIGINAL_SOURCE_NAME, id: uploadId},
+  return client.fetch<{_id: string; source?: {id?: string}; privacy?: {status?: string; version?: string; strippedFromDigest?: string}} | null>(
+    '*[_type == "sanity.fileAsset" && source.name == $name && source.id == $id][0]',
+    {name: VIDEO_ORIGINAL_SOURCE_NAME, id: digest(uploadId)},
     {perspective: 'raw', useCdn: false},
   )
 }
@@ -337,7 +345,7 @@ async function cleanup(client: SanityClient) {
   // The stripped copies of the uploads, then the MP4s converted from the uploads or the copies.
   const copies = await client.fetch<string[]>(
     '*[_type == "sanity.fileAsset" && source.name == $name && source.id in $ids]._id',
-    {name: VIDEO_ORIGINAL_SOURCE_NAME, ids: created.uploads},
+    {name: VIDEO_ORIGINAL_SOURCE_NAME, ids: created.uploads.map((id) => digest(id))},
     {perspective: 'raw'},
   )
   const outputs = await client.fetch<string[]>(
@@ -385,6 +393,9 @@ async function main() {
   const projectId = process.env.SANITY_PROJECT_ID
   const token = process.env.SANITY_WRITE_TOKEN
   if (!projectId || !token) throw new Error('SANITY_PROJECT_ID and SANITY_WRITE_TOKEN must be set')
+  const fromEnv = uploadDigesterFromEnv()
+  if (!fromEnv) throw new Error(`${PRIVACY_LINK_KEY_ENV} must be set to the Functions' key`)
+  digest = fromEnv
   if (!values.first || !values.second)
     throw new Error('--first <hevc.mov> and --second <video> are required')
   const dataset = values.dataset!
@@ -452,6 +463,8 @@ async function main() {
     const mp4 = block.file!.asset!._ref!
     const copy = await strippedCopy(client, mov)
     check(copy && copy.privacy?.status === 'stripped' && copy.privacy.version === VIDEO_STRIP_VERSION, 'a stripped copy of the upload')
+    check(copy.privacy?.strippedFromDigest === digest(mov), 'the copy records the upload digest')
+    check(!JSON.stringify(copy).includes(mov.split('-')[1]), "the copy never names the upload's id (its CDN URL)")
     check(block.conversion?.outputAssetId === mp4, 'outputAssetId = file')
     check(block.conversion?.sourceAssetId === copy._id, 'sourceAssetId = the stripped copy')
     check(block.conversion?.settingsVersion === SETTINGS_VERSION, 'settingsVersion')

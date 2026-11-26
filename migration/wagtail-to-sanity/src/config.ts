@@ -116,7 +116,10 @@ export interface Secrets {
  * never logged.
  */
 export function loadSecrets(paths: DataPaths): Secrets {
-  const needed = ['SANITY_WRITE_TOKEN'] as const
+  // PRIVACY_LINK_KEY: the key of the stripped copies' upload digests (studio/functions/privacy/
+  // provenance.ts), the same as the Functions' environment variable. Read from process.env by
+  // src/privacy/marker.ts.
+  const needed = ['SANITY_WRITE_TOKEN', 'PRIVACY_LINK_KEY'] as const
   if (needed.some((name) => !process.env[name]) && existsSync(paths.secretsFile)) {
     process.loadEnvFile(paths.secretsFile)
   }

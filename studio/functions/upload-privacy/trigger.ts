@@ -103,8 +103,9 @@ export function isAssetType(type: unknown): type is 'sanity.imageAsset' | 'sanit
  * GROQ query for the sweep: uploads since UPLOADED_SINCE, older than the grace period, not made by
  * the migration or a Function, images or videos (image assets, and file assets of either kind),
  * used by no document, and still with their
- * metadata: never checked, `replaced` but not deleted, a due retry, a stale `processing` mark, or
- * checked by an older stripper. Params: $since, $grace, $retry, $stale, $own, $exclude,
+ * metadata: never checked, `replaced` but not deleted, `failed` (its location data could not be
+ * removed, so it is deleted; privacy review round 2, finding 2), a due retry, a stale `processing`
+ * mark, or checked by an older stripper. Params: $since, $grace, $retry, $stale, $own, $exclude,
  * $imageVersion, $videoVersion (a slice takes constant numbers only, so SWEEP_LIMIT is written in).
  */
 export const SWEEP_QUERY = `*[
@@ -117,11 +118,12 @@ export const SWEEP_QUERY = `*[
   && (
     !defined(${PRIVACY_FIELD})
     || ${PRIVACY_FIELD}.status == "replaced"
+    || ${PRIVACY_FIELD}.status == "failed"
     || (${PRIVACY_FIELD}.status == "pending" && coalesce(dateTime(${PRIVACY_FIELD}.updatedAt) < dateTime(now()) - $retry, true))
     || (${PRIVACY_FIELD}.status == "processing" && coalesce(dateTime(${PRIVACY_FIELD}.updatedAt) < dateTime(now()) - $stale, true))
-    || (_type == "sanity.imageAsset" && ${PRIVACY_FIELD}.status in ["clean", "stripped", "failed"] && ${PRIVACY_FIELD}.version != $imageVersion)
-    || (_type == "sanity.fileAsset" && string::startsWith(coalesce(mimeType, ""), "video/") && ${PRIVACY_FIELD}.status in ["clean", "stripped", "failed"] && ${PRIVACY_FIELD}.version != $videoVersion)
-    || (_type == "sanity.fileAsset" && string::startsWith(coalesce(mimeType, ""), "image/") && ${PRIVACY_FIELD}.status in ["clean", "stripped", "failed"] && ${PRIVACY_FIELD}.version != $imageVersion)
+    || (_type == "sanity.imageAsset" && ${PRIVACY_FIELD}.status in ["clean", "stripped"] && ${PRIVACY_FIELD}.version != $imageVersion)
+    || (_type == "sanity.fileAsset" && string::startsWith(coalesce(mimeType, ""), "video/") && ${PRIVACY_FIELD}.status in ["clean", "stripped"] && ${PRIVACY_FIELD}.version != $videoVersion)
+    || (_type == "sanity.fileAsset" && string::startsWith(coalesce(mimeType, ""), "image/") && ${PRIVACY_FIELD}.status in ["clean", "stripped"] && ${PRIVACY_FIELD}.version != $imageVersion)
   )
   && count(*[references(^._id)]) == 0
 ] | order(_createdAt asc)[0...${SWEEP_LIMIT}]._id`

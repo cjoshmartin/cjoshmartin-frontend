@@ -12,6 +12,8 @@ import {createClient} from '@sanity/client'
 import {documentEventHandler} from '@sanity/functions'
 
 import {createImageAssetProcessor} from '../image-privacy/orchestrator'
+import {privateAssetFetch} from '../privacy/private-fetch'
+import {PRIVACY_LINK_KEY_ENV, uploadDigesterFromEnv} from '../privacy/provenance'
 import {FFMPEG_LINUX_ARM64_SHA256, ffmpegStaticPath, verifyFfmpegBinary} from '../video-to-mp4/ffmpeg'
 import {ConversionFailure, type AssetDocument} from '../video-to-mp4/orchestrator'
 import {stripOriginal} from '../video-to-mp4/strip-original'
@@ -39,7 +41,11 @@ export const handler = documentEventHandler<UploadEventData>(async ({context, ev
     return
   }
 
-  const {processAsset} = createImageAssetProcessor({store, runId, log})
+  const uploadDigest = uploadDigesterFromEnv()
+  if (!uploadDigest) log(`${PRIVACY_LINK_KEY_ENV} is not set: stripped copies are not linked to their uploads`)
+  // Uploads are read with their own cache key and the token, never through the plain public URL.
+  const assetFetch = privateAssetFetch(client.config().token)
+  const {processAsset} = createImageAssetProcessor({store, runId, log, uploadDigest})
   const outcome = await runUploadPrivacy({
     store,
     event: event.data,
@@ -50,13 +56,19 @@ export const handler = documentEventHandler<UploadEventData>(async ({context, ev
     async stripVideo(upload) {
       try {
         const ffmpegPath = await verifyFfmpegBinary(await ffmpegStaticPath(), FFMPEG_LINUX_ARM64_SHA256)
-        return await stripOriginal(client, upload as unknown as AssetDocument, {ffmpegPath, deadline: startedAt + (FUNCTION_TIMEOUT_SECONDS - 60) * 1000, log})
+        return await stripOriginal(client, upload as unknown as AssetDocument, {
+          ffmpegPath,
+          deadline: startedAt + (FUNCTION_TIMEOUT_SECONDS - 60) * 1000,
+          log,
+          fetchImpl: assetFetch,
+          uploadDigest,
+        })
       } catch (error) {
         if (error instanceof ConversionFailure) throw new UploadStripFailure(error.message)
         throw error
       }
     },
-    stripImageFile: (upload) => stripImageFile(client, upload, {deadline}),
+    stripImageFile: (upload) => stripImageFile(client, upload, {deadline, fetchImpl: assetFetch, uploadDigest}),
   })
   log(`${event.data.operation} ${event.data.id}: ${outcome.outcomes.map((o) => `${o.assetId} ${describeOutcome(o)}`).join(' | ') || 'nothing to do'} in ${((Date.now() - startedAt) / 1000).toFixed(1)} s`)
 })

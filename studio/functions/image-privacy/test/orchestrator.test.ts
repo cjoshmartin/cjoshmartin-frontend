@@ -11,6 +11,7 @@ import {evaluate, parse} from 'groq-js'
 
 import {IMAGE_PRIVACY_SOURCE_NAME, IMAGE_STRIP_VERSION} from '../../privacy/constants'
 import {analyzeImage} from '../../privacy/image-strip'
+import {UNLINKED_SOURCE_ID, uploadDigest} from '../../privacy/provenance'
 import {RetryableImageError, runImagePrivacy, UnexpectedImageError, type RunOptions} from '../orchestrator'
 import {IMAGE_PRIVACY_FILTER, RETRY_DELAY_SECONDS} from '../trigger'
 import {jpegWithGps, TINY_JPEG} from './fixtures'
@@ -25,12 +26,14 @@ const imageValue = (ref: string, extra: Record<string, unknown> = {}) => ({
 let store: MemoryImageStore
 let gps: string
 const logs: string[] = []
+const KEY = 'ab'.repeat(32)
 const options = (overrides: Partial<RunOptions> = {}): RunOptions => ({
   store,
   documentId: 'drafts.blogPost-1',
   runId: 'run-a',
   log: (m) => logs.push(m),
   sleep: async () => undefined,
+  uploadDigest: (id) => uploadDigest(id, KEY),
   ...overrides,
 })
 
@@ -77,7 +80,9 @@ describe('runImagePrivacy', () => {
     assert.deepEqual(block, {_type: 'imageBlock', _key: 'i', asset: {_type: 'reference', _ref: copy}, layout: 'left', alt: 'In text'})
 
     const copyDoc = store.get(copy)!
-    assert.deepEqual(copyDoc.source, {name: IMAGE_PRIVACY_SOURCE_NAME, id: gps})
+    assert.deepEqual(copyDoc.source, {name: IMAGE_PRIVACY_SOURCE_NAME, id: uploadDigest(gps, KEY)})
+    assert.equal((copyDoc.privacy as {strippedFromDigest: string}).strippedFromDigest, uploadDigest(gps, KEY))
+    assert.ok(!JSON.stringify(copyDoc).includes(gps.split('-')[1]), 'the copy never names the upload (its id is its CDN URL)')
     assert.equal((copyDoc.privacy as {status: string}).status, 'stripped')
     assert.equal((copyDoc.privacy as {version: string}).version, IMAGE_STRIP_VERSION)
     assert.deepEqual((copyDoc.privacy as {removed: string[]}).removed, ['EXIF: Make, GPS'])
@@ -89,6 +94,15 @@ describe('runImagePrivacy', () => {
     assert.deepEqual(store.deletions, [gps])
     assert.equal(await filterMatches('drafts.blogPost-1'), false, 'its own patch does not start another run')
     assert.equal((await runImagePrivacy(options({runId: 'run-b'}))).kind, 'nothing-to-do')
+  })
+
+  it('without the key the copy is not linked to its upload at all', async () => {
+    await runImagePrivacy(options({uploadDigest: undefined}))
+    const copyDoc = store.get(store.uploads[0].id)!
+    assert.deepEqual(copyDoc.source, {name: IMAGE_PRIVACY_SOURCE_NAME, id: UNLINKED_SOURCE_ID})
+    assert.equal((copyDoc.privacy as {strippedFromDigest?: string}).strippedFromDigest, undefined)
+    assert.ok(!JSON.stringify(copyDoc).includes(gps.split('-')[1]))
+    assert.equal(store.get(gps), undefined, 'the upload is deleted all the same')
   })
 
   it('leaves an image without personal metadata alone: no upload, no document change', async () => {

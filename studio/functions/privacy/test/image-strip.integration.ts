@@ -20,11 +20,16 @@ import path from 'node:path'
 import {test} from 'node:test'
 
 import {analyzeImage, stripImage} from '../image-strip'
-import {exifOrientation, exiftoolTags, ffmpegFrames, iccSha256, magickSignatures, personalTags, tool} from './media-tools'
+import {exifOrientation, exiftoolTags, ffmpegFrames, iccSha256, magickSignatures, personalTags, sameImageFrames, tool} from './media-tools'
 
 const ICC = '/System/Library/ColorSync/Profiles/Display P3.icc'
 const MARKERS = ['TestCamera', 'TestPerson', 'TestSerial', 'TestComment', 'TestPlace']
 const dir = mkdtempSync(path.join(os.tmpdir(), 'image-strip-'))
+
+/** Whether the stripper removed data after a JPEG's primary image (MPF secondary images, motion photos). */
+function removedAfterImage(result: ReturnType<typeof stripImage>): boolean {
+  return result.format === 'jpeg' && result.removed.some((item) => /after the end of the image/.test(item.what))
+}
 
 const EXIF_TAGS = [
   '-GPSLatitude=51.5',
@@ -178,7 +183,7 @@ for (const c of cases) {
     assert.equal(exifOrientation(output), exifOrientation(input), 'orientation kept')
     assert.equal(iccSha256(output), iccSha256(input), 'ICC profile kept')
     assert.deepEqual(magickSignatures(output), magickSignatures(input), 'ImageMagick decodes the same pixels')
-    assert.deepEqual(ffmpegFrames(output), ffmpegFrames(input), 'ffmpeg decodes the same frames')
+    assert.ok(sameImageFrames(ffmpegFrames(input), ffmpegFrames(output), removedAfterImage(result)), 'ffmpeg decodes the same frames')
     assert.equal(stripImage(result.output).output, undefined, 'the stripped file is left alone')
   })
 }
@@ -234,7 +239,9 @@ test('every image in PRIVACY_ORIGINALS_DIR strips losslessly', {skip: !originals
     assert.equal(exifOrientation(output), exifOrientation(input), `${name}: orientation`)
     assert.equal(iccSha256(output), iccSha256(input), `${name}: ICC`)
     assert.deepEqual(magickSignatures(output), magickSignatures(input), `${name}: ImageMagick pixels`)
-    assert.deepEqual(ffmpegFrames(output), ffmpegFrames(input), `${name}: ffmpeg frames`)
+    const inputFrames = ffmpegFrames(input)
+    const outputFrames = ffmpegFrames(output)
+    assert.ok(sameImageFrames(inputFrames, outputFrames, removedAfterImage(result)), `${name}: ffmpeg frames (input ${inputFrames.length}, output ${outputFrames.length})`)
   }
   assert.ok(stripped > 0)
 })

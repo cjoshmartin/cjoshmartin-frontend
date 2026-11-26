@@ -24,7 +24,7 @@ import os from 'node:os'
 import path from 'node:path'
 import {test} from 'node:test'
 
-import {parseStreamHash, stripIsobmffInPlace, stripVideo} from '../video-strip'
+import {parseStreamHash, stripIsobmffInPlace, stripVideo, VideoStripError} from '../video-strip'
 import {ffmpegRunner, LINUX_FFMPEG} from './ffmpeg-runner'
 import {exiftoolTags, personalTags, tool} from './media-tools'
 
@@ -222,14 +222,35 @@ function subtitleFile(): string {
   return subtitles
 }
 
+/** Whether a video stream has runs of packets with the same decode time stamp (macOS screen recordings). */
+function hasRepeatedDecodeTimes(file: string): boolean {
+  const lines = tool('ffmpeg', ['-v', 'error', '-i', file, '-map', '0:v', '-c', 'copy', '-f', 'framemd5', '-']).toString('utf8').split('\n')
+  const dts = lines.filter((line) => line !== '' && !line.startsWith('#')).map((line) => line.split(',').map((p) => p.trim()))
+  return dts.some((parts, i) => i > 0 && parts[0] === dts[i - 1][0] && parts[1] === dts[i - 1][1])
+}
+
 const videos = process.env.PRIVACY_VIDEOS_DIR
 test('every video in PRIVACY_VIDEOS_DIR strips losslessly', {skip: !videos || !existsSync(videos)}, async () => {
+  const refused: string[] = []
   for (const name of readdirSync(videos!).sort()) {
     const input = path.join(videos!, name)
     const dolbyVision = probe(input).some((s) => s.side_data_list?.some((d) => d.side_data_type === 'DOVI configuration record'))
-    const {report} = await stripAndCheck(input, {markers: [], dolbyVision: dolbyVision && Boolean(LINUX_FFMPEG)})
+    let report: Awaited<ReturnType<typeof stripAndCheck>>['report']
+    try {
+      ;({report} = await stripAndCheck(input, {markers: [], dolbyVision: dolbyVision && Boolean(LINUX_FFMPEG)}))
+    } catch (error) {
+      // The Function's ffmpeg 7.0.2 moves each packet of a run with the same decode time stamp by
+      // one tick, which the packet check allows. ffmpeg 9.1's muxer changes the duration of a
+      // packet before such a run instead, so the check refuses the copy: it fails closed. Only that
+      // refusal is accepted, only for such files and only with another ffmpeg than the Function's.
+      const timingRefusal = error instanceof VideoStripError && /packet \d+ duration changed by/.test(error.message)
+      if (LINUX_FFMPEG || !timingRefusal || !hasRepeatedDecodeTimes(input)) throw error
+      refused.push(name)
+      continue
+    }
     if (dolbyVision) assert.equal(report.muxer, 'mp4', `${name}: written as MP4 to keep Dolby Vision`)
   }
+  if (refused.length > 0) console.log(`refused by the packet check with the local ffmpeg (repeated decode time stamps): ${refused.length} (${refused.join(', ')})`)
 })
 
 // ---------------------------------------------------------------------------------------------

@@ -10,12 +10,15 @@
  * - used by a document: nothing (the content Functions strip it and move the references);
  * - being converted (video-to-mp4 lease) or checked (a fresh `processing` mark): nothing;
  * - `replaced` by an existing copy: deleted;
- * - checked with the current stripper (`clean`, `stripped`, `failed`): nothing;
+ * - checked with the current stripper (`clean`, `stripped`): nothing;
+ * - `failed` with the current stripper (its location data cannot be removed): deleted, because a
+ *   file with its location is never kept in the public dataset (privacy review round 2, finding 2);
  * - otherwise stripped: an image by the image-privacy Function's own processing (a copy without
  *   location and personal metadata, references moved, the upload deleted), a video by the
  *   video-to-mp4 Function's stripper (a copy, the upload marked `replaced`, then deleted here), an
  *   image uploaded as a file (served as stored) by the image stripper into a file copy; a clean
- *   upload is marked `clean` and kept. Other files (PDF, STL) are not stripped by any Function and
+ *   upload is marked `clean` and kept; an upload the stripper fails on is marked `failed` and
+ *   deleted. Other files (PDF, STL) are not stripped by any Function and
  *   are left as they are.
  */
 import {
@@ -171,8 +174,11 @@ export async function runUploadPrivacy(options: RunOptions): Promise<RunOutcome>
       const failure = error instanceof UploadStripFailure
       const message = truncate(failure ? error.message : `Could not remove the location data yet (${errorText(error)}); retried by a later sweep.`)
       await mark({status: failure ? 'failed' : 'pending', version, message, updatedAt: now().toISOString()})
-      if (!failure) unexpected.push(error)
-      return {assetId: asset._id, kind, result: failure ? 'failed' : 'pending', message}
+      if (!failure) {
+        unexpected.push(error)
+        return {assetId: asset._id, kind, result: 'pending', message}
+      }
+      return deleteUnstrippable(asset._id, message)
     }
     if (result.clean) return {assetId: asset._id, kind, result: 'clean', message: result.message}
     const deleted = await store.deleteAssetIfUnreferenced(asset._id)
@@ -182,6 +188,14 @@ export async function runUploadPrivacy(options: RunOptions): Promise<RunOutcome>
       result: 'stripped',
       message: `${result.message} Copy ${result.assetId}; upload ${deleted.kind === 'referenced' ? `kept, now used by ${deleted.by.join(', ')}` : 'deleted'}.`,
     }
+  }
+
+  /** Deletes an unused upload whose location data the current stripper cannot remove. */
+  async function deleteUnstrippable(assetId: string, message: string): Promise<UploadOutcome> {
+    const deleted = await store.deleteAssetIfUnreferenced(assetId)
+    if (deleted.kind === 'referenced') return {assetId, kind: 'kept', reason: `its location data cannot be removed (${message}), but it is used again by ${deleted.by.join(', ')}`}
+    log(`${assetId}: its location data cannot be removed (${message}); deleted`)
+    return {assetId, kind: 'deleted', reason: 'its location data cannot be removed'}
   }
 
   async function handleUpload(assetId: string): Promise<UploadOutcome> {
@@ -202,11 +216,13 @@ export async function runUploadPrivacy(options: RunOptions): Promise<RunOutcome>
         ? {assetId, kind: 'kept', reason: `used again by ${deleted.by.join(', ')}`}
         : {assetId, kind: 'deleted', reason: `replaced by ${privacy.replacementAssetId}`}
     }
-    if (privacy?.version === versionFor(asset) && ['clean', 'stripped', 'failed'].includes(privacy.status ?? '')) return {assetId, kind: 'done'}
+    if (privacy?.version === versionFor(asset) && privacy.status === 'failed') return deleteUnstrippable(assetId, privacy.message ?? 'no message was recorded')
+    if (privacy?.version === versionFor(asset) && ['clean', 'stripped'].includes(privacy.status ?? '')) return {assetId, kind: 'done'}
 
     if (asset._type === 'sanity.imageAsset') {
       const {outcome, unexpected: error} = await options.processImage(assetId)
       if (error !== undefined) unexpected.push(error)
+      if (outcome.kind === 'failed') return deleteUnstrippable(assetId, outcome.message)
       return {assetId, kind: 'image', outcome}
     }
     if (isVideoFile(asset)) return handleFile(asset, 'video')

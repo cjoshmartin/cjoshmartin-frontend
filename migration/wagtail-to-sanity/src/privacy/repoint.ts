@@ -11,9 +11,10 @@
  *                                  video contract v2: the upload that was converted and the MP4
  *   source.id                      on a video-to-mp4 MP4 asset: the upload it was made from
  *
- * `privacy.strippedFrom` and `privacy.replacementAssetId` on asset documents record where a
- * stripped copy came from (src/privacy/marker.ts). They name a deleted upload on purpose, so they
- * are provenance, not uses: they are reported separately and never moved.
+ * `privacy.strippedFrom` (round-1 copies only; copies now record a keyed digest,
+ * `privacy.strippedFromDigest`, which is no asset id) and `privacy.replacementAssetId` on asset
+ * documents record where a stripped copy came from (src/privacy/marker.ts). They name a deleted
+ * upload on purpose, so they are provenance, not uses: they are reported separately and never moved.
  *
  * Every other string that equals an asset id is reported as unknown, and the privacy step stops
  * before writing anything: moving an id it does not understand could break a document.

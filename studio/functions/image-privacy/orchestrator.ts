@@ -26,6 +26,7 @@
  */
 import {IMAGE_STRIP_VERSION, PRIVACY_FIELD, type AssetPrivacy} from '../privacy/constants'
 import {IMAGE_MIME_TYPES, ImageStripError, stripImage, type ImageStripResult} from '../privacy/image-strip'
+import {copySourceId, type UploadDigester} from '../privacy/provenance'
 import {
   assetNeedsWork,
   imageAssetIds,
@@ -62,9 +63,10 @@ export interface ImageStore {
   download(asset: ImageAssetDocument): Promise<Uint8Array>
   /**
    * Uploads the stripped bytes as an image asset with source {name: IMAGE_PRIVACY_SOURCE_NAME, id:
-   * <upload>}, the upload's file name, and only the placeholder and palette metadata extracted.
+   * `sourceId`} (the upload's digest, never its id: privacy/provenance.ts), the upload's file name,
+   * and only the placeholder and palette metadata extracted.
    */
-  uploadStripped(bytes: Uint8Array, upload: ImageAssetDocument, mimeType: string): Promise<ImageAssetDocument>
+  uploadStripped(bytes: Uint8Array, upload: ImageAssetDocument, mimeType: string, sourceId: string): Promise<ImageAssetDocument>
 }
 
 /** A problem that is not the file's fault (network, API): recorded as `pending`, retried later. */
@@ -96,6 +98,11 @@ export interface RunOptions {
   now?: () => Date
   log?: (message: string) => void
   sleep?: (ms: number) => Promise<void>
+  /**
+   * The keyed digest of an upload's id (privacy/provenance.ts), recorded on its copy instead of the
+   * id. Undefined without the key: the copy is then not linked to its upload.
+   */
+  uploadDigest?: UploadDigester
 }
 
 /** Raised after the outcome was recorded when an asset hit an unexpected error, for the logs. */
@@ -119,7 +126,7 @@ function truncate(message: string): string {
 export const RETRY_NOTE = 'It is retried automatically on the next change to a document that uses the image, 10 minutes after this attempt or later.'
 
 /** What processing one image asset needs: the store, this run's id (the lease holder) and the clock. */
-export type ImageAssetProcessorOptions = Pick<RunOptions, 'store' | 'runId' | 'now' | 'log' | 'sleep'>
+export type ImageAssetProcessorOptions = Pick<RunOptions, 'store' | 'runId' | 'now' | 'log' | 'sleep' | 'uploadDigest'>
 
 /**
  * Steps 1 to 5 of the top of this file for one asset, shared by this Function's document events and
@@ -250,9 +257,10 @@ export function createImageAssetProcessor(options: ImageAssetProcessorOptions): 
       return {outcome: {assetId, kind: 'clean'}}
     }
 
+    const link = options.uploadDigest?.(assetId)
     let copy: ImageAssetDocument
     try {
-      copy = await store.uploadStripped(result.output, asset, IMAGE_MIME_TYPES[result.format])
+      copy = await store.uploadStripped(result.output, asset, IMAGE_MIME_TYPES[result.format], copySourceId(assetId, options.uploadDigest))
     } catch (error) {
       return pending(assetId, error)
     }
@@ -271,7 +279,7 @@ export function createImageAssetProcessor(options: ImageAssetProcessorOptions): 
       const copyPrivacy: AssetPrivacy = {
         status: 'stripped',
         version: IMAGE_STRIP_VERSION,
-        strippedFrom: assetId,
+        ...(link ? {strippedFromDigest: link} : {}),
         removed: result.personal,
         updatedAt: now().toISOString(),
       }

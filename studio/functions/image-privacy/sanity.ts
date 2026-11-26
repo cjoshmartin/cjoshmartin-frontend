@@ -97,13 +97,13 @@ export function createSanityImageStore(client: SanityClient, options: {deadline:
       }
       return bytes
     },
-    async uploadStripped(bytes, upload, mimeType) {
+    async uploadStripped(bytes, upload, mimeType, sourceId) {
       let asset: ImageAssetDocument
       try {
         asset = (await client.assets.upload('image', Buffer.from(bytes), {
           filename: upload.originalFilename ?? upload._id,
           contentType: mimeType,
-          source: {name: IMAGE_PRIVACY_SOURCE_NAME, id: upload._id},
+          source: {name: IMAGE_PRIVACY_SOURCE_NAME, id: sourceId},
           extract: [...IMAGE_METADATA_OPTIONS],
           tag: 'image-privacy.upload',
         })) as unknown as ImageAssetDocument

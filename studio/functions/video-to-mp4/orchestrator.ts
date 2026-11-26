@@ -27,6 +27,12 @@
  * 5. Delete the unstripped upload once nothing references it any more (drafts, published documents
  *    and release versions), so only the copy without location data stays in the dataset; that
  *    happens whatever the conversion's outcome.
+ *    An upload whose location and personal metadata cannot be removed (too large for /tmp, a file
+ *    the strippers refuse, a check that fails, a timeout) is marked `failed` and taken out of
+ *    every block that uses it (`file` and `original` removed, `conversion` says why and what to
+ *    do), then deleted the same way: a file with its location is never kept in the public dataset
+ *    (privacy review round 2, finding 2). A version in a locked release keeps it until the
+ *    release is published or archived; the upload-privacy sweep deletes it then.
  *
  * Every document write is a patch addressed by block `_key` and guarded by the document revision
  * that was read (ifRevisionID), retried after re-reading on a conflict, so a concurrent edit is
@@ -202,6 +208,12 @@ const MAX_LEASE_ROUNDS = 3
 const MAX_PRIVACY_WAITS = 60
 const PRIVACY_WAIT_MS = 5000
 
+/** conversion.message of a block whose upload was taken out because it could not be stripped. */
+export function uploadRemovedMessage(reason: string): string {
+  const sentence = /[.!?]$/.test(reason.trim()) ? reason.trim() : `${reason.trim()}.`
+  return `${sentence} The upload was removed from this block and deleted: a file whose location data cannot be removed is not kept in the public dataset. Upload another file.`
+}
+
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -323,6 +335,22 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
     return patched
   }
 
+  /**
+   * Records on the upload that the current stripper cannot remove its location data (so no run
+   * strips it again, and the upload-privacy sweep deletes it once nothing uses it), and returns the
+   * result that takes it out of the blocks and deletes it.
+   */
+  async function removeUnstrippable(assetId: string, reason: string): Promise<ConversionResult> {
+    await updateDocument(assetId, (asset) => {
+      const privacy = (asset as AssetDocument)[PRIVACY_FIELD]
+      if (privacy?.status === 'failed' && privacy.version === VIDEO_STRIP_VERSION) return null
+      const mark: AssetPrivacy = {status: 'failed', version: VIDEO_STRIP_VERSION, message: reason, updatedAt: now().toISOString()}
+      return {set: {[PRIVACY_FIELD]: mark}}
+    })
+    log(`${assetId}: its location data cannot be removed (${reason}); taking it out of every block and deleting it`)
+    return {status: 'failed', fileAssetId: assetId, message: uploadRemovedMessage(reason), removeUpload: true, deleteUpload: assetId}
+  }
+
   async function produceResult(
     assetId: string,
   ): Promise<{result: ConversionResult; unexpected?: unknown}> {
@@ -399,6 +427,12 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
         if (!again) throw new RetryableConversionError(`${assetId} was deleted while its location data was being removed`)
         current = again
       }
+      const recorded = current[PRIVACY_FIELD]
+      if (recorded?.status === 'failed' && recorded.version === VIDEO_STRIP_VERSION) {
+        // The current stripper already failed on this upload (another block's run, or the
+        // upload-privacy Function): the same failure, without stripping again.
+        throw new ConversionFailure(recorded.message?.trim() || 'The location and personal metadata could not be removed from this upload.')
+      }
       if (isPrivateOriginal(current)) {
         source = current
         strippedNote =
@@ -450,6 +484,8 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
       // whatever happened to the conversion (a retry converts the copy).
       const onCopy = <T extends ConversionResult>(result: T): T =>
         source && source._id !== assetId ? {...result, strippedAssetId: source._id, deleteUpload: assetId} : result
+      // No private original: the failure is the strip's (or recorded by an earlier one).
+      if (error instanceof ConversionFailure && !source) return {result: await removeUnstrippable(assetId, error.message)}
       if (error instanceof ConversionFailure) return {result: onCopy(failed(error.message))}
       if (error instanceof RetryableConversionError) return {result: onCopy(retry(error.message))}
       return {

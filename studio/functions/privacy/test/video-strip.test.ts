@@ -61,6 +61,52 @@ test('describeContainer reads streams, side data and metadata keys (not values)'
   assert.throws(() => describeContainer('Error opening input file'), VideoStripError)
 })
 
+// Newer ffmpeg (9.1) prints QuickTime track references as stream groups: a stream that belongs to
+// a group is listed inside it (once per group) and may not appear at the top level at all.
+const IPHONE_STREAM_GROUPS = `Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'input.mov':
+  Metadata:
+    major_brand     : qt
+    minor_version   : 0
+    compatible_brands: qt
+    com.apple.quicktime.location.ISO6709: +00.0000+000.0000+000.000/
+  Duration: 00:00:19.82, start: 0.000000, bitrate: 10675 kb/s
+  Stream group #0:0[0x1]: Track Reference:
+    Stream #0:0[0x1](und): Video: hevc (Main) (hvc1 / 0x31637668), yuvj420p(pc, smpte170m/smpte432/bt709), 1920x1440, 9921 kb/s, 29.97 fps, 29.97 tbr, 600 tbn (default)
+      Metadata:
+        handler_name    : Core Media Video
+        encoder         : HEVC
+      Side data:
+        Display Matrix: rotation of -90.00 degrees
+    Stream #0:2[0x3](und): Data: none (mebx / 0x7862656D), 0 kb/s (default)
+      Metadata:
+        handler_name    : Core Media Metadata
+  Stream group #0:1[0x1]: Track Reference:
+    Stream #0:0[0x1](und): Video: hevc (Main) (hvc1 / 0x31637668), yuvj420p(pc, smpte170m/smpte432/bt709), 1920x1440, 9921 kb/s, 29.97 fps, 29.97 tbr, 600 tbn (default)
+      Metadata:
+        handler_name    : Core Media Video
+        encoder         : HEVC
+      Side data:
+        Display Matrix: rotation of -90.00 degrees
+    Stream #0:3[0x4](und): Data: none (mebx / 0x7862656D), 34 kb/s (default)
+      Metadata:
+        handler_name    : Core Media Metadata
+  Stream #0:1[0x2](und): Audio: pcm_s16le (lpcm / 0x6D63706C), 44100 Hz, mono, s16, 705 kb/s (default)
+    Metadata:
+      handler_name    : Core Media Audio
+At least one output file must be specified
+`
+
+test('describeContainer reads each stream once, in index order, also from stream groups (ffmpeg 9.1)', () => {
+  const d = describeContainer(IPHONE_STREAM_GROUPS)
+  assert.deepEqual(d.streams.map((s) => [s.index, s.kind, s.codec]), [[0, 'video', 'hevc'], [1, 'audio', 'pcm_s16le'], [2, 'data', 'mebx'], [3, 'data', 'mebx']])
+  assert.deepEqual(d.streams[0].metadataKeys, ['handler_name', 'encoder'])
+  assert.deepEqual(d.streams[0].sideData, ['Display Matrix: rotation of -90.00 degrees'], 'side data once, not once per group')
+  assert.deepEqual(d.streams[1].details, ['44100 Hz', 'mono', 's16'])
+  assert.deepEqual(d.globalMetadataKeys, ['major_brand', 'minor_version', 'compatible_brands', 'com.apple.quicktime.location.ISO6709'], 'stream metadata never counts as file metadata')
+  const plan = planStrip(d)
+  assert.deepEqual(plan.kept.map((s) => [s.index, s.kind]), [[0, 'video'], [1, 'audio']], 'the stream copy maps the video once')
+})
+
 test('planStrip keeps video and audio, and writes MP4 to keep Dolby Vision', () => {
   const plan = planStrip(describeContainer(IPHONE))
   assert.equal(plan.muxer, 'mp4')

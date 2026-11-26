@@ -52,6 +52,11 @@ export function videoNeedsConversion(value: VideoValue | undefined): boolean {
 
 export type VideoConversionState =
   | {kind: 'empty'}
+  /**
+   * The video-to-mp4 Function could not remove the location and personal metadata from the upload,
+   * so it took the upload out of the block and deleted it; `message` says why and what to do.
+   */
+  | {kind: 'removed'; message: string}
   | {kind: 'ready'}
   | {kind: 'converting'}
   | {kind: 'waiting'; message: string}
@@ -80,7 +85,13 @@ export function videoConversionState(
   conversion: VideoConversionValue | undefined,
   currentSettingsVersion: string,
 ): VideoConversionState {
-  if (!fileAssetId) return {kind: 'empty'}
+  if (!fileAssetId) {
+    // The Function's removal of an unstrippable upload: `failed` without a file and without the
+    // upload's id. A failure the editor cleared by removing the file keeps its sourceAssetId.
+    const message = conversion?.message?.trim()
+    if (conversion?.status === 'failed' && !conversion.sourceAssetId && message) return {kind: 'removed', message}
+    return {kind: 'empty'}
+  }
   if (fileAssetId === conversion?.outputAssetId) return {kind: 'ready'}
   if (conversion?.sourceAssetId === fileAssetId) {
     if (conversion.status === 'failed') {
@@ -105,6 +116,8 @@ export function videoConversionLabel(state: VideoConversionState): string {
   switch (state.kind) {
     case 'empty':
       return 'No video file'
+    case 'removed':
+      return `Upload removed: ${state.message}`
     case 'ready':
       return 'Ready'
     case 'converting':

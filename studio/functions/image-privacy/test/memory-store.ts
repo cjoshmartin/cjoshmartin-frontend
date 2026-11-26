@@ -18,7 +18,7 @@ type Doc = Record<string, unknown> & {_id: string; _type: string}
 export class MemoryImageStore implements ImageStore {
   readonly docs = new Map<string, Doc & {_rev: string}>()
   readonly bytes = new Map<string, Uint8Array>()
-  readonly uploads: {sourceId: string; mimeType: string; id: string}[] = []
+  readonly uploads: {uploadId: string; mimeType: string; id: string}[] = []
   readonly deletions: string[] = []
   /** Called before every upload (a test publishes a draft "mid-processing" here). */
   beforeUpload: (() => void | Promise<void>) | undefined
@@ -105,16 +105,16 @@ export class MemoryImageStore implements ImageStore {
     return bytes
   }
 
-  async uploadStripped(bytes: Uint8Array, upload: ImageAssetDocument, mimeType: string): Promise<ImageAssetDocument> {
+  async uploadStripped(bytes: Uint8Array, upload: ImageAssetDocument, mimeType: string, sourceId: string): Promise<ImageAssetDocument> {
     await this.beforeUpload?.()
     const dimensions = this.copyDimensions ?? upload.metadata?.dimensions
     const id = this.putImage(bytes, {
       originalFilename: upload.originalFilename,
       mimeType,
-      source: {name: 'image-privacy', id: upload._id},
+      source: {name: 'image-privacy', id: sourceId},
       metadata: {dimensions: {width: dimensions?.width, height: dimensions?.height}},
     })
-    this.uploads.push({sourceId: upload._id, mimeType, id})
+    this.uploads.push({uploadId: upload._id, mimeType, id})
     return this.get(id) as unknown as ImageAssetDocument
   }
 }

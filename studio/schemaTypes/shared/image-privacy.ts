@@ -61,14 +61,24 @@ export function imagePrivacyState(privacy: AssetPrivacy | undefined | null): Ima
 }
 
 /**
+ * The validation error for an image whose location and camera data the Function cannot remove
+ * (null otherwise). An error, so the document cannot be published with it: the uploaded file is
+ * public with that data for as long as a document uses it (the plain CDN URL even serves some
+ * files, GIFs for example, exactly as stored). Once no document uses it, the upload-privacy
+ * Function deletes it.
+ */
+export function imagePrivacyError(state: ImagePrivacyState): string | null {
+  if (state.kind !== 'failed') return null
+  return `Location and camera data could not be removed from this image: ${state.message} The uploaded file stays public, with that data, for as long as a document uses it. Replace it with another file (${FORMAT_NAMES}); the unused upload is then deleted.`
+}
+
+/**
  * The validation warning for an image whose metadata could not be removed yet (null when there is
- * nothing to warn about). Not an error: the uploaded file is public either way, and the Function
- * also fixes published documents.
+ * nothing to warn about). Not an error: the Function retries or finishes it, also in published
+ * documents.
  */
 export function imagePrivacyWarning(state: ImagePrivacyState): string | null {
   switch (state.kind) {
-    case 'failed':
-      return `Location and camera data could not be removed from this image: ${state.message} Replace it with another file.`
     case 'pending':
       return `Removing location and camera data from this image is waiting to be retried: ${state.message}`
     case 'replaced':
@@ -95,7 +105,8 @@ export function imagePrivacyLabel(
     case 'clean':
       return null
     case 'pending':
+      return {tone: 'caution', text: imagePrivacyWarning(state) as string}
     case 'failed':
-      return {tone: state.kind === 'failed' ? 'critical' : 'caution', text: imagePrivacyWarning(state) as string}
+      return {tone: 'critical', text: imagePrivacyError(state) as string}
   }
 }
