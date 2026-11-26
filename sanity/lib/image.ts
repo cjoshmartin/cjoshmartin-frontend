@@ -1,7 +1,7 @@
 import { createImageUrlBuilder, type SanityImageSource } from '@sanity/image-url'
 
 import { dataset, projectId } from '@/sanity/env'
-import { croppedDimensions, fitWidth, type ImageDimensions } from '@/sanity/lib/imageDimensions'
+import { croppedDimensions, fitWidth, sizedTo, type ImageDimensions } from '@/sanity/lib/imageDimensions'
 
 export type { ImageDimensions }
 
@@ -41,10 +41,12 @@ export function getImageDimensions(image: SanityImageWithAsset): ImageDimensions
 
 /**
  * URL of the image scaled down to at most `maxWidth` pixels wide (never scaled up), in the best
- * format the browser accepts. Animated GIFs stay animated through the image pipeline.
+ * format the browser accepts. It asks for exactly `scaledDimensions(image, maxWidth)` (width and
+ * height), so the delivered image always has the size the `<img>` attributes state. Animated GIFs
+ * stay animated through the image pipeline.
  */
 export function imageUrl(image: SanityImageWithAsset, maxWidth: number): string {
-  return urlFor(image).width(maxWidth).fit('max').auto('format').url()
+  return sizedTo(urlFor(image), scaledDimensions(image, maxWidth)).auto('format').url()
 }
 
 /** Width and height of `imageUrl(image, maxWidth)`, for `<img width height>` attributes. */

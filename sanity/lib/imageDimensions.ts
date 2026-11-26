@@ -2,6 +2,7 @@
  * Image dimensions without a request: Sanity image asset ids are `image-<sha1>-<width>x<height>-<format>`
  * (a stable format documented by Sanity). Kept free of app imports so unit tests can load it.
  */
+import type { ImageUrlBuilder } from '@sanity/image-url'
 
 export interface ImageDimensions {
   width: number
@@ -41,11 +42,27 @@ export function croppedDimensions(assetRef: string, crop?: ImageCrop | null): Im
   }
 }
 
-/** The size of `dimensions` scaled down to at most `maxWidth` wide (never up), like `fit=max`. */
+/**
+ * The size of `dimensions` scaled down to at most `maxWidth` wide (never up), keeping the aspect
+ * ratio to within a pixel. This is the size a URL asks for with `sizedTo`, not a prediction of the
+ * CDN: given only `w` and `fit=max`, the CDN picks the height itself, and its rounding is not
+ * documented (it can be a pixel off, more for very narrow crops, and it can even change the width).
+ */
 export function fitWidth(dimensions: ImageDimensions, maxWidth: number): ImageDimensions {
   const { width, height } = dimensions
   if (width <= maxWidth) {
     return { width, height }
   }
-  return { width: maxWidth, height: Math.round((height * maxWidth) / width) }
+  return { width: maxWidth, height: Math.max(1, Math.round((height * maxWidth) / width)) }
+}
+
+/**
+ * Asks the CDN for exactly `size`: `w` and `h` with `fit=crop`, which the image API documents as
+ * filling the requested size exactly, so `size` is the pixel size that is delivered. With a size
+ * from `fitWidth`, the requested aspect ratio differs from the crop's only by the rounding of the
+ * height to whole pixels; @sanity/image-url trims the crop rect (around the hotspot) by that much
+ * to match it, so nothing is distorted, and a crop no wider than the maximum is delivered as is.
+ */
+export function sizedTo<T extends ImageUrlBuilder>(builder: T, size: ImageDimensions): T {
+  return builder.width(size.width).height(size.height).fit('crop')
 }
