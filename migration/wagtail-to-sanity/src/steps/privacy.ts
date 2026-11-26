@@ -46,7 +46,7 @@ import type {SanityClient} from '@sanity/client'
 import {CONVERTED_ASSET_SOURCE_NAME} from '../../../../studio/functions/video-to-mp4/settings'
 import {ASSET_SOURCE_NAME, type Dataset, type DataPaths, type Secrets} from '../config'
 import {updateRecordAfterPatch, type StoredDocument} from '../import-guard'
-import {copyPath, ensureStrippedCopy, readPrivacyMap, toolVersions, withoutUrl, writePrivacyMap, type PrivacyMap, type StrippedCopy} from '../privacy/copies'
+import {copyPath, ensureStrippedCopy, readPrivacyMap, stripperVersions, toolVersions, withoutUrl, writePrivacyMap, type PrivacyMap, type StrippedCopy} from '../privacy/copies'
 import {downloadAsset} from '../privacy/download'
 import {assetIdWithSha1, PRIVACY_FIELD, strippedMarker} from '../privacy/marker'
 import {findAssetIdOccurrences, replacementSet, applyReplacementSet, type Occurrence} from '../privacy/repoint'
@@ -190,11 +190,16 @@ export function personalMetadataExifKeys(exif: unknown): string[] {
 export async function prepareBucketCopies(paths: DataPaths): Promise<PrivacyMap> {
   const inventory = readJson<Inventory>(path.join(paths.state, 'inventory.json'))
   const tools = await toolVersions()
+  const strippers = stripperVersions()
   const previous = readPrivacyMap(paths)
-  // New rules can change any copy; start over rather than mix copies made under two rule sets.
-  const map: PrivacyMap = previous && previous.rulesVersion === PRIVACY_RULES_VERSION
-    ? {...previous, tools, bucket: {}}
-    : {rulesVersion: PRIVACY_RULES_VERSION, tools, updatedAt: new Date().toISOString(), bucket: {}, copies: {}}
+  // New rules or stripper code can change any copy; start over rather than mix copies made under
+  // two of them. A copy that comes out with the same bytes keeps the time it was first made, so
+  // its asset and its `privacy` field stay as they are.
+  const reuse = previous !== null && previous.rulesVersion === PRIVACY_RULES_VERSION && previous.strippers?.sourceSha256 === strippers.sourceSha256
+  const map: PrivacyMap = reuse
+    ? {...previous, tools, strippers, bucket: {}}
+    : {rulesVersion: PRIVACY_RULES_VERSION, strippers, tools, updatedAt: new Date().toISOString(), bucket: {}, copies: {}}
+  if (previous && !reuse) log('privacy: the rules or the stripper code changed since the last run; every copy is made again')
   log(`privacy: scanning ${inventory.files.length} bucket files (exiftool ${tools.exiftool}, rules ${PRIVACY_RULES_VERSION})`)
   const scans = await mapLimit(inventory.files, 6, async (file) => {
     const local = path.join(paths.gcs, file.path)
@@ -210,6 +215,8 @@ export async function prepareBucketCopies(paths: DataPaths): Promise<PrivacyMap>
   for (const entry of scans) if (entry.scan.findings.length && !flagged.has(entry.file.sha1)) flagged.set(entry.file.sha1, entry)
   for (const {file, local, scan} of flagged.values()) {
     const copy = await ensureStrippedCopy(paths, map, {file: local, sha1: file.sha1, filename: path.posix.basename(file.path), kind: scan.kind, findings: scan.findings})
+    const earlier = previous?.copies[file.sha1]
+    if (!reuse && earlier && earlier.sha1 === copy.sha1) copy.strippedAt = earlier.strippedAt
     log(`  ${file.path}: ${describeFindings(scan.findings)} -> stripped copy ${copy.sha1.slice(0, 12)} (${copy.removed.join(', ')}), verified`)
   }
   map.updatedAt = new Date().toISOString()

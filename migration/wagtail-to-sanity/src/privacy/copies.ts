@@ -14,8 +14,12 @@
  * and every byte outside the changed ranges (src/privacy/video.ts). Both scan the copy again and
  * must find nothing personal.
  */
-import {existsSync, mkdirSync, rmSync, statSync} from 'node:fs'
+import {createHash} from 'node:crypto'
+import {existsSync, mkdirSync, readFileSync, rmSync, statSync} from 'node:fs'
 import path from 'node:path'
+import {fileURLToPath} from 'node:url'
+
+import {IMAGE_STRIP_VERSION, VIDEO_STRIP_VERSION} from '../../../../studio/functions/privacy/constants'
 
 import type {DataPaths} from '../config'
 import {hashFile, readJson, writeJson} from '../util'
@@ -52,6 +56,8 @@ export interface BucketFileScan {
 
 export interface PrivacyMap {
   rulesVersion: string
+  /** STRIPPERS of the run that made the copies; another value makes every copy again. */
+  strippers?: Strippers
   tools: Tools
   updatedAt: string
   /** Every bucket content file (path relative to gcs/) and what the scan found in it. */
@@ -64,6 +70,30 @@ export interface Tools {
   exiftool: string
   ffprobe: string
   magick: string
+}
+
+/** The Functions' strippers the copies are made with, and a fingerprint of their code. */
+export interface Strippers {
+  imageStripVersion: string
+  videoStripVersion: string
+  /** sha256 over the stripper source files (STRIPPER_SOURCES), so any change to them is noticed. */
+  sourceSha256: string
+}
+
+/** The source files of the strippers (studio/functions/privacy), relative to that folder. */
+export const STRIPPER_SOURCES = [
+  'constants.ts', 'exif.ts', 'gif.ts', 'image-format.ts', 'image-strip.ts', 'isobmff-image.ts',
+  'isobmff-video.ts', 'jpeg.ts', 'png.ts', 'tiff.ts', 'webp.ts',
+] as const
+
+export function stripperVersions(): Strippers {
+  const dir = fileURLToPath(new URL('../../../../studio/functions/privacy/', import.meta.url))
+  const hash = createHash('sha256')
+  for (const file of STRIPPER_SOURCES) {
+    hash.update(`${file}\0`)
+    hash.update(readFileSync(path.join(dir, file)))
+  }
+  return {imageStripVersion: IMAGE_STRIP_VERSION, videoStripVersion: VIDEO_STRIP_VERSION, sourceSha256: hash.digest('hex')}
 }
 
 export async function toolVersions(): Promise<Tools> {
@@ -100,6 +130,9 @@ export function requirePrivacyMap(paths: DataPaths, files: readonly {path: strin
   if (!map) throw new Error(`${privacyMapPath(paths)} does not exist; run the privacy step first (--steps privacy)`)
   if (map.rulesVersion !== PRIVACY_RULES_VERSION) {
     throw new Error(`${privacyMapPath(paths)} was made with rules ${map.rulesVersion}, the current rules are ${PRIVACY_RULES_VERSION}; run the privacy step again`)
+  }
+  if (map.strippers?.sourceSha256 !== stripperVersions().sourceSha256) {
+    throw new Error(`${privacyMapPath(paths)} was made with other stripper code (studio/functions/privacy); run the privacy step again`)
   }
   const stale = files.filter((f) => map.bucket[f.path]?.sha1 !== f.sha1).map((f) => f.path)
   if (stale.length) throw new Error(`The privacy map does not cover ${stale.length} bucket files with their current bytes (${stale.slice(0, 5).join(', ')}); run the privacy step again`)
