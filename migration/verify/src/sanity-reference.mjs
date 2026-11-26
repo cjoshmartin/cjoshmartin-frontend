@@ -1,5 +1,5 @@
 // Reference data from the published Sanity dataset, used to decide whether a difference between
-// the old and new site is explained (unlisted pages, SEO descriptions, pending Mux videos, ...).
+// the old and new site is explained (unlisted pages, SEO descriptions, the MP4 video files, ...).
 // The datasets have a public ACL, so published documents are read without a token.
 import { createRequire } from 'node:module'
 
@@ -22,8 +22,22 @@ const PAGES_QUERY = `*[_type in ["homePage", "blogPost", "project", "flexPage"]]
   "wagtailId": legacy.wagtailId,
   _updatedAt,
   "videoBlocks": count(body[_type == "video"]),
-  "pendingVideoBlocks": count(body[_type == "video" && !defined(asset.asset->playbackId)]),
-  "pendingVideoRefs": body[_type == "video" && !defined(asset.asset->playbackId)].asset.asset._ref,
+  "videos": body[_type == "video"]{
+    _key,
+    "fileRef": file.asset._ref,
+    "url": file.asset->url,
+    "mimeType": file.asset->mimeType,
+    "extension": file.asset->extension,
+    "sourceName": file.asset->source.name,
+    "sourceId": file.asset->source.id,
+    "originalRef": original.asset._ref,
+    "originalFilename": original.asset->originalFilename,
+    "originalSourceUrl": original.asset->source.url,
+    "status": conversion.status,
+    "sourceAssetId": conversion.sourceAssetId,
+    "outputAssetId": conversion.outputAssetId,
+    "settingsVersion": conversion.settingsVersion
+  },
   "codeBlocks": count(body[_type == "code"]),
   "stlBlocks": count(body[_type == "stlModel"]),
   "youtubeBlocks": count(body[_type == "youtube"]) + count(heroMedia[_type == "youtube"])

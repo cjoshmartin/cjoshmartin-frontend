@@ -1,6 +1,8 @@
 // Compares the crawled old and new observations route by route and classifies every difference
 // as EXPECTED (with the reason and its source in the plan or a work-package note) or UNEXPECTED.
+import { CONVERTED_ASSET_SOURCE_NAME, OUTPUT_EXTENSION, OUTPUT_MIME_TYPE, SETTINGS_VERSION } from '../../../studio/functions/video-to-mp4/settings.ts'
 import { LINK_HREF_FIXES } from '../../wagtail-to-sanity/src/content-fixes.ts'
+import { SANITY_PROJECT_ID } from './config.mjs'
 import { compareText } from './text-diff.mjs'
 
 export const SAME = 'same'
@@ -9,7 +11,14 @@ export const UNEXPECTED = 'unexpected'
 export const INFO = 'info'
 
 /** Infrastructure the new site serves its own content from. Errors there are the site's errors. */
-const NEW_INFRA = /(^|\.)(sanity\.io|mux\.com)$/
+const NEW_INFRA = /(^|\.)sanity\.io$/
+
+/**
+ * Largest difference in a rendered video box (px) explained by the MP4's size: the converter scales
+ * to at most 1920 px and rounds both sides down to even numbers (settings.ts VIDEO_FILTER), which
+ * changes the aspect ratio by under 0.5 %.
+ */
+const VIDEO_BOX_TOLERANCE = 2
 
 /** The site itself on either deployment, so a path that failed on both can be matched. */
 const SITE_HOSTS = new Set(['localhost:3000', 'www.cjoshmartin.com', 'cjoshmartin.com'])
@@ -169,8 +178,8 @@ function compareConsole(oldLog, newLog, route) {
   const failedNew = failed.filter((entry) => !oldFailed.has(requestKey(entry.url)))
   results.push(
     failedNew.length
-      ? check('failed requests (site, Sanity, Mux)', UNEXPECTED, { new: failedNew.map((entry) => `${entry.failure} ${entry.type} ${entry.url}`) })
-      : check('failed requests (site, Sanity, Mux)', SAME, { new: [] }),
+      ? check('failed requests (site, Sanity)', UNEXPECTED, { new: failedNew.map((entry) => `${entry.failure} ${entry.type} ${entry.url}`) })
+      : check('failed requests (site, Sanity)', SAME, { new: [] }),
   )
   if (failedAlsoOld.length) {
     results.push(
@@ -252,49 +261,160 @@ function compareImages(oldImages, newImages) {
   return results
 }
 
-function compareVideos(oldVideos, newVideos, doc) {
-  const pending = doc?.pendingVideoBlocks ?? 0
-  const results = []
-  results.push(
-    exact('video count', oldVideos.length, newVideos.length, (oldCount, newCount) =>
-      pending > 0 && oldCount - newCount === pending
-        ? { reason: `${pending} video block(s) reference Mux assets that don't exist yet (${doc.pendingVideoRefs.join(', ')}); they render nothing until Mux is upgraded (WP3b/WP4 note).` }
-        : null,
-    ),
+/** The URL the Sanity CDN serves a converted MP4 file asset from (video contract v2). */
+const mp4UrlPattern = (dataset) => new RegExp(`^https://cdn\\.sanity\\.io/files/${SANITY_PROJECT_ID}/${dataset}/[0-9a-f]{40}\\.${OUTPUT_EXTENSION}$`)
+
+/** The file name at the end of a URL, decoded ("IMG_3151.MOV"). */
+const urlFileName = (url) => {
+  try {
+    return decodeURIComponent(new URL(url).pathname.split('/').pop() ?? '')
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Problems with one rendered video against its Sanity block (video contract v2,
+ * docs/sanity-migration/schema-contract.md): the page must play the block's converted MP4 from the
+ * Sanity CDN, typed video/mp4, and the block must be a finished conversion of its kept original
+ * with the current settings.
+ */
+export function videoContractProblems(video, block, dataset) {
+  if (!block) return ['no matching video block in Sanity']
+  const problems = []
+  const expect = (condition, message) => {
+    if (!condition) problems.push(message)
+  }
+  expect(mp4UrlPattern(dataset).test(block.url ?? ''), `file URL ${block.url} is not a ${dataset} MP4 on cdn.sanity.io`)
+  expect(block.mimeType === OUTPUT_MIME_TYPE && block.extension === OUTPUT_EXTENSION, `file is ${block.mimeType} .${block.extension}`)
+  expect(
+    block.sourceName === CONVERTED_ASSET_SOURCE_NAME && block.sourceId === block.originalRef,
+    `file source is ${block.sourceName}/${block.sourceId}, not ${CONVERTED_ASSET_SOURCE_NAME}/${block.originalRef}`,
   )
-  const attributes = (video) => `muted=${video.muted} loop=${video.loop} playsInline=${video.playsInline} controls=${video.controls}`
-  const wrong = newVideos.filter((video) => !(video.muted && video.loop && video.playsInline && video.controls))
+  expect(block.status === 'ready', `conversion status ${block.status}`)
+  expect(block.outputAssetId === block.fileRef, `conversion.outputAssetId ${block.outputAssetId} is not file ${block.fileRef} (needs conversion)`)
+  expect(block.sourceAssetId === block.originalRef, `conversion.sourceAssetId ${block.sourceAssetId} is not original ${block.originalRef}`)
+  expect(block.settingsVersion === SETTINGS_VERSION, `settingsVersion ${block.settingsVersion}, current ${SETTINGS_VERSION}`)
+  expect(video.sources?.length === 1, `${video.sources?.length ?? 0} <source> elements`)
+  expect(video.sources?.[0]?.src === block.url, `<source src> ${video.sources?.[0]?.src} is not the block's file`)
+  expect(video.sources?.[0]?.type === OUTPUT_MIME_TYPE, `<source type> ${video.sources?.[0]?.type}`)
+  expect(video.src === block.url, `currentSrc ${video.src} is not the block's file`)
+  expect(JSON.stringify(video.fallbackLinks ?? []) === JSON.stringify([block.url]), `fallback link ${JSON.stringify(video.fallbackLinks)}`)
+  expect(!video.error, `media error ${video.error}`)
+  return problems
+}
+
+function compareVideos(oldVideos, newVideos, doc, dataset) {
+  const blocks = doc?.videos ?? []
+  const results = []
+  // Every Wagtail video is in Sanity now (owner decision 2026-11-26: Mux dropped), so the counts
+  // must be equal, with no exceptions.
+  results.push(exact('video count', oldVideos.length, newVideos.length))
+  if (newVideos.length || blocks.length) {
+    results.push(
+      newVideos.length === blocks.length
+        ? check('video count = Sanity video blocks', SAME, { new: newVideos.length })
+        : check('video count = Sanity video blocks', UNEXPECTED, { old: blocks.length, new: newVideos.length, reason: 'old = published video blocks in the page body' }),
+    )
+  }
+  const attributes = (video) =>
+    `autoplay=${video.autoplay} muted=${video.muted} loop=${video.loop} playsInline=${video.playsInline} controls=${video.controls}`
+  const wrong = newVideos.filter((video) => !(video.autoplay && video.muted && video.loop && video.playsInline && video.controls))
   results.push(
     wrong.length
       ? check('video attributes', UNEXPECTED, { new: wrong.map(attributes) })
-      : check('video attributes', SAME, { new: newVideos.length ? 'all muted, loop, playsInline, controls' : 'no videos' }),
+      : check('video attributes', SAME, { new: newVideos.length ? 'all autoplay, muted, loop, playsInline, controls' : 'no videos' }),
   )
-  const oldAutoplay = oldVideos.filter((video) => video.autoplay).length
-  const newAutoplay = newVideos.filter((video) => video.autoplay).length
-  if (oldAutoplay !== newAutoplay) {
-    results.push(
-      check('video autoplay attribute', EXPECTED, {
-        old: `${oldAutoplay} of ${oldVideos.length}`,
-        new: `${newAutoplay} of ${newVideos.length}`,
-        reason: 'MuxVideo autoPlay="muted" starts muted playback from script instead of the autoplay attribute; playback is verified in interactive-results.json.',
-      }),
-    )
+  const autoplayCount = (videos) => `${videos.filter((video) => video.autoplay).length} of ${videos.length}`
+  results.push(exact('video autoplay attribute', autoplayCount(oldVideos), autoplayCount(newVideos)))
+  if (!newVideos.length && !oldVideos.length) return results
+
+  const contract = newVideos.map((video, index) => ({ index, problems: videoContractProblems(video, blocks[index], dataset) }))
+  const broken = contract.filter((entry) => entry.problems.length)
+  results.push(
+    broken.length
+      ? check('video files (contract v2)', UNEXPECTED, { new: broken })
+      : check('video files (contract v2)', SAME, {
+          new: `${newVideos.length} ready MP4s (${SETTINGS_VERSION}) from cdn.sanity.io/files/${SANITY_PROJECT_ID}/${dataset}, <source type="${OUTPUT_MIME_TYPE}">`,
+        }),
+  )
+
+  // Same videos in the same order: the old page's file is the block's kept original.
+  const order = oldVideos.map((video, index) => ({ old: urlFileName(video.src), original: blocks[index]?.originalFilename ?? null }))
+  const misordered = order.filter((entry) => entry.old !== entry.original)
+  results.push(
+    misordered.length || oldVideos.length !== blocks.length
+      ? check('video order (old file = Sanity original)', UNEXPECTED, { old: order.map((entry) => entry.old), new: order.map((entry) => entry.original) })
+      : check('video order (old file = Sanity original)', SAME, { new: order.map((entry) => entry.old) }),
+  )
+
+  const hosts = (videos) => [...new Set(videos.map((video) => hostOf(video.src) || video.src.split(':')[0]))]
+  results.push(
+    exact('video sources', hosts(oldVideos), hosts(newVideos), (oldValue, newValue) =>
+      oldValue.every((host) => host === 'storage.googleapis.com') && newValue.every((host) => host === 'cdn.sanity.io') && !broken.length
+        ? {
+            reason:
+              'Videos are MP4 file assets converted with the fixed settings and served by the Sanity CDN, instead of the original uploads in the old GCS bucket (owner decision 2026-11-26, video contract v2).',
+          }
+        : null,
+    ),
+  )
+
+  // Rendered boxes: the MP4 keeps the displayed aspect ratio up to even-pixel rounding.
+  if (oldVideos.length === newVideos.length) {
+    const diffs = []
+    const undecodedOld = []
+    oldVideos.forEach((oldVideo, index) => {
+      const newVideo = newVideos[index]
+      if (!oldVideo.readyState || oldVideo.error) {
+        undecodedOld.push({ index, old: `${oldVideo.width}x${oldVideo.height}`, readyState: oldVideo.readyState, error: oldVideo.error })
+        return
+      }
+      const dw = Math.abs(oldVideo.width - newVideo.width)
+      const dh = Math.abs(oldVideo.height - newVideo.height)
+      if (dw || dh) diffs.push({ index, old: `${oldVideo.width}x${oldVideo.height}`, new: `${newVideo.width}x${newVideo.height}`, dw, dh })
+    })
+    const large = diffs.filter((diff) => diff.dw > VIDEO_BOX_TOLERANCE || diff.dh > VIDEO_BOX_TOLERANCE)
+    if (large.length) results.push(check('video sizes', UNEXPECTED, { diffs: large }))
+    else if (diffs.length) {
+      results.push(
+        check('video sizes', EXPECTED, { diffs, reason: `Within ±${VIDEO_BOX_TOLERANCE} px: the MP4's sides are rounded down to even numbers when it is scaled (settings.ts).` }),
+      )
+    } else results.push(check('video sizes', SAME, {}))
+    if (undecodedOld.length) {
+      results.push(
+        check('old videos not decoded by the test browser', INFO, { old: undecodedOld, reason: 'The old original could not be measured, so its size is not compared.' }),
+      )
+    }
   }
-  const sources = (videos) => [...new Set(videos.map((video) => hostOf(video.src) || (video.src.startsWith('blob:') ? 'blob (MSE)' : video.src)))]
-  if (newVideos.length || oldVideos.length) {
-    results.push(
-      exact('video sources', sources(oldVideos), sources(newVideos), (_, newValue) =>
-        newValue.every((source) => /mux\.com$|^blob/.test(source))
-          ? { reason: 'Videos stream from Mux (HLS) instead of raw files on GCS (plan §7.1).' }
-          : null,
-      ),
-    )
-  }
+  const unmeasured = newVideos.filter((video) => !video.readyState || !video.videoWidth)
+  if (unmeasured.length) results.push(check('new videos without metadata', UNEXPECTED, { new: unmeasured.map((video) => `${video.src} readyState=${video.readyState}`) }))
   return results
 }
 
+/**
+ * Requests and HTML of the new site that reach Mux or the old bucket (src/forbidden.mjs), on any
+ * route kind and at both widths.
+ */
+function compareForbidden(newSite) {
+  const found = []
+  for (const hop of newSite.http?.chain ?? []) {
+    for (const item of hop.forbiddenInBody ?? []) found.push(`${hop.url} HTML: ${item.count}x ${item.name} (${item.examples.join(', ')})`)
+  }
+  let requests = 0
+  for (const [viewport, entry] of Object.entries(newSite.browser ?? {})) {
+    const log = entry?.log
+    if (!log) continue
+    requests += Object.values(log.requestHosts ?? {}).reduce((sum, count) => sum + count, 0)
+    for (const request of log.forbiddenRequests ?? []) found.push(`${viewport} ${request.type} ${request.url} (${request.reason})`)
+  }
+  return found.length
+    ? check('forbidden hosts (Mux, images-for-cms)', UNEXPECTED, { new: found })
+    : check('forbidden hosts (Mux, images-for-cms)', SAME, { new: `0 of ${requests} browser requests; none in the HTML` })
+}
+
 /** Compares one desktop page extraction. */
-function comparePage(route, oldExtract, newExtract, doc) {
+function comparePage(route, oldExtract, newExtract, doc, dataset) {
   const rules = routeRules(route, doc)
   const results = [
     exact('title', oldExtract.title, newExtract.title, rules.title),
@@ -334,7 +454,7 @@ function comparePage(route, oldExtract, newExtract, doc) {
     )
   }
   results.push(...compareImages(oldExtract.images, newExtract.images))
-  results.push(...compareVideos(oldExtract.videos, newExtract.videos, doc))
+  results.push(...compareVideos(oldExtract.videos, newExtract.videos, doc, dataset))
   const iframeKinds = (extract, kind) => extract.iframes.filter((frame) => frame.kind === kind).map((frame) => frame.src.replace(/&?enablejsapi=1/, ''))
   results.push(exact('YouTube iframes', iframeKinds(oldExtract, 'youtube'), iframeKinds(newExtract, 'youtube')))
   results.push(exact('Disqus thread', iframeKinds(oldExtract, 'disqus').length > 0, iframeKinds(newExtract, 'disqus').length > 0))
@@ -424,9 +544,8 @@ function comparePage(route, oldExtract, newExtract, doc) {
 /** The resume's Charter stylesheet answered 404 (it did on the old site; review fixes R1-3). */
 const charterFontMissing = (log) => (log?.badResponses ?? []).some((response) => /\/charter-font\.css$/.test(response.url))
 
-function compareLayout(oldBrowser, newBrowser, doc) {
+function compareLayout(oldBrowser, newBrowser) {
   const results = []
-  const pending = doc?.pendingVideoBlocks ?? 0
   for (const viewport of ['desktop', 'mobile']) {
     const oldEntry = oldBrowser?.[viewport]
     const newEntry = newBrowser?.[viewport]
@@ -441,8 +560,26 @@ function compareLayout(oldBrowser, newBrowser, doc) {
     )
     const delta = newEntry.extract.pageHeight - oldEntry.extract.pageHeight
     const heights = { old: oldEntry.extract.pageHeight, new: newEntry.extract.pageHeight, delta }
+    // Video boxes may differ by a few px each (see VIDEO_BOX_TOLERANCE); with the same number of
+    // videos, that part of the difference is explained by them.
+    const oldVideos = oldEntry.extract.videos ?? []
+    const newVideos = newEntry.extract.videos ?? []
+    const videoDelta = newVideos.reduce((sum, video) => sum + video.height, 0) - oldVideos.reduce((sum, video) => sum + video.height, 0)
+    const videoBoxesClose =
+      oldVideos.length === newVideos.length &&
+      oldVideos.every(
+        (video, index) => Math.abs(video.height - newVideos[index].height) <= VIDEO_BOX_TOLERANCE && Math.abs(video.width - newVideos[index].width) <= VIDEO_BOX_TOLERANCE,
+      )
     if (Math.abs(delta) <= 4) results.push(check(`${viewport} page height`, delta === 0 ? SAME : EXPECTED, { ...heights, reason: delta ? 'Within ±4 px (image rounding).' : undefined }))
-    else if (pending > 0 && delta < 0) results.push(check(`${viewport} page height`, EXPECTED, { ...heights, reason: `${pending} pending Mux video(s) render nothing.` }))
+    else if (newVideos.length && videoBoxesClose && Math.abs(delta - videoDelta) <= 4) {
+      results.push(
+        check(`${viewport} page height`, EXPECTED, {
+          ...heights,
+          videoDelta,
+          reason: `The ${newVideos.length} video boxes account for ${videoDelta} px (each within ±${VIDEO_BOX_TOLERANCE} px: MP4 even-size rounding); the rest is within ±4 px.`,
+        }),
+      )
+    }
     else if (charterFontMissing(oldEntry.log) && !charterFontMissing(newEntry.log)) {
       results.push(check(`${viewport} page height`, EXPECTED, { ...heights, reason: 'Review fixes R1-3: the Charter fonts load now (the old site requested a missing stylesheet and fell back to Times), so the text reflows.' }))
     }
@@ -614,13 +751,13 @@ export function compareRecord(record, reference, records) {
       )
       if (newDesktop?.extract) {
         checks.push(
-          ...comparePage(route, base, newDesktop.extract, doc).map((item) => ({
+          ...comparePage(route, base, newDesktop.extract, doc, reference.dataset).map((item) => ({
             ...item,
             field: `${item.field} (vs new ${route.compareWithNew})`,
           })),
         )
       }
-      checks.push(...compareLayout(records.get(route.compareWithNew).sites.new.browser, newSite.browser, doc).map((item) => ({ ...item, field: `${item.field} (vs new ${route.compareWithNew})` })))
+      checks.push(...compareLayout(records.get(route.compareWithNew).sites.new.browser, newSite.browser).map((item) => ({ ...item, field: `${item.field} (vs new ${route.compareWithNew})` })))
     } else {
       checks.push(exact('HTTP status', oldSite.http.final.status, newSite.http.final.status))
       if (route.oldReferer) {
@@ -634,10 +771,11 @@ export function compareRecord(record, reference, records) {
           }),
         )
       }
-      if (oldDesktop?.extract && newDesktop?.extract) checks.push(...comparePage(route, oldDesktop.extract, newDesktop.extract, doc))
-      checks.push(...compareLayout(oldSite.browser, newSite.browser, doc))
+      if (oldDesktop?.extract && newDesktop?.extract) checks.push(...comparePage(route, oldDesktop.extract, newDesktop.extract, doc, reference.dataset))
+      checks.push(...compareLayout(oldSite.browser, newSite.browser))
     }
   }
+  checks.push(compareForbidden(newSite))
   const verdict = checks.some((item) => item.verdict === UNEXPECTED) ? UNEXPECTED : checks.some((item) => item.verdict === EXPECTED) ? EXPECTED : SAME
   return { route, verdict, checks }
 }

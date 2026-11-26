@@ -1,14 +1,20 @@
-// Interactive checks on the new site: Mux videos reach the playing state, STL canvases draw a
-// moving model, YouTube embeds load a player, testimonial ASCII art renders (same art as Sanity
-// and the old site) and the hover/touch reveal works, testimonials rotate, and no console errors.
-// The pages to visit come from the crawl data (raw/*.json), so run src/crawl.mjs first.
+// Interactive checks on the new site: every video plays its Sanity MP4 on its own (autoplay),
+// muted, looping, inline and with controls, as many videos as the old page had; STL canvases draw
+// a moving model, YouTube embeds load a player, testimonial ASCII art renders (same art as Sanity
+// and the old site) and the hover/touch reveal works, testimonials rotate, no request reaches Mux
+// or the old bucket, and no console errors. The pages to visit come from the crawl data
+// (raw/*.json), so run src/crawl.mjs first.
 //
 // Usage: node src/interactive.mjs [--dir <parity dir with the crawl>] [--out <dir, default --dir>] [--dataset production]
+//        [--browser chrome-for-testing|chrome|webkit] [--videos-only] [--only <substring>]
+// Writes interactive-results.json (Chrome for Testing) or interactive-results-<browser>.json.
 import fs from 'node:fs'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 
-import { LIVE_SNAPSHOT_DIR, NEW_BASE, OLD_BASE, PARITY_DIR, USER_AGENT, VIEWPORTS, ensureDir, launchBrowser, readJson, routeFileName } from './config.mjs'
+import { videoContractProblems } from './compare.mjs'
+import { DEFAULT_BROWSER, LIVE_SNAPSHOT_DIR, NEW_BASE, OLD_BASE, PARITY_DIR, USER_AGENT, VIEWPORTS, ensureDir, launchBrowser, readJson, routeFileName } from './config.mjs'
+import { forbiddenRequest } from './forbidden.mjs'
 import { fetchReference } from './sanity-reference.mjs'
 
 const { values: args } = parseArgs({
@@ -17,6 +23,8 @@ const { values: args } = parseArgs({
     out: { type: 'string' },
     only: { type: 'string' },
     dataset: { type: 'string', default: 'production' },
+    browser: { type: 'string', default: DEFAULT_BROWSER },
+    'videos-only': { type: 'boolean', default: false },
   },
 })
 
@@ -43,15 +51,20 @@ for (const route of routesFile.routes) {
   const extract = record.sites.new.browser?.desktop?.extract
   if (!extract) continue
   const doc = reference.byPath.get(route.path.split('?')[0])
+  const oldExtract = record.sites.old.browser?.desktop?.extract
   const needs = {
     videos: extract.videos.length,
-    pendingVideos: doc?.pendingVideoBlocks ?? 0,
-    stl: extract.stl.canvases,
-    youtube: extract.iframes.filter((frame) => frame.kind === 'youtube').length,
-    testimonials: extract.testimonials.length,
-    disqus: extract.iframes.some((frame) => frame.kind === 'disqus'),
+    videoBlocks: doc?.videos?.length ?? 0,
+    // The old page's video count is the target (/?utm_source=test crashed on the old site, so it
+    // is compared with the new home page instead).
+    oldVideos: route.compareWithNew ? null : (oldExtract?.videos.length ?? null),
+    stl: args['videos-only'] ? 0 : extract.stl.canvases,
+    youtube: args['videos-only'] ? 0 : extract.iframes.filter((frame) => frame.kind === 'youtube').length,
+    testimonials: args['videos-only'] ? 0 : extract.testimonials.length,
+    disqus: args['videos-only'] ? false : extract.iframes.some((frame) => frame.kind === 'disqus'),
   }
-  if (needs.videos || needs.pendingVideos || needs.stl || needs.youtube || needs.testimonials || needs.disqus) targets.push({ route, needs })
+  const anyVideos = needs.videos || needs.videoBlocks || needs.oldVideos
+  if (anyVideos || needs.stl || needs.youtube || needs.testimonials || needs.disqus) targets.push({ route, needs, blocks: doc?.videos ?? [] })
 }
 
 /** The Disqus thread parameters a page loads: identifier, URL and title must match the old site. */
@@ -75,14 +88,30 @@ async function disqusParams(browser, url) {
 
 function watch(page) {
   const errors = []
+  const requests = { total: 0, forbidden: [], videoFiles: [] }
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push({ text: message.text().slice(0, 300), location: message.location()?.url ?? '' })
   })
   page.on('pageerror', (error) => errors.push({ text: `pageerror: ${String(error).slice(0, 300)}`, location: '' }))
-  return errors
+  page.on('request', (request) => {
+    const url = request.url()
+    requests.total++
+    const reason = forbiddenRequest(url)
+    if (reason) requests.forbidden.push({ url: url.slice(0, 300), type: request.resourceType(), reason })
+    // Chromium only: WebKit loads media in its own process, out of Playwright's sight; there the
+    // video's currentSrc is still checked against the block's MP4.
+    if (request.resourceType() === 'media' && !requests.videoFiles.includes(url)) requests.videoFiles.push(url)
+  })
+  return { errors, requests }
 }
 
-async function checkVideos(page) {
+/**
+ * Each video must start on its own (the script never calls play()), from the block's MP4, and reach
+ * the playing state: not paused, more than 0.5 s played, enough data, decoded frames. Then it is
+ * sought to 0.6 s before the end and must wrap to the start and keep playing (loop), without
+ * ending and without going fullscreen (inline).
+ */
+async function checkVideos(page, blocks) {
   const count = await page.locator('video').count()
   const results = []
   for (let index = 0; index < count; index++) {
@@ -94,23 +123,50 @@ async function checkVideos(page) {
       state = await video.evaluate((element) => ({
         paused: element.paused,
         currentTime: element.currentTime,
+        duration: element.duration,
         readyState: element.readyState,
         networkState: element.networkState,
         error: element.error ? `${element.error.code} ${element.error.message}` : null,
-        src: (element.currentSrc || element.getAttribute('src') || '').slice(0, 120),
+        src: element.currentSrc || element.getAttribute('src') || '',
+        sources: [...element.querySelectorAll('source')].map((source) => ({ src: source.src, type: source.getAttribute('type') })),
+        fallbackLinks: [...element.querySelectorAll('a[href]')].map((anchor) => anchor.href),
+        autoplay: element.autoplay,
         muted: element.muted,
+        mutedAttribute: element.hasAttribute('muted'),
         loop: element.loop,
         playsInline: element.playsInline,
         controls: element.controls,
         width: element.videoWidth,
         height: element.videoHeight,
+        fullscreen: document.fullscreenElement === element || element.webkitDisplayingFullscreen === true,
       }))
-      if (!state.paused && state.currentTime > 0.5 && state.readyState >= 3) break
+      if (!state.paused && state.currentTime > 0.5 && state.readyState >= 3 && state.width > 0) break
       if (state.error) break
       await page.waitForTimeout(500)
     }
-    const playing = !state.paused && state.currentTime > 0.5 && state.readyState >= 3
-    results.push({ index, playing, secondsToPlay: playing ? Number(((Date.now() - started) / 1000).toFixed(1)) : null, ...state })
+    const playing = !state.paused && state.currentTime > 0.5 && state.readyState >= 3 && state.width > 0
+    const secondsToPlay = playing ? Number(((Date.now() - started) / 1000).toFixed(1)) : null
+    const loopCheck = playing
+      ? await video.evaluate(async (element) => {
+          const target = Math.max(0, element.duration - 0.6)
+          element.currentTime = target
+          const begin = performance.now()
+          let reachedEnd = false
+          while (performance.now() - begin < 8000) {
+            await new Promise((resolve) => setTimeout(resolve, 100))
+            if (element.currentTime >= target - 0.05) reachedEnd = true
+            if (reachedEnd && element.currentTime < target - 0.3 && !element.paused) {
+              return { looped: true, seekedTo: Number(target.toFixed(2)), wrappedTo: Number(element.currentTime.toFixed(2)), ended: element.ended }
+            }
+          }
+          return { looped: false, seekedTo: Number(target.toFixed(2)), currentTime: element.currentTime, paused: element.paused, ended: element.ended }
+        })
+      : null
+    const inline = state.playsInline && !state.fullscreen && !(await video.evaluate((element) => document.fullscreenElement === element || element.webkitDisplayingFullscreen === true))
+    const problems = videoContractProblems(state, blocks[index], args.dataset)
+    const ok = playing && loopCheck?.looped && !loopCheck.ended && state.autoplay && state.muted && state.mutedAttribute && state.loop && inline && state.controls && problems.length === 0
+    // `state.loop` is the element's loop property; `loopCheck` is the seek-to-the-end result.
+    results.push({ ...state, index, ok, playing, secondsToPlay, startedBy: 'autoplay', loopCheck, inline, problems })
   }
   return results
 }
@@ -281,9 +337,11 @@ async function checkTestimonial(page, { mobile, rotation }) {
   return result
 }
 
-const browser = await launchBrowser()
+const browser = await launchBrowser(args.browser)
+const browserVersion = browser.version()
+console.log(`Browser: ${args.browser} ${browserVersion}; ${targets.length} pages`)
 const results = []
-for (const { route, needs } of targets) {
+for (const { route, needs, blocks } of targets) {
   for (const [viewportName, viewport] of Object.entries(VIEWPORTS)) {
     // Videos, STL and YouTube are checked at both widths; the rotation wait only once.
     const context = await browser.newContext({
@@ -292,13 +350,21 @@ for (const { route, needs } of targets) {
       ...(viewportName === 'mobile' ? { isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : {}),
     })
     const page = await context.newPage()
-    const errors = watch(page)
+    const { errors, requests } = watch(page)
     const response = await page.goto(NEW_BASE + route.path, { waitUntil: 'load', timeout: 90_000 })
     await page.waitForTimeout(2500)
     const entry = { route: route.path, viewport: viewportName, status: response?.status() ?? null, needs }
     const slug = `${routeFileName(route.path)}.${viewportName}`
     if (needs.testimonials) entry.testimonial = await checkTestimonial(page, { mobile: viewportName === 'mobile', rotation: route.path === '/' && viewportName === 'desktop' })
-    if (needs.videos || needs.pendingVideos) entry.videos = await checkVideos(page)
+    if (needs.videos || needs.videoBlocks || needs.oldVideos) {
+      entry.videos = await checkVideos(page, blocks)
+      entry.videoCount = {
+        page: entry.videos.length,
+        sanityBlocks: needs.videoBlocks,
+        oldPage: needs.oldVideos,
+        ok: entry.videos.length === needs.videoBlocks && (needs.oldVideos === null || entry.videos.length === needs.oldVideos),
+      }
+    }
     if (needs.stl) entry.stl = await checkStl(page, slug)
     if (needs.youtube) entry.youtube = await checkYouTube(page)
     if (needs.youtube && viewportName === 'desktop') {
@@ -316,10 +382,20 @@ for (const { route, needs } of targets) {
       entry.disqus = { old: oldThread, new: newThread, same: !oldThread.error && JSON.stringify(oldThread) === JSON.stringify(newThread) }
     }
     entry.consoleErrors = errors
+    entry.requests = requests
     results.push(entry)
-    console.log(JSON.stringify({ route: entry.route, viewport: viewportName, status: entry.status, testimonial: entry.testimonial && { name: entry.testimonial.name, revealWorks: entry.testimonial.revealWorks, matchesSanity: entry.testimonial.artMatchesSanity, matchesOld: entry.testimonial.artMatchesOldSite, rotation: entry.testimonial.rotation }, videos: entry.videos?.map((video) => video.playing), stl: entry.stl?.map((model) => model.rendered && model.animating), youtube: entry.youtube?.map((frame) => `${frame.loaded && !frame.playerError ? 'loaded' : 'NOT LOADED'}/${frame.played?.currentTime > 0 ? 'played' : 'not played'}`), youtubeOldSite: entry.youtubeOldSite?.map((frame) => (frame.played?.currentTime > 0 ? 'played' : 'not played')), disqus: entry.disqus?.same, consoleErrors: errors.length }))
+    console.log(JSON.stringify({ route: entry.route, viewport: viewportName, status: entry.status, testimonial: entry.testimonial && { name: entry.testimonial.name, revealWorks: entry.testimonial.revealWorks, matchesSanity: entry.testimonial.artMatchesSanity, matchesOld: entry.testimonial.artMatchesOldSite, rotation: entry.testimonial.rotation }, videos: entry.videos?.map((video) => (video.ok ? 'ok' : `FAIL ${JSON.stringify({ playing: video.playing, loopCheck: video.loopCheck, problems: video.problems })}`)), videoCount: entry.videoCount, forbiddenRequests: requests.forbidden.length, stl: entry.stl?.map((model) => model.rendered && model.animating), youtube: entry.youtube?.map((frame) => `${frame.loaded && !frame.playerError ? 'loaded' : 'NOT LOADED'}/${frame.played?.currentTime > 0 ? 'played' : 'not played'}`), youtubeOldSite: entry.youtubeOldSite?.map((frame) => (frame.played?.currentTime > 0 ? 'played' : 'not played')), disqus: entry.disqus?.same, consoleErrors: errors.length }))
     await context.close()
   }
 }
 await browser.close()
-fs.writeFileSync(path.join(outDir, 'interactive-results.json'), JSON.stringify({ generatedAt: new Date().toISOString(), base: NEW_BASE, results }, null, 1))
+const resultsName = args.browser === 'chrome-for-testing' ? 'interactive-results.json' : `interactive-results-${args.browser}.json`
+fs.writeFileSync(
+  path.join(outDir, resultsName),
+  JSON.stringify({ generatedAt: new Date().toISOString(), base: NEW_BASE, dataset: args.dataset, browser: args.browser, browserVersion, videosOnly: args['videos-only'], results }, null, 1),
+)
+const videos = results.flatMap((entry) => entry.videos ?? [])
+const forbidden = results.flatMap((entry) => entry.requests.forbidden)
+console.log(
+  `${resultsName}: ${videos.filter((video) => video.ok).length}/${videos.length} videos ok; video counts ok on ${results.filter((entry) => entry.videoCount?.ok).length}/${results.filter((entry) => entry.videoCount).length} page visits; ${forbidden.length} forbidden requests of ${results.reduce((sum, entry) => sum + entry.requests.total, 0)}`,
+)

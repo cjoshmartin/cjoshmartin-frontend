@@ -2,16 +2,17 @@
   "name": "cjoshmartin-migration-verify",
   "version": "1.0.0",
   "private": true,
-  "description": "End-to-end verification of the Sanity-backed site against the old Wagtail-backed site: parity crawl, screenshots, interactive checks and the live ASCII-art Function check.",
+  "description": "End-to-end verification of the Sanity-backed site against the old Wagtail-backed site: parity crawl, screenshots, interactive checks (MP4 video playback included), and the live checks of the ASCII-art and video-to-mp4 Functions.",
   "license": "UNLICENSED",
   "type": "module",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "parity": "node src/parity.mjs",
+    "parity": "node src/crawl.mjs && node src/report.mjs",
     "interactive": "node src/interactive.mjs",
     "function-check": "node src/function-check.mjs",
+    "video-function-check": "node src/video-function-check.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {

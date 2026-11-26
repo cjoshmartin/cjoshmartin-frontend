@@ -6,7 +6,7 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
-const { chromium } = require('playwright-core')
+const { chromium, webkit } = require('playwright-core')
 
 /** The current production site (Wagtail-backed until cutover). The apex domain 308s to www. */
 export const OLD_BASE = process.env.OLD_BASE ?? 'https://www.cjoshmartin.com'
@@ -34,8 +34,8 @@ export const VIEWPORTS = {
 
 /**
  * The newest Chrome for Testing in the Playwright cache (any revision, so no download is needed).
- * Chrome for Testing has the proprietary codecs (H.264/AAC) that Mux HLS playback needs.
- * CHROME_PATH overrides it.
+ * Chrome for Testing has the proprietary codecs (H.264/AAC) that the site's MP4 videos need;
+ * Playwright's open-source Chromium builds do not. CHROME_PATH overrides it.
  */
 export function chromeExecutable() {
   if (process.env.CHROME_PATH) {
@@ -58,13 +58,23 @@ export function chromeExecutable() {
   return candidates[0]
 }
 
-export async function launchBrowser() {
-  return chromium.launch({
-    executablePath: chromeExecutable(),
-    headless: true,
-    // Muted autoplay is allowed by default; this also lets the YouTube check start playback.
-    args: ['--autoplay-policy=no-user-gesture-required'],
-  })
+/**
+ * Browsers the checks can run in, all with H.264/AAC so the MP4 videos decode:
+ * - `chrome-for-testing` (default): chromeExecutable() above;
+ * - `chrome`: an installed Google Chrome (Playwright channel "chrome");
+ * - `webkit`: Playwright's WebKit build from the Playwright cache (Safari's engine).
+ * VERIFY_BROWSER sets the default for every script.
+ */
+export const BROWSERS = ['chrome-for-testing', 'chrome', 'webkit']
+export const DEFAULT_BROWSER = process.env.VERIFY_BROWSER ?? 'chrome-for-testing'
+
+export async function launchBrowser(kind = DEFAULT_BROWSER) {
+  // Muted autoplay is allowed by default; the flag also lets the YouTube check start playback.
+  const chromiumArgs = ['--autoplay-policy=no-user-gesture-required']
+  if (kind === 'chrome-for-testing') return chromium.launch({ executablePath: chromeExecutable(), headless: true, args: chromiumArgs })
+  if (kind === 'chrome') return chromium.launch({ channel: 'chrome', headless: true, args: chromiumArgs })
+  if (kind === 'webkit') return webkit.launch({ headless: true })
+  throw new Error(`Unknown browser "${kind}"; use one of ${BROWSERS.join(', ')}`)
 }
 
 /** Reads a JSON file, failing with the file name in the message. */

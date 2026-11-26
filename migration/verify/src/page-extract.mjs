@@ -60,14 +60,27 @@ export function extractPage() {
     return { kind, host, src: kind === 'youtube' ? src : src.slice(0, 120) }
   })
 
-  const videos = [...document.querySelectorAll('video')].map((video) => ({
-    src: (video.currentSrc || video.getAttribute('src') || video.querySelector('source')?.getAttribute('src') || '').slice(0, 160),
-    autoplay: video.autoplay,
-    muted: video.muted,
-    loop: video.loop,
-    playsInline: video.playsInline,
-    controls: video.controls,
-  }))
+  const videos = [...document.querySelectorAll('video')].map((video) => {
+    const box = video.getBoundingClientRect()
+    return {
+      src: (video.currentSrc || video.getAttribute('src') || video.querySelector('source')?.getAttribute('src') || '').slice(0, 300),
+      sources: [...video.querySelectorAll('source')].map((source) => ({ src: source.src, type: source.getAttribute('type') })),
+      // Fallback content is only shown by browsers without <video> support (package C decision 3).
+      fallbackLinks: [...video.querySelectorAll('a[href]')].map((anchor) => anchor.href),
+      autoplay: video.autoplay,
+      muted: video.muted,
+      loop: video.loop,
+      playsInline: video.playsInline,
+      controls: video.controls,
+      preload: video.getAttribute('preload'),
+      width: Math.round(box.width),
+      height: Math.round(box.height),
+      videoWidth: video.videoWidth,
+      videoHeight: video.videoHeight,
+      readyState: video.readyState,
+      error: video.error ? `${video.error.code} ${video.error.message}` : null,
+    }
+  })
 
   const codeBlocks = [...document.querySelectorAll('pre')]
     .filter((pre) => pre.querySelector('code') && !isDynamic(pre))
@@ -87,6 +100,9 @@ export function extractPage() {
   const externalLinks = []
   for (const anchor of document.querySelectorAll('a[href]')) {
     if (isDynamic(anchor)) continue
+    // A <video>'s fallback download link is never shown where video plays; it is checked with the
+    // videos instead.
+    if (anchor.closest('video')) continue
     const raw = anchor.getAttribute('href')
     if (!raw || raw.startsWith('javascript:') || raw.startsWith('mailto:') || raw.startsWith('tel:')) continue
     let url
@@ -111,6 +127,8 @@ export function extractPage() {
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const parent = node.parentElement
     if (!parent || isDynamic(parent)) continue
+    // Fallback content of a <video> (see above) is not rendered.
+    if (parent.closest('video')) continue
     if (typeof parent.checkVisibility === 'function' && !parent.checkVisibility({ visibilityProperty: true })) continue
     const text = norm(node.textContent)
     if (text) parts.push(text)

@@ -2,11 +2,13 @@
 // observations and screenshots. compare.mjs turns them into the parity report.
 //
 // Usage: node src/crawl.mjs [--out <dir>] [--only <substring>] [--concurrency <n>]
+//        [--browser chrome-for-testing|chrome|webkit]
 import fs from 'node:fs'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 
-import { NEW_BASE, OLD_BASE, PARITY_DIR, USER_AGENT, VIEWPORTS, ensureDir, launchBrowser, routeFileName } from './config.mjs'
+import { DEFAULT_BROWSER, NEW_BASE, OLD_BASE, PARITY_DIR, USER_AGENT, VIEWPORTS, ensureDir, launchBrowser, routeFileName } from './config.mjs'
+import { forbiddenInHtml, forbiddenRequest } from './forbidden.mjs'
 import { extractPage } from './page-extract.mjs'
 import { buildRoutes } from './routes.mjs'
 
@@ -15,6 +17,7 @@ const { values: args } = parseArgs({
     out: { type: 'string', default: PARITY_DIR },
     only: { type: 'string' },
     concurrency: { type: 'string', default: '3' },
+    browser: { type: 'string', default: DEFAULT_BROWSER },
   },
 })
 
@@ -49,6 +52,7 @@ async function httpProbe(url) {
     entry.bytes = buffer.length
     if (/text\/(html|plain|xml)|application\/xml/.test(contentType)) {
       const body = buffer.toString('utf8')
+      entry.forbiddenInBody = forbiddenInHtml(body)
       if (/text\/html/.test(contentType)) {
         entry.noindex = /<meta[^>]+name="robots"[^>]+content="[^"]*noindex/i.test(body)
       } else {
@@ -61,9 +65,29 @@ async function httpProbe(url) {
   return { firstStatus: chain[0].status, firstLocation: chain[0].location, final: last, chain }
 }
 
-/** Collects console errors, page errors and failed requests for one page. */
+/**
+ * Collects console errors, page errors, failed requests and, for every request the page (or one of
+ * its frames) makes: the host tally, the media requests and any request to a forbidden host
+ * (src/forbidden.mjs).
+ */
 function watch(page) {
-  const log = { consoleErrors: [], consoleWarnings: [], pageErrors: [], failedRequests: [], badResponses: [] }
+  const log = { consoleErrors: [], consoleWarnings: [], pageErrors: [], failedRequests: [], badResponses: [], requestHosts: {}, mediaRequests: [], forbiddenRequests: [] }
+  page.on('request', (request) => {
+    const url = request.url()
+    let host = url.split(':')[0]
+    try {
+      if (/^https?:/.test(url)) host = new URL(url).host
+    } catch {
+      host = 'invalid-url'
+    }
+    log.requestHosts[host] = (log.requestHosts[host] ?? 0) + 1
+    // Chromium reports <video> loads as "media" requests; WebKit loads media in its own process, so
+    // they do not reach Playwright there.
+    const shortUrl = url.slice(0, 300)
+    if (request.resourceType() === 'media' && !log.mediaRequests.includes(shortUrl)) log.mediaRequests.push(shortUrl)
+    const reason = forbiddenRequest(url)
+    if (reason) log.forbiddenRequests.push({ url: shortUrl, type: request.resourceType(), reason })
+  })
   page.on('console', (message) => {
     const entry = { text: message.text().slice(0, 500), location: message.location()?.url ?? '' }
     if (message.type() === 'error') log.consoleErrors.push(entry)
@@ -167,6 +191,11 @@ async function visitPage(browser, base, route, site) {
         pageHeight: document.documentElement.scrollHeight,
         horizontalScroll: document.documentElement.scrollWidth > window.innerWidth + 1,
         scrollWidth: document.documentElement.scrollWidth,
+        // Rendered video boxes, so a page height difference can be traced to the videos.
+        videos: [...document.querySelectorAll('video')].map((video) => {
+          const box = video.getBoundingClientRect()
+          return { width: Math.round(box.width), height: Math.round(box.height), readyState: video.readyState, error: video.error ? `${video.error.code} ${video.error.message}` : null }
+        }),
       }))
     }
     entry.screenshot = await screenshot(page, path.join(shotDir, `${routeFileName(route.path)}.${site}.${viewportName}.jpg`))
@@ -246,11 +275,12 @@ async function pickFilters() {
 const filters = await pickFilters()
 const allRoutes = buildRoutes(filters)
 // routes.json always lists every route; --only re-crawls a subset into the same directory.
-fs.writeFileSync(path.join(outDir, 'routes.json'), JSON.stringify({ filters, routes: allRoutes, old: OLD_BASE, new: NEW_BASE }, null, 1))
+fs.writeFileSync(path.join(outDir, 'routes.json'), JSON.stringify({ filters, routes: allRoutes, old: OLD_BASE, new: NEW_BASE, browser: args.browser }, null, 1))
 const routes = args.only ? allRoutes.filter((route) => route.path.includes(args.only)) : allRoutes
 console.log(`Crawling ${routes.length} routes (medium filter "${filters.medium}", technology filter "${filters.technology}")`)
 
-const browser = await launchBrowser()
+const browser = await launchBrowser(args.browser)
+console.log(`Browser: ${args.browser} ${browser.version()}`)
 const queue = [...routes]
 const failures = []
 await Promise.all(

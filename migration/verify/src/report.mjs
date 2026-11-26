@@ -119,29 +119,38 @@ ${pairs}
   })
   .join('\n')
 
-// Interactive checks (src/interactive.mjs), when they have been run.
-const interactiveFile = path.join(args.dir, 'interactive-results.json')
-const interactive = fs.existsSync(interactiveFile) ? readJson(interactiveFile) : null
+// Interactive checks (src/interactive.mjs), when they have been run: interactive-results.json
+// (Chrome for Testing) and interactive-results-<browser>.json for other browsers.
+const interactiveFiles = fs
+  .readdirSync(args.dir)
+  .filter((name) => /^interactive-results(-[a-z-]+)?\.json$/.test(name))
+  .sort()
 const tally = (items, ok) => (items?.length ? `${items.filter(ok).length}/${items.length}` : '')
-const interactiveRows = (interactive?.results ?? [])
-  .map((entry) => {
-    const testimonial = entry.testimonial
-    const cells = [
-      tally(entry.videos, (video) => video.playing),
-      tally(entry.stl, (model) => model.rendered && model.animating),
-      tally(entry.youtube, (frame) => frame.loaded && !frame.playerError),
-      tally(entry.youtube, (frame) => frame.played?.currentTime > 0),
-      tally(entry.youtubeOldSite, (frame) => frame.played?.currentTime > 0),
-      testimonial ? `${testimonial.name}: art ${testimonial.artMatchesSanity && testimonial.artMatchesOldSite ? 'matches' : 'DIFFERS'}, reveal ${testimonial.revealWorks ? 'works' : 'FAILS'}${testimonial.rotation ? `, rotated to ${testimonial.rotation.after32s}` : ''}` : '',
-      entry.disqus ? (entry.disqus.same ? `same thread (t_i=${entry.disqus.new.identifier})` : 'DIFFERS') : '',
-    ]
-    return `<tr><td><code>${escape(entry.route)}</code></td><td>${entry.viewport}</td>${cells.map((cell) => `<td>${escape(cell)}</td>`).join('')}</tr>`
-  })
-  .join('\n')
-const interactiveSection = interactive
-  ? `<h2>Interactive checks (new site)</h2>
-<p class="muted">From <code>interactive-results.json</code> (${escape(interactive.generatedAt)}). YouTube "played" is after a click on the embed; "old site" is the same click on the old site.</p>
-<div class="wrap"><table><thead><tr><th>Route</th><th>Width</th><th>Mux videos playing</th><th>STL drawn and rotating</th><th>YouTube loaded</th><th>YouTube played</th><th>YouTube played (old site)</th><th>Testimonial</th><th>Disqus</th></tr></thead><tbody>${interactiveRows}</tbody></table></div>`
+const interactiveTable = (file) => {
+  const interactive = readJson(path.join(args.dir, file))
+  const rows = interactive.results
+    .map((entry) => {
+      const testimonial = entry.testimonial
+      const cells = [
+        tally(entry.videos, (video) => video.ok),
+        entry.videoCount ? `${entry.videoCount.page} (Sanity ${entry.videoCount.sanityBlocks}, old ${entry.videoCount.oldPage ?? 'n/a'})${entry.videoCount.ok ? '' : ' DIFFERS'}` : '',
+        tally(entry.stl, (model) => model.rendered && model.animating),
+        tally(entry.youtube, (frame) => frame.loaded && !frame.playerError),
+        tally(entry.youtube, (frame) => frame.played?.currentTime > 0),
+        tally(entry.youtubeOldSite, (frame) => frame.played?.currentTime > 0),
+        testimonial ? `${testimonial.name}: art ${testimonial.artMatchesSanity && testimonial.artMatchesOldSite ? 'matches' : 'DIFFERS'}, reveal ${testimonial.revealWorks ? 'works' : 'FAILS'}${testimonial.rotation ? `, rotated to ${testimonial.rotation.after32s}` : ''}` : '',
+        entry.disqus ? (entry.disqus.same ? `same thread (t_i=${entry.disqus.new.identifier})` : 'DIFFERS') : '',
+        entry.requests ? `${entry.requests.forbidden.length} of ${entry.requests.total}` : '',
+      ]
+      return `<tr><td><code>${escape(entry.route)}</code></td><td>${entry.viewport}</td>${cells.map((cell) => `<td>${escape(cell)}</td>`).join('')}</tr>`
+    })
+    .join('\n')
+  return `<h3>${escape(interactive.browser ?? 'chrome-for-testing')} ${escape(interactive.browserVersion ?? '')}${interactive.videosOnly ? ' (videos only)' : ''}</h3>
+<p class="muted">From <code>${escape(file)}</code> (${escape(interactive.generatedAt)}). A video is OK when it started on its own and played its Sanity MP4 (type video/mp4), muted, inline, with controls, and wrapped to the start after a seek to the end. YouTube "played" is after a click on the embed; "old site" is the same click on the old site.</p>
+<div class="wrap"><table><thead><tr><th>Route</th><th>Width</th><th>Videos OK</th><th>Video count</th><th>STL drawn and rotating</th><th>YouTube loaded</th><th>YouTube played</th><th>YouTube played (old site)</th><th>Testimonial</th><th>Disqus</th><th>Mux / old-bucket requests</th></tr></thead><tbody>${rows}</tbody></table></div>`
+}
+const interactiveSection = interactiveFiles.length
+  ? `<h2>Interactive checks (new site)</h2>\n${interactiveFiles.map(interactiveTable).join('\n')}`
   : '<p class="muted">Interactive checks have not been run (src/interactive.mjs).</p>'
 
 const index = results
