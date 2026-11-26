@@ -619,7 +619,7 @@ after 64.7 s.
 | Pointers to deleted assets (independent scan) | 0 (was 99) | 0 (was 99) |
 | `validate` (13 checks) | 13/13 pass (18:38 UTC). `privacy`: 173 assets, 0 with personal metadata, 99/99 copies marked, 0 documents naming a missing asset (269 searched) | 13/13 pass (18:32 UTC). `privacy`: 173 assets, 0 with personal metadata, 99/99 copies marked, 0 documents naming a missing asset (271 searched) |
 | `compare` | 269/269 shared ids identical (the 99 re-marked copies included), NDJSON byte-identical, Portable Text digest `0819ad48e7b0de27` | same |
-| Asset bytes | Unchanged this round: the 173 asset ids and sha1 hashes equal the set recheck 1 scanned byte by byte at 17:12 to 17:24 UTC (0 location fingerprints, 0 personal tags, 0 non-zero unused `mdat` bytes). Asset ids are content hashes. The `validate` `privacy` check above downloaded and scanned every asset again. | same |
+| Asset bytes | Unchanged this round: the 173 asset ids and sha1 hashes equal the set recheck 1 scanned byte by byte at 17:12 to 17:24 UTC (0 location fingerprints, 0 personal tags, 0 non-zero unused `mdat` bytes). Asset ids are content hashes. The `validate` `privacy` check above downloaded and scanned every asset again. | Same, and recheck 1's independent scan was run again at 18:42 UTC (283 files: the stored and the public bytes): 0 location fingerprints, 0 location or identifier tags, 0 non-zero unused `mdat` bytes. What it lists is known: the 2 PDFs' Creator, Title and dates (R2-7), ffmpeg's encoder name and handler descriptions in the 29 MP4s, and 4 orientation-only EXIF blocks. |
 | Deleted URLs still served (probe, 2 rounds) | 3 files, 58 images; 0 with a location | same |
 
 ### Open points for the owner (round 2)
