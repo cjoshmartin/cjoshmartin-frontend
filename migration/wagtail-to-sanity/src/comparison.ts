@@ -17,6 +17,13 @@ export const ASSET_TYPES = new Set(['sanity.imageAsset', 'sanity.fileAsset'])
  */
 export const SECRETS_PATH = 'secrets.**'
 
+/**
+ * The Presentation tool's preview URL secrets (`sanity.previewUrlSecret`): the Studio creates one
+ * per preview session in the dataset it previews, each expires, and each holds a secret. They are
+ * never the same in two datasets, so the comparison does not read them either, only lists their ids.
+ */
+export const PREVIEW_URL_SECRET_TYPE = 'sanity.previewUrlSecret'
+
 export function sha256(text: string): string {
   return createHash('sha256').update(text).digest('hex')
 }

@@ -6,7 +6,9 @@
  *   assets           every bucket content file (videos included, as their originals) is an asset
  *                    with that sha1 and its Wagtail source; asset counts match
  *   hashes           every Wagtail image/document record's asset sha1 equals its file_hash
- *                    (or the explained bucket sha1 for the known overwritten objects)
+ *                    (or the explained bucket sha1 for the known overwritten objects); an image
+ *                    whose file had personal metadata is its stripped copy instead, and its decoded
+ *                    pixels (two decoders, every frame) equal those of the Wagtail original
  *   references       every _ref resolves (strong refs to published documents or assets)
  *   keys             every object in every array has a unique _key
  *   portableText     styles, lists and marks resolve; no raw HTML or entity text unless the
@@ -19,7 +21,12 @@
  *                    with source video-to-mp4 made from `original` (the Wagtail upload), conversion
  *                    is ready with the current settings version, nothing needs conversion, each
  *                    MP4 is the checked output of the convert step and is served by the CDN; and
- *                    no Mux document, block or token is left
+ *                    no Mux document, block or token is left; an original that had personal
+ *                    metadata is its stripped copy, with the same audio and video packets
+ *   privacy          every asset of the dataset, downloaded, has no personal metadata (exiftool -ee,
+ *                    the track list, STL headers; src/privacy/rules.ts), no asset document holds
+ *                    metadata.location or personal metadata.exif keys, no unstripped upload is left,
+ *                    and every stripped copy carries its `privacy` field
  *   asciiArt         testimonial art equals the live site's and was made from the current photo
  *   convergence      the dataset holds exactly the transformed documents, unchanged
  *   studioValidation `sanity documents validate --workspace <dataset> --level error`
@@ -27,7 +34,7 @@
  * Writes reports/validation-<dataset>.json and reports/validation-<dataset>.md and fails
  * (non-zero exit) if any check fails.
  */
-import {existsSync} from 'node:fs'
+import {existsSync, rmSync} from 'node:fs'
 import path from 'node:path'
 
 import {JSDOM} from 'jsdom'
@@ -40,6 +47,14 @@ import {
 } from '../../../../studio/functions/video-to-mp4/settings'
 import {videoNeedsConversion} from '../../../../studio/schemaTypes/shared/video-conversion'
 import {ASSET_SOURCE_NAME, gcsPublicUrl, mediaAssetSourceId, type Dataset, type DataPaths, type Secrets} from '../config'
+import {requirePrivacyMap} from '../privacy/copies'
+import {downloadAsset} from '../privacy/download'
+import {pixelHashes} from '../privacy/image'
+import {assetIdWithSha1, PRIVACY_FIELD, strippedMarker} from '../privacy/marker'
+import {scanLocalFile} from '../privacy/scan'
+import {compareMediaPackets} from '../privacy/video'
+import {mapLimit} from '../sanity'
+import {describeFindings, personalMetadataExifKeys} from './privacy'
 import {linkHrefFix} from '../content-fixes'
 import {KNOWN_DISCREPANCIES} from '../discrepancies'
 import {migratedRevisions} from '../references'
@@ -236,11 +251,24 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
   const transformed = readNdjson(ndjsonPath(paths, dataset))
   const schema = await loadStudioSchema()
   const client = sanityClient(dataset, secrets)
+  const privacy = requirePrivacyMap(paths, inventory.files)
+  /** The asset sha1 a bucket file's bytes have in the dataset: its stripped copy's, if it has one. */
+  const uploadedSha1 = (sha1: string) => privacy.copies[sha1]?.sha1 ?? sha1
+  const bucketFileBySha1 = new Map(inventory.files.map((f) => [f.sha1, path.join(paths.gcs, f.path)]))
 
   log(`validate: reading ${dataset}`)
   const all = await client.fetch<Doc[]>(`*[!(_id in path("_.**")) && !(_id in path("versions.**"))]`)
   const byId = new Map(all.map((d) => [d._id, d]))
   const assets = all.filter((d) => d._type === 'sanity.imageAsset' || d._type === 'sanity.fileAsset')
+
+  // Every asset as the dataset stores it (images with dlRaw), each checked against its sha1. The
+  // hashes, videos and privacy checks read these files, not local copies.
+  const downloadDir = path.join(paths.privacy, 'downloads', `validate-${dataset}`)
+  rmSync(downloadDir, {recursive: true, force: true})
+  log(`validate: downloading ${assets.length} assets of ${dataset}`)
+  const downloaded = new Map(
+    await mapLimit(assets, 6, async (asset) => [asset._id, await downloadAsset(asset as Parameters<typeof downloadAsset>[0], downloadDir, secrets.sanityWriteToken)] as const),
+  )
   // Documents under `secrets.` hold tokens; they are never read into a report (the videos check
   // only looks at their ids and types).
   const content = all.filter((d) => !d._type.startsWith('sanity.') && !d._id.startsWith('secrets.'))
@@ -278,11 +306,12 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
     const mediaIdByPath = new Map(Object.entries(inventory.mediaFiles).map(([id, p]) => [p, Number(id)]))
     for (const file of inventory.files) {
       const type = file.folder === 'documents' || file.folder === 'media' ? 'file' : 'image'
-      expectedKeys.add(`${type}:${file.sha1}`)
-      const asset = assetBySha.get(`${type}:${file.sha1}`)
+      const sha1 = uploadedSha1(file.sha1)
+      expectedKeys.add(`${type}:${sha1}`)
+      const asset = assetBySha.get(`${type}:${sha1}`)
       const source = asset?.source as {name?: string; id?: string; url?: string} | undefined
       if (!asset) {
-        check.fail(`${file.path}: no ${type} asset with sha1 ${file.sha1}`)
+        check.fail(`${file.path}: no ${type} asset with sha1 ${sha1}${sha1 !== file.sha1 ? ` (the copy of the bucket file without personal metadata)` : ''}`)
       } else if (file.folder === 'media') {
         // A video's original: the asset the video blocks keep in `original`.
         const mediaId = mediaIdByPath.get(file.path)
@@ -303,7 +332,8 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
     const images = migrated.filter((a) => a._type === 'sanity.imageAsset').length
     const files = migrated.filter((a) => a._type === 'sanity.fileAsset').length
     const videoFiles = inventory.files.filter((f) => f.folder === 'media').length
-    check.summary = `${inventory.files.length} bucket files (${videoFiles} videos) -> ${expectedKeys.size} distinct assets; dataset has ${images} image + ${files} file assets from wagtail`
+    const strippedFiles = inventory.files.filter((f) => privacy.copies[f.sha1]).length
+    check.summary = `${inventory.files.length} bucket files (${videoFiles} videos, ${strippedFiles} uploaded as copies without personal metadata) -> ${expectedKeys.size} distinct assets; dataset has ${images} image + ${files} file assets from wagtail`
     checks.push(check)
 
     const hashes = new Check('hashes')
@@ -312,6 +342,30 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
     )
     let compared = 0
     let equal = 0
+    let equalPixels = 0
+    /**
+     * Whether `asset` is the stripped copy of the bucket file with `sha1` and decodes to the same
+     * pixels as that file (cached per asset).
+     */
+    const pixelChecks = new Map<string, Promise<string | null>>()
+    const strippedWithSamePixels = (asset: Doc, sha1: string): Promise<string | null> => {
+      const key = `${asset._id}:${sha1}`
+      let result = pixelChecks.get(key)
+      if (!result) {
+        result = (async () => {
+          const copy = privacy.copies[sha1]
+          const original = bucketFileBySha1.get(sha1)
+          if (!copy || asset.sha1hash !== copy.sha1) return `not the stripped copy of ${sha1}`
+          if (!original) return `no bucket file has sha1 ${sha1}`
+          const [a, b] = await Promise.all([pixelHashes(original), pixelHashes(downloaded.get(asset._id)!)])
+          if (JSON.stringify(a.magick) !== JSON.stringify(b.magick)) return 'its decoded pixels differ from the Wagtail original (ImageMagick)'
+          if (a.ffmpeg !== b.ffmpeg) return 'its decoded pixels differ from the Wagtail original (ffmpeg)'
+          return null
+        })()
+        pixelChecks.set(key, result)
+      }
+      return result
+    }
     for (const image of data.images) {
       const assetId = assetMap.images[String(image.id)]
       if (!assetId) {
@@ -331,8 +385,18 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
         equal++
         continue
       }
+      if (privacy.copies[image.file_hash]) {
+        const problem = await strippedWithSamePixels(asset, image.file_hash)
+        if (problem) hashes.fail(`image ${image.id}: ${asset._id} ${problem}`)
+        else equalPixels++
+        continue
+      }
       if (known && known.kind === 'image-hash-mismatch' && asset.sha1hash === known.bucketSha1) {
         hashes.explained.push(`image ${image.id}: sha1 ${String(asset.sha1hash)} instead of recorded ${image.file_hash}. ${known.explanation}`)
+      } else if (known && known.kind === 'image-hash-mismatch' && privacy.copies[known.bucketSha1]) {
+        const problem = await strippedWithSamePixels(asset, known.bucketSha1)
+        if (problem) hashes.fail(`image ${image.id}: ${asset._id} ${problem}`)
+        else hashes.explained.push(`image ${image.id}: the stripped copy of bucket sha1 ${known.bucketSha1} (same decoded pixels) instead of recorded ${image.file_hash}. ${known.explanation}`)
       } else {
         hashes.fail(`image ${image.id}: asset sha1 ${String(asset.sha1hash)} != Wagtail file_hash ${image.file_hash}`)
       }
@@ -344,7 +408,7 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
       else if (asset.sha1hash === doc.file_hash) equal++
       else hashes.fail(`document ${doc.id}: asset sha1 ${String(asset.sha1hash)} != Wagtail file_hash ${doc.file_hash}`)
     }
-    hashes.summary = `${data.images.length} image + ${data.documents.length} document records: ${equal} equal to file_hash, ${hashes.explained.length} explained (${KNOWN_DISCREPANCIES.filter((k) => k.kind === 'image-hash-mismatch').length} overwritten objects, ${KNOWN_DISCREPANCIES.filter((k) => k.kind === 'image-file-missing').length} missing file), ${hashes.failures.length} failing`
+    hashes.summary = `${data.images.length} image + ${data.documents.length} document records: ${equal} equal to file_hash, ${equalPixels} stripped copies with the decoded pixels of the Wagtail original, ${hashes.explained.length} explained (${KNOWN_DISCREPANCIES.filter((k) => k.kind === 'image-hash-mismatch').length} overwritten objects, ${KNOWN_DISCREPANCIES.filter((k) => k.kind === 'image-file-missing').length} missing file), ${hashes.failures.length} failing`
     checks.push(hashes)
   }
 
@@ -739,6 +803,8 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
       return asset?._type === 'sanity.fileAsset' ? asset : undefined
     }
     let ready = 0
+    /** Stripped originals whose audio and video packets were compared with the Wagtail upload. */
+    const strippedOriginalsChecked = new Map<string, Promise<string[]>>()
     for (const {where, block} of actualBlocks) {
       const before = check.failures.length
       const mediaId = expectedBlocks.get(where)
@@ -775,7 +841,17 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
           `${where}: ${mp4._id} records ${CONVERTED_ASSET_SETTINGS_FIELD} ${JSON.stringify(mp4[CONVERTED_ASSET_SETTINGS_FIELD])}, expected ${SETTINGS_VERSION}`,
         )
         check.expect(originalSource?.name === ASSET_SOURCE_NAME && originalSource.id === mediaAssetSourceId(mediaId), `${where}: original ${original._id} is not the Wagtail upload of media ${mediaId}`)
-        check.expect(original.sha1hash === converted.source.sha1, `${where}: original ${original._id} has sha1 ${String(original.sha1hash)}, the bucket file ${converted.source.sha1}`)
+        const originalSha1 = uploadedSha1(converted.source.sha1)
+        check.expect(
+          original.sha1hash === originalSha1,
+          `${where}: original ${original._id} has sha1 ${String(original.sha1hash)}, expected ${originalSha1}${originalSha1 !== converted.source.sha1 ? ' (the bucket file without personal metadata)' : ''}`,
+        )
+        if (originalSha1 !== converted.source.sha1 && original.sha1hash === originalSha1) {
+          if (!strippedOriginalsChecked.has(original._id)) {
+            strippedOriginalsChecked.set(original._id, compareMediaPackets(path.join(paths.gcs, converted.source.path), downloaded.get(original._id)!))
+          }
+          for (const problem of await strippedOriginalsChecked.get(original._id)!) check.fail(`${where}: original ${original._id}: ${problem} than the Wagtail upload`)
+        }
         check.expect(
           original.mimeType === originalMimeType(converted.source.filename),
           `${where}: original ${original._id} has mimeType ${String(original.mimeType)}, expected ${originalMimeType(converted.source.filename)}`,
@@ -834,7 +910,35 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
       if (response.status === 200 && type === OUTPUT_MIME_TYPE && length === asset.size) served++
       else check.fail(`${asset._id}: HEAD ${url} answered ${response.status}, ${type}, ${length} bytes (asset size ${String(asset.size)})`)
     }
-    check.summary = `${ready}/${expectedBlocks.size} video blocks are ready MP4s (settings ${SETTINGS_VERSION}); ${served}/${mp4Assets.length} MP4s served by the CDN; ${muxDocuments.length} Mux documents`
+    check.summary = `${ready}/${expectedBlocks.size} video blocks are ready MP4s (settings ${SETTINGS_VERSION}); ${strippedOriginalsChecked.size} originals are copies without personal metadata with the Wagtail upload's audio and video packets; ${served}/${mp4Assets.length} MP4s served by the CDN; ${muxDocuments.length} Mux documents`
+    checks.push(check)
+  }
+
+  // --- privacy --------------------------------------------------------------------------
+  {
+    const check = new Check('privacy')
+    const originalsOfCopies = new Set(Object.keys(privacy.copies))
+    const copiesBySha1 = new Map(Object.values(privacy.copies).map((c) => [c.sha1, c]))
+    let scanned = 0
+    let marked = 0
+    const results = await mapLimit(assets, 6, async (asset) => ({asset, scan: await scanLocalFile(downloaded.get(asset._id)!)}))
+    for (const {asset, scan} of results) {
+      scanned++
+      if (scan.unreadable) check.fail(`${asset._id}: cannot be checked: ${scan.unreadable}`)
+      if (scan.findings.length) check.fail(`${asset._id} (${String(asset.originalFilename ?? '')}): personal metadata (${describeFindings(scan.findings)}): ${scan.findings.map((f) => f.tag).join(', ')}`)
+      const metadata = (asset.metadata ?? {}) as Record<string, unknown>
+      if (metadata.location !== undefined && metadata.location !== null) check.fail(`${asset._id}: the asset document holds metadata.location`)
+      const exifKeys = personalMetadataExifKeys(metadata.exif)
+      if (exifKeys.length) check.fail(`${asset._id}: metadata.exif holds personal keys ${exifKeys.join(', ')}`)
+      if (originalsOfCopies.has(String(asset.sha1hash))) check.fail(`${asset._id}: an upload with personal metadata is still in the dataset (its stripped copy has sha1 ${privacy.copies[String(asset.sha1hash)]!.sha1})`)
+      const copy = copiesBySha1.get(String(asset.sha1hash))
+      if (copy) {
+        const expected = strippedMarker({kind: copy.kind, removed: copy.removed, strippedFrom: assetIdWithSha1(asset._id, copy.sha1, copy.originalSha1), strippedAt: copy.strippedAt})
+        if (stableStringify(asset[PRIVACY_FIELD] ?? null) === stableStringify(expected)) marked++
+        else check.fail(`${asset._id}: stripped copy without the expected ${PRIVACY_FIELD} field`)
+      }
+    }
+    check.summary = `${scanned} assets downloaded and scanned (exiftool -ee, tracks, STL headers): ${results.filter((r) => r.scan.findings.length).length} with personal metadata; ${marked}/${assets.filter((a) => copiesBySha1.has(String(a.sha1hash))).length} stripped copies marked; ${assets.filter((a) => originalsOfCopies.has(String(a.sha1hash))).length} unstripped uploads left`
     checks.push(check)
   }
 

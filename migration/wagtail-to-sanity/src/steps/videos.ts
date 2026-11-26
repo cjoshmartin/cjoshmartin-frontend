@@ -20,6 +20,12 @@
  * made with other settings are left alone here; once the import has pointed every block at the
  * current MP4, the prune-mp4s step deletes them.
  *
+ * An original with personal metadata (location, device details, timed metadata tracks) is never
+ * uploaded: the privacy step (src/steps/privacy.ts) made a copy without it whose audio and video
+ * packets are byte-identical, and this step uploads that copy (same title, file name, MIME type and
+ * source) with the `privacy` field the Functions read. The MP4 is the same either way, because the
+ * converter decodes the same packets.
+ *
  * Assets are content-addressed, so reruns reuse what is there and only patch metadata. The step
  * protects asset metadata like the assets step: before writing, it refuses when an asset's title,
  * description, originalFilename or source differs from what it would set and from what its last
@@ -42,17 +48,22 @@ import {
   SETTINGS_VERSION,
 } from '../../../../studio/functions/video-to-mp4/settings'
 import {ASSET_SOURCE_NAME, gcsPublicUrl, mediaAssetSourceId, type Dataset, type DataPaths, type Secrets} from '../config'
+import {requirePrivacyMap, withStrippedCopy, type PrivacyMap} from '../privacy/copies'
+import {PRIVACY_FIELD} from '../privacy/marker'
 import {mapLimit, sanityClient} from '../sanity'
-import {hashFile, log, readJson, sleep, writeJson} from '../util'
+import {hashFile, log, readJson, sleep, stableStringify, writeJson} from '../util'
 import {describeProblems, verifyMp4} from '../video/ffmpeg'
 import {loadExport} from '../wagtail'
 import {
   differingMetadata,
+  ensurePrivacyMarker,
+  expectedPrivacyMarker,
   findAssetMetadataEdits,
   type AssetMetadataEdit,
   type ExistingAsset,
   type PlannedAsset,
 } from './assets'
+import type {Inventory} from './extract'
 import {readMp4Map, type ConvertedVideo} from './convert'
 
 /** MIME types of the original files, by extension (what a browser reports when uploading them). */
@@ -121,8 +132,16 @@ export function readVideoAssetMap(paths: DataPaths, dataset: Dataset): VideoAsse
   return map
 }
 
-/** The asset of a Wagtail video as uploaded. */
-export function plannedOriginal(video: ConvertedVideo): PlannedAsset {
+/**
+ * The asset of a Wagtail video as uploaded: the bucket file, or its stripped copy when the privacy
+ * map has one (then `sha1` is the copy's).
+ */
+export function plannedOriginal(video: ConvertedVideo, privacy: PrivacyMap): PlannedAsset {
+  return withStrippedCopy(plannedOriginalOfBucketFile(video), privacy)
+}
+
+/** The asset of a Wagtail video's bucket file, before the privacy map is applied. */
+export function plannedOriginalOfBucketFile(video: ConvertedVideo): PlannedAsset {
   return {
     type: 'file',
     sha1: video.source.sha1,
@@ -164,7 +183,7 @@ export function currentConversionsOf(assets: readonly StoredFileAsset[], origina
   )
 }
 
-const FILE_ASSET_FIELDS = `_id, _type, _createdAt, sha1hash, title, description, originalFilename, source, mimeType, extension, size, url, ${CONVERTED_ASSET_SETTINGS_FIELD}`
+const FILE_ASSET_FIELDS = `_id, _type, _createdAt, sha1hash, title, description, originalFilename, source, mimeType, extension, size, url, ${CONVERTED_ASSET_SETTINGS_FIELD}, ${PRIVACY_FIELD}`
 
 async function fetchFileAssets(client: SanityClient): Promise<StoredFileAsset[]> {
   return client.fetch<StoredFileAsset[]>(`*[_type == "sanity.fileAsset"]{${FILE_ASSET_FIELDS}}`)
@@ -248,6 +267,7 @@ export async function uploadVideos(
 ): Promise<VideoAssetMap> {
   const data = loadExport(paths.exportJson)
   const mp4s = readMp4Map(paths)
+  const privacy = requirePrivacyMap(paths, readJson<Inventory>(path.join(paths.state, 'inventory.json')).files)
   const client = sanityClient(dataset, secrets)
   const previous = readVideoAssetMap(paths, dataset)
   const recordFile = previous ? videoAssetMapPath(paths, dataset) : null
@@ -261,12 +281,12 @@ export async function uploadVideos(
   // --- Originals: check, then upload or patch ---------------------------------------------
   let existing = await fetchFileAssets(client)
   const bySha1 = () => new Map(existing.map((a) => [`file:${a.sha1hash}`, a]))
-  const originals = videos.map(plannedOriginal)
+  const originals = videos.map((video) => plannedOriginal(video, privacy))
   // MP4s whose original is already in the dataset can be checked before anything is written.
   const knownMp4s = (): PlannedAsset[] => {
     const byKey = bySha1()
-    return videos.flatMap((video) => {
-      const original = byKey.get(`file:${video.source.sha1}`)
+    return videos.flatMap((video, index) => {
+      const original = byKey.get(`file:${originals[index]!.sha1}`)
       if (!original) return []
       const conversions = currentConversionsOf(existing, original._id)
       const sha1 = conversions.length === 1 ? conversions[0]!.sha1hash : video.output.sha1
@@ -281,12 +301,14 @@ export async function uploadVideos(
     const planned = originals[index]!
     let current = bySha1().get(`file:${planned.sha1}`)
     if (!current) {
-      current = await upload(client, path.join(paths.gcs, video.source.path), planned, originalMimeType(video.source.filename))
+      const file = planned.strippedCopy ? path.join(paths.privacy, planned.strippedCopy.file) : path.join(paths.gcs, video.source.path)
+      current = await upload(client, file, planned, originalMimeType(video.source.filename))
       uploaded++
-      log(`  uploaded ${video.source.path} -> ${current._id}`)
+      log(`  uploaded ${planned.strippedCopy ? `the stripped copy of ${video.source.path}` : video.source.path} -> ${current._id}`)
     }
     if (current.sha1hash !== planned.sha1) throw new Error(`Sanity stored ${video.source.path} with sha1 ${current.sha1hash}, expected ${planned.sha1}`)
     if (await patchMetadata(client, current, planned)) patched++
+    if (await ensurePrivacyMarker(client, privacy, planned, current)) patched++
     return current
   })
 
@@ -387,6 +409,10 @@ export async function uploadVideos(
     const plannedOriginalAsset = result.assets[original._id]!
     const plannedMp4Asset = result.assets[mp4._id]!
     if (differingMetadata(original, plannedOriginalAsset).length) problems.push(`${where}: ${original._id} metadata differs from the plan`)
+    const marker = expectedPrivacyMarker(privacy, plannedOriginalAsset, original._id)
+    if (marker !== null && stableStringify(original[PRIVACY_FIELD] ?? null) !== stableStringify(marker)) {
+      problems.push(`${where}: ${original._id} is a stripped copy without its ${PRIVACY_FIELD} field`)
+    }
     if (differingMetadata(mp4, plannedMp4Asset).length) problems.push(`${where}: ${mp4._id} metadata differs from the plan`)
     if (original.mimeType !== originalMimeType(plannedOriginalAsset.originalFilename)) {
       problems.push(`${where}: ${original._id} has mimeType ${original.mimeType}, expected ${originalMimeType(plannedOriginalAsset.originalFilename)}`)

@@ -13,6 +13,12 @@
  * description, originalFilename and source {name: "wagtail", id, url} match the Wagtail records
  * (patching assets that already exist, for example the testimonial photos WP2 uploaded).
  *
+ * A bucket file with personal metadata is never uploaded: the privacy step (src/steps/privacy.ts)
+ * made a copy without it, listed in privacy/privacy-map.json, and this step uploads that copy (same
+ * title, description, file name and source) with the `privacy` field the Functions read
+ * (src/privacy/marker.ts). The step refuses to run when the privacy map does not cover every bucket
+ * file.
+ *
  * Writes state/assets-<dataset>.json: bucket path, Wagtail image/document id and media id (for
  * thumbnails) -> Sanity asset id, and per asset the metadata the step left on it. That file is also
  * the record that protects later edits: before writing anything, the step refuses when an asset's
@@ -25,6 +31,8 @@ import {createReadStream, existsSync} from 'node:fs'
 import path from 'node:path'
 
 import {ASSET_SOURCE_NAME, gcsPublicUrl, type Dataset, type DataPaths, type Secrets} from '../config'
+import {copyFor, requirePrivacyMap, withStrippedCopy, type PrivacyMap, type StrippedSource} from '../privacy/copies'
+import {assetIdWithSha1, PRIVACY_FIELD, strippedMarker} from '../privacy/marker'
 import {mapLimit, sanityClient} from '../sanity'
 import {groupBy, log, readJson, stableStringify, writeJson} from '../util'
 import {loadExport, type WagtailDocument, type WagtailImage, type WagtailMedia} from '../wagtail'
@@ -49,6 +57,11 @@ export interface PlannedAsset {
   source: AssetSource
   /** Wagtail records whose bytes this asset holds. */
   records: string[]
+  /**
+   * Set when the bucket file has personal metadata: the upload is this stripped copy, and `sha1` is
+   * the copy's.
+   */
+  strippedCopy?: StrippedSource
 }
 
 export interface AssetMap {
@@ -146,6 +159,7 @@ export interface ExistingAsset {
   description?: string
   originalFilename?: string
   source?: {name?: string; id?: string; url?: string}
+  [PRIVACY_FIELD]?: unknown
 }
 
 /** The asset fields this step sets. Only these are compared, written and recorded. */
@@ -210,6 +224,35 @@ export function findAssetMetadataEdits(
   return edits.sort((a, b) => (a.assetId < b.assetId ? -1 : a.assetId > b.assetId ? 1 : 0))
 }
 
+/**
+ * The `privacy` field a stripped copy must carry (src/privacy/marker.ts); null for an upload of a
+ * bucket file without personal metadata.
+ */
+export function expectedPrivacyMarker(map: PrivacyMap, asset: Pick<PlannedAsset, 'sha1' | 'strippedCopy'>, assetId: string): unknown {
+  if (!asset.strippedCopy) return null
+  const copy = copyFor(map, asset.strippedCopy)
+  return strippedMarker({
+    kind: copy.kind,
+    removed: copy.removed,
+    strippedFrom: assetIdWithSha1(assetId, asset.sha1, copy.originalSha1),
+    strippedAt: copy.strippedAt,
+  })
+}
+
+/** Sets the `privacy` field of a stripped copy when it differs; returns whether it wrote. */
+export async function ensurePrivacyMarker(
+  client: ReturnType<typeof sanityClient>,
+  map: PrivacyMap,
+  asset: Pick<PlannedAsset, 'sha1' | 'strippedCopy'>,
+  current: {_id: string; [PRIVACY_FIELD]?: unknown},
+): Promise<boolean> {
+  const marker = expectedPrivacyMarker(map, asset, current._id)
+  if (marker === null || stableStringify(current[PRIVACY_FIELD] ?? null) === stableStringify(marker)) return false
+  await client.patch(current._id).set({[PRIVACY_FIELD]: marker}).commit()
+  log(`  set ${PRIVACY_FIELD} on ${current._id} (stripped copy)`)
+  return true
+}
+
 export function assetMapPath(paths: DataPaths, dataset: Dataset): string {
   return path.join(paths.state, `assets-${dataset}.json`)
 }
@@ -232,11 +275,15 @@ export async function uploadAssets(
   const inventory = readJson<Inventory>(path.join(paths.state, 'inventory.json'))
   const data = loadExport(paths.exportJson)
   const client = sanityClient(dataset, secrets)
-  const planned = planAssets(inventory.files, data.images, data.documents, data.media)
-  log(`assets: ${planned.length} distinct assets from ${inventory.files.filter((f) => f.folder !== 'media').length} files`)
+  const privacy = requirePrivacyMap(paths, inventory.files)
+  const planned = planAssets(inventory.files, data.images, data.documents, data.media).map((asset) => withStrippedCopy(asset, privacy))
+  log(
+    `assets: ${planned.length} distinct assets from ${inventory.files.filter((f) => f.folder !== 'media').length} files ` +
+      `(${planned.filter((a) => a.strippedCopy).length} of them as copies without personal metadata)`,
+  )
 
   const existing = await client.fetch<ExistingAsset[]>(
-    `*[_type in ["sanity.imageAsset", "sanity.fileAsset"]]{_id, _type, sha1hash, title, description, originalFilename, source}`,
+    `*[_type in ["sanity.imageAsset", "sanity.fileAsset"]]{_id, _type, sha1hash, title, description, originalFilename, source, ${PRIVACY_FIELD}}`,
   )
   const existingByKey = new Map(
     existing.map((a) => [`${a._type === 'sanity.imageAsset' ? 'image' : 'file'}:${a.sha1hash}`, a]),
@@ -264,7 +311,7 @@ export async function uploadAssets(
     if (!current) {
       const doc = await client.assets.upload(
         asset.type,
-        createReadStream(path.join(paths.gcs, asset.primaryPath)),
+        createReadStream(asset.strippedCopy ? path.join(paths.privacy, asset.strippedCopy.file) : path.join(paths.gcs, asset.primaryPath)),
         {
           filename: asset.originalFilename,
           title: asset.title,
@@ -283,7 +330,7 @@ export async function uploadAssets(
         originalFilename: doc.originalFilename,
         source: (doc as {source?: ExistingAsset['source']}).source,
       }
-      log(`  uploaded ${asset.primaryPath} -> ${doc._id}`)
+      log(`  uploaded ${asset.strippedCopy ? `the stripped copy of ${asset.primaryPath}` : asset.primaryPath} -> ${doc._id}`)
     }
     if (current.sha1hash !== asset.sha1) {
       throw new Error(`Sanity stored ${asset.primaryPath} with sha1 ${current.sha1hash}, expected ${asset.sha1}`)
@@ -312,6 +359,7 @@ export async function uploadAssets(
       patched++
       log(`  updated metadata of ${current._id} (${[...Object.keys(set), ...unset.map((u) => `-${u}`)].join(', ')})`)
     }
+    if (await ensurePrivacyMarker(client, privacy, asset, current)) patched++
     return {...asset, assetId: current._id}
   })
 

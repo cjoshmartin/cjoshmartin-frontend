@@ -5,6 +5,11 @@
  *
  * Steps, in order (all of them unless --steps is given):
  *   extract    unzip + verify the export, mirror the bucket, hash and reconcile files
+ *   privacy    scan every bucket file and every asset of the dataset for location and other
+ *              personal metadata, make verified copies without it (no re-encoding), replace each
+ *              such asset in the dataset by its copy (moving every reference, drafts included) and
+ *              delete it; the assets and videos steps upload only those copies
+ *              (privacy/privacy-map.json, privacy/inventory-<dataset>.json)
  *   assets     upload every image, document and video thumbnail to the dataset (content-addressed,
  *              so reruns reuse); refuses before writing if asset metadata changed since its last
  *              run (state/assets-<dataset>.json)
@@ -24,8 +29,8 @@
  *   prune-mp4s delete the MP4s of the Wagtail videos made with other settings than the current
  *              SETTINGS_VERSION, once nothing references them (after a settings change)
  *   validate   counts, references, Portable Text integrity, hashes, videos (contract v2, no
- *              Mux left), text parity and `sanity documents validate`; writes
- *              reports/validation-<dataset>.json
+ *              Mux left), privacy (no asset has personal metadata), text parity and
+ *              `sanity documents validate`; writes reports/validation-<dataset>.json
  *
  * Steps that only run when named in --steps:
  *   baseline   record an untouched dataset that was imported before imports kept a record
@@ -54,7 +59,7 @@ import {parseArgs} from 'node:util'
 import {DATASETS, dataPaths, loadSecrets, type Dataset} from './config'
 import {log} from './util'
 
-const STEPS = ['extract', 'assets', 'convert', 'videos', 'ascii', 'transform', 'import', 'prune-mp4s', 'validate'] as const
+const STEPS = ['extract', 'privacy', 'assets', 'convert', 'videos', 'ascii', 'transform', 'import', 'prune-mp4s', 'validate'] as const
 /** Steps that never run by default; their position in this list is their order in a run. */
 const EXTRA_STEPS = ['baseline'] as const
 const ALL_STEPS = ['baseline', ...STEPS] as const
@@ -112,6 +117,13 @@ async function main(): Promise<void> {
       case 'extract': {
         const {extract} = await import('./steps/extract')
         await extract(paths, {syncGcs: !values['no-gcs-sync']})
+        break
+      }
+      case 'privacy': {
+        const {runPrivacy} = await import('./steps/privacy')
+        await runPrivacy(paths, target, loadSecrets(paths), {
+          discardStudioEdits: values['discard-studio-edits'],
+        })
         break
       }
       case 'assets': {

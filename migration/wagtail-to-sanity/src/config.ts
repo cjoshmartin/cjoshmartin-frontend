@@ -6,6 +6,9 @@
  *   extracted/                  the unzipped export (export.json, dumpdata.json, manifest.json)
  *   gcs/                        local copy of the bucket's content folders
  *   video-mp4/media-<id>/       the Wagtail videos converted to MP4 (convert step)
+ *   privacy/                    copies without personal metadata, the privacy map and the asset
+ *                               inventories of the privacy step (local only: they name tags, and
+ *                               downloads/ holds the dataset's files)
  *   state/                      maps that make reruns converge (assets, MP4s, videos, ASCII art)
  *   transformed/<dataset>/      NDJSON written by the transform step
  *   reports/                    detailed data reports (never committed)
@@ -75,6 +78,7 @@ export interface DataPaths {
   manifestJson: string
   gcs: string
   videoMp4: string
+  privacy: string
   state: string
   transformed: string
   reports: string
@@ -93,6 +97,7 @@ export function dataPaths(root: string = path.join(homedir(), 'cjoshmartin-migra
     manifestJson: path.join(extracted, 'manifest.json'),
     gcs: path.join(root, 'gcs'),
     videoMp4: path.join(root, 'video-mp4'),
+    privacy: path.join(root, 'privacy'),
     state: path.join(root, 'state'),
     transformed: path.join(root, 'transformed'),
     reports: path.join(root, 'reports'),

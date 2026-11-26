@@ -18,7 +18,8 @@
  *                 transformed/<dataset>/data.ndjson tie the datasets to the transform output
  *   ndjson        sha256 of both transformed files, and the ids of documents that differ
  *
- * Documents under `secrets.` (tokens) are never read into the report: only their ids are listed.
+ * Documents under `secrets.` (tokens) and the Presentation tool's `sanity.previewUrlSecret`
+ * documents (per-session preview secrets) are never read into the report: only their ids are listed.
  * Writes reports/wp3/compare-<a>-<b>.json and .md (ids and hashes only, no content) and exits
  * non-zero when the datasets differ.
  */
@@ -28,6 +29,7 @@ import {parseArgs} from 'node:util'
 
 import {
   ASSET_TYPES,
+  PREVIEW_URL_SECRET_TYPE,
   SECRETS_PATH,
   comparable,
   countByType,
@@ -66,13 +68,16 @@ async function main(): Promise<void> {
   const read = async (dataset: Dataset) => {
     log(`compare: reading ${dataset}`)
     const docs = await sanityClient(dataset, secrets).fetch<Doc[]>(
-      `*[!(_id in path("_.**")) && !(_id in path($secrets))]`,
-      {secrets: SECRETS_PATH},
+      `*[!(_id in path("_.**")) && !(_id in path($secrets)) && _type != $previewSecret]`,
+      {secrets: SECRETS_PATH, previewSecret: PREVIEW_URL_SECRET_TYPE},
     )
     const secretIds = await sanityClient(dataset, secrets).fetch<string[]>(`*[_id in path($secrets)]._id`, {
       secrets: SECRETS_PATH,
     })
-    return {docs, byId: new Map(docs.map((d) => [d._id, d])), secretIds: [...secretIds].sort()}
+    const previewSecretIds = await sanityClient(dataset, secrets).fetch<string[]>(`*[_type == $previewSecret]._id`, {
+      previewSecret: PREVIEW_URL_SECRET_TYPE,
+    })
+    return {docs, byId: new Map(docs.map((d) => [d._id, d])), secretIds: [...secretIds].sort(), previewSecretIds: [...previewSecretIds].sort()}
   }
   const left = await read(a)
   const right = await read(b)
@@ -201,6 +206,7 @@ async function main(): Promise<void> {
       differentIds: ndjsonDifferent,
     },
     secretsDocuments: {[a]: left.secretIds, [b]: right.secretIds},
+    previewUrlSecrets: {[a]: left.previewSecretIds, [b]: right.previewSecretIds},
     differences,
   }
   const base = path.join(paths.reports, 'wp3', `compare-${a}-${b}`)
@@ -219,6 +225,7 @@ async function main(): Promise<void> {
     `- Portable Text: ${portableText.fields[a]} / ${portableText.fields[b]} blockContent fields, ${portableText.blocks[a]} / ${portableText.blocks[b]} blocks. Digest ${a} \`${portableText.digest[a]!.slice(0, 16)}\`, ${b} \`${portableText.digest[b]!.slice(0, 16)}\` (NDJSON: \`${portableText.digest[`${a} NDJSON`]!.slice(0, 16)}\`, \`${portableText.digest[`${b} NDJSON`]!.slice(0, 16)}\`).`,
     `- NDJSON: ${a} \`${ndjson[a].sha256.slice(0, 16)}\`, ${b} \`${ndjson[b].sha256.slice(0, 16)}\` (${result.ndjson.byteIdentical ? 'byte-identical' : `${ndjsonDifferent.length} documents differ`}).`,
     `- \`secrets.*\` documents (not compared): ${a} ${left.secretIds.length ? left.secretIds.join(', ') : 'none'}, ${b} ${right.secretIds.length ? right.secretIds.join(', ') : 'none'}.`,
+    `- \`${PREVIEW_URL_SECRET_TYPE}\` documents (Presentation tool sessions, not compared): ${a} ${left.previewSecretIds.length}, ${b} ${right.previewSecretIds.length}.`,
     '',
     `| Type | ${a} | ${b} |`,
     '|---|---|---|',

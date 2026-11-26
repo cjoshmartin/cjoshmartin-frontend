@@ -697,3 +697,279 @@ Logs, scripts and state from this package are outside git:
 - `reports/wp3/video-mp4.{json,md}`;
 - `state/video-mp4.json`, `state/videos-<dataset>.json`;
 - `video-mp4/media-<id>/`, with the 29 MP4s (86 MiB).
+
+
+## Privacy: personal metadata stripped from every existing asset (work package M, 2026-11-26)
+
+Owner decision: no asset the public datasets serve may carry location or other personal metadata,
+and nothing is re-encoded. Photos keep their pixels, orientation and ICC profile. Video originals
+keep their video and audio streams byte for byte, with their rotation and colour/HDR tags. This
+package cleaned the assets that are already in `staging` and `production`. Future uploads belong to
+the image-privacy and video-to-mp4 Functions (another package).
+
+### Result
+
+- **24 assets in each dataset had personal metadata: 15 images and 9 video originals.** Each one
+  was replaced by a copy without it, and the old asset was deleted once nothing used it. On the CDN,
+  all 24 old URLs now answer 404.
+- **Lossless, and proven per file.** Images were checked by decoded-pixel hashes (ImageMagick and
+  ffmpeg, every frame). Video originals were checked by per-stream packet hashes (pts, dts,
+  duration, flags, size, byte position, sha256 of the data). Both kinds were checked for unchanged
+  stream and tag descriptions. The Dolby Vision configuration of `IMG_3151.MOV` is kept.
+- **Content is unchanged apart from asset ids.** The documents that used the 24 assets were patched
+  in one transaction per dataset: `blogPost-19`, `blogPost-39`, `project-6`, `project-7`,
+  `project-8` and `project-24`. The `source.id` of 9 MP4 assets was patched too. Crop, hotspot, alt
+  text and captions are untouched, and every video block keeps its MP4.
+- **The 29 converted MP4s carry no personal metadata** (scanned with `exiftool -ee`), so none had to
+  be converted again.
+- **Validation: 13 of 13 checks pass** on `staging` (11:44 UTC) and on `production` (11:52 UTC). The
+  13th check is the new `privacy` check.
+- **The two datasets compare identical** on all 269 ids they share. The NDJSON is byte-identical
+  (`d427c126c7164b24…`) and so is the Portable Text digest (`6ce9db236331b857…`). The only ids in just
+  one dataset are 3 unreferenced probe images that the image-privacy package uploaded to staging for
+  its format test. They are not this package's to delete (see [Open](#open-1)).
+- **Reruns change nothing.** A rerun of `npm run migrate -- --dataset <ds> --steps privacy` on each
+  dataset found 0 assets to replace, and left the state files and the NDJSON byte-identical.
+
+### What counts as personal
+
+The rules are in [`src/privacy/rules.ts`](../../../migration/wagtail-to-sanity/src/privacy/rules.ts)
+(`personal-metadata-v1`). They read every tag of `exiftool -j -a -u -ee -G0:1:3`, which covers
+embedded documents and each sample of timed metadata. They also read the track list of videos and the
+header of STL models, which exiftool does not read.
+
+| Category | Tags |
+|---|---|
+| location | anything GPS, location, geotag, ISO 6709, latitude or longitude, plus the IPTC/XMP place fields |
+| maker-notes | every maker note (vendor blocks with device and photo ids, face and scene data) |
+| identifier | serial numbers, `ImageUniqueID`, Apple content/photo ids, camera, device and body ids, owner names |
+| person | artist, author, creator, by-line, credit, copyright, rights, contact details, face/person regions |
+| data-track | any video track that is not video or audio (timed metadata `mebx`, timecode, text, ...) |
+
+These are kept as not personal: orientation and ICC profile (the owner decision), colour, HDR and
+rendering data, camera make, model, lens and software name (a device type, not a device), capture
+settings and times, free-text titles and comments, the editing-session ids of XMP `xmpMM`, and a
+PDF's `Creator` (the application).
+
+### Inventory
+
+`~/cjoshmartin-migration/privacy/inventory-<dataset>.json` (local only; tag names, never values) has
+one entry per asset: its bytes, the scan, `metadata.location`/`metadata.exif`, the `privacy` field and
+the documents that use it. Timestamped copies are in `privacy/runs/`. `production` before the clean:
+173 assets (110 images, 58 videos, 3 STL, 2 PDF), every one mapped by sha1 to its local bucket file or
+converted MP4. 24 of them had personal metadata. `staging` had the same 173 plus the 3 probes, with
+the same 24 flagged. (The first staging inventory file was overwritten by a later run. The 24 are in
+`run-staging-1.log` and in `privacy/runs/replaced-staging-*.json`.)
+
+- **Location: 11 assets.**
+  - 6 photos have an EXIF GPS block: `IMG_0070.jpeg`, `IMG_3241_copy.jpg`, `IMG_3736.jpg`,
+    `IMG_7630.jpg`, `IMG_8414.jpg` and `IMG_9514.jpg`.
+  - 5 videos have a location atom: `IMG_0169.MOV`, `IMG_3151.MOV` and `IMG_3239.MOV` in QuickTime
+    Keys, `IMG_6810.MOV` and `IMG_7386.MOV` in an item list.
+  - `exiftool -ee` found no location inside the timed-metadata (`mebx`) tracks of the three iPhone
+    MOVs. They carry camera, motion and Live Photo details, and were removed as data tracks.
+- **Maker notes: 7 Apple photos.** These are the 6 GPS photos and `IMG_9344.jpeg`.
+- **Identifiers: 12 images with `ImageUniqueID`.** That includes 4 Android screenshots, `IMG_5861.JPG`,
+  `IMG_9932.JPG`, `IMG_9932_copy.jpeg` and `l_9b2d….jpg`.
+- **Person: 5 assets.**
+  - `IMG_9344.jpeg` has face regions (XMP `mwg-rs`, with face ids).
+  - The three iPhone screen recordings have an `Author` atom.
+  - `export_1711667273802.MOV` has a video editor's 32-hex `Copyright` value.
+- **None of the other assets had personal metadata:** the 2 PDFs, the 3 STL models (Fusion "ATF"
+  headers), all 29 MP4s and every other image and video. No asset document holds
+  `metadata.location` or `metadata.exif`.
+- **EXIF thumbnails show the same picture as the main image** (RMSE 2–8 % after scaling both to the
+  thumbnail size). So they are not a stale-crop leak, and they are kept.
+
+### How the copies are made
+
+Copies are made once, locally, in `~/cjoshmartin-migration/privacy/stripped/<sha1>/`, and listed in
+`privacy/privacy-map.json`. Both datasets upload the same bytes, so the new asset ids are equal in
+both. Making a copy again gives the same bytes; the integration test checks this.
+
+**Images** (exiftool 13.55):
+
+- exiftool deletes exactly the personal tags: the whole GPS IFD, the whole maker note, the whole
+  `XMP-mwg-rs` namespace, and `ExifIFD:ImageUniqueID` on its own. It rewrites only metadata
+  segments, never the image data.
+- The check (`src/privacy/image.ts`) requires all of the following:
+  - the decoded pixels are identical with two decoders;
+  - the EXIF thumbnail and the MPF gain map (`IMG_9344.jpeg`) are byte-identical;
+  - the ICC profile is byte-identical and the orientation is unchanged;
+  - every tag that is not personal keeps its value, except offsets exiftool must move
+    (`ThumbnailOffset`, `MPImageStart`);
+  - a new scan finds nothing personal.
+- On the 4 Android screenshots exiftool printed "Entries in IFD0 were out of sequence. Fixed." It
+  writes IFD0 in tag order. Every value was compared afterwards, and that warning is the only one
+  accepted.
+
+**Video originals.** These are not remuxed with ffmpeg. Measured with ffmpeg 9.0.1, `-c copy`
+(with `-map_metadata -1` and the original track timescale) kept every packet, but it:
+
+- dropped the Dolby Vision configuration record of `IMG_3151.MOV`;
+- changed the edit lists of `deep_linking.MP4` (the AAC priming packet and the last video frame
+  were no longer marked as discarded);
+- changed a video `duration_ts` from 9407 to 9408.
+
+Instead, [`src/privacy/isobmff.ts`](../../../migration/wagtail-to-sanity/src/privacy/isobmff.ts)
+edits the boxes in place:
+
+- `moov/udta`, `moov/meta`, the `udta`/`meta` of kept tracks, and every track that is not `vide` or
+  `soun` each become a zero-filled `free` box of the same size, so no offset changes;
+- the removed tracks' samples in `mdat` are overwritten with zeros;
+- anything unknown is refused rather than kept.
+
+The check (`src/privacy/video.ts`) requires all of the following:
+
+- the size is the same, and every byte outside the reported ranges is identical;
+- every kept stream has identical packets and an identical ffprobe description (codec
+  configuration, colour, side data: display matrix, DOVI record, ambient viewing environment);
+- the container duration, start and bit rate are unchanged;
+- only tags were removed;
+- a new scan finds nothing personal and no data track.
+
+Converting three stripped originals again (media 2, 7 and 28) gave MP4s byte-identical to the ones
+in the datasets. That is why every video keeps its MP4.
+
+| File | Found | Removed | Proof |
+|---|---|---|---|
+| `IMG_0070.jpeg` | location, maker notes | EXIF GPS, maker notes | pixels equal (2 decoders); orientation 6; ICC and thumbnail identical |
+| `IMG_3241_copy.jpg` | location, maker notes | EXIF GPS, maker notes | pixels equal; orientation 1; ICC identical |
+| `IMG_3736.jpg` | location, maker notes, id | EXIF GPS, maker notes, ImageUniqueID | pixels equal; ICC and thumbnail identical |
+| `IMG_7630.jpg` | location, maker notes, id | EXIF GPS, maker notes, ImageUniqueID | pixels equal; orientation 6; ICC and thumbnail identical |
+| `IMG_8414.jpg` | location, maker notes, id | EXIF GPS, maker notes, ImageUniqueID | pixels equal; orientation 6; ICC and thumbnail identical |
+| `IMG_9514.jpg` | location, maker notes, id | EXIF GPS, maker notes, ImageUniqueID | pixels equal; orientation 6; ICC and thumbnail identical |
+| `IMG_9344.jpeg` | maker notes, face regions | maker notes, XMP mwg-rs | pixels equal; ICC and HDR gain map (MPF) identical |
+| `IMG_5861.JPG`, `IMG_9932.JPG`, `IMG_9932_copy.jpeg`, `l_9b2d….jpg` | id | ImageUniqueID | pixels equal; ICC and thumbnails identical where present |
+| 4 × `Screenshot_20240517-*.png` | id | ImageUniqueID (PNG eXIf) | pixels equal; ICC identical |
+| `IMG_3151.MOV` (media 7) | location, 3 data tracks | `moov/meta`, 3 `mebx` tracks (68 KB of samples zeroed) | HEVC 470 + AAC 676 packets equal; display matrix, DOVI profile 8 record, ambient viewing environment kept |
+| `IMG_0169.MOV` (media 15) | location, 2 data tracks | `moov/meta`, 2 `mebx` tracks | HEVC 594 + PCM 887 packets equal; rotation kept |
+| `IMG_3239.MOV` (media 10) | location, 2 data tracks | `moov/meta`, 2 `mebx` tracks | AAC 686 + H.264 476 packets equal; rotation kept |
+| `IMG_6810.MOV`, `IMG_7386.MOV` (media 2, 3) | location | `moov/udta` | VP9 103/84 + AAC 151/123 packets equal |
+| `export_1711667273802.MOV` (media 9) | copyright id | `moov/meta` | HEVC 1767 + AAC 2539 packets equal |
+| `deep_linking.MP4`, 2 × `ScreenRecording_*.MP4` (media 27–29) | author | `moov/udta` | HEVC + AAC packets equal, edit lists untouched |
+
+### In the datasets
+
+For each of the 24, the step works in this order:
+
+1. **Upload the copy.** It has the old asset's `title`, `originalFilename`, MIME type and `source`
+   (Wagtail record, bucket URL). Images extract the same metadata (`blurhash`, `lqip`, `palette`) and
+   never `exif` or `location`.
+2. **Mark it.** The copy gets a `privacy` field in the shape the Functions read: `status: "stripped"`,
+   `version` (the Functions' `image-strip-v1`/`video-strip-v1`), `removed`, `strippedFrom` (the
+   deleted asset) and `updatedAt`.
+3. **Move every use in one transaction.** This covers every document in the raw perspective,
+   drafts and release versions included. Each patch is conditional on the document's `_rev`.
+4. **Delete the old asset.** This happens only after a query and a scan of every document find no
+   reference and no stored id.
+
+Next it brings the state the later steps read up to date. It reruns the asset, video and
+ASCII-art logic, which uploaded and patched nothing, and the transform. Then it moves the import
+record's entries of the 6 patched migration documents to their new revisions, so the next import
+does not take these patches for Studio edits. A document already edited in the Studio would have
+kept its old entry. None was.
+
+Runs (logs in `~/cjoshmartin-migration/reports/wp3/privacy/`):
+
+| Run | Result |
+|---|---|
+| staging 1 (11:27 UTC) | Copies uploaded and marked, all uses moved (11:31:20). Then it **stopped before deleting**: its own check counted the new copies' `privacy.strippedFrom` as a use of the old assets. Fixed: provenance fields are recorded, never moved or counted as uses. The pending record of the patched documents survived for the next run. |
+| staging 2 (11:33) | 24 deleted, state brought up to date, 6 record entries moved. |
+| staging validate (11:40) | 13/13 pass |
+| staging 3 and 4 (11:44, 11:53) | 0 to replace; state files and NDJSON unchanged |
+| production 1 (11:46, `--confirm-production`) | 24 uploaded, 15 documents patched, 24 deleted, 6 record entries moved, in one run |
+| production validate (11:50) | 13/13 pass |
+| production 2 (11:53) | 0 to replace |
+
+Local records: `privacy/runs/replaced-<dataset>-*.json` holds the replaced asset documents, the
+patches, and the documents as they were before the patch. These files contain draft content, so they
+stay local only. With the bucket originals, they are enough to undo the change.
+
+### Validation changes
+
+- **`privacy` (new).** Downloads every asset of the dataset (images with `dlRaw`) and checks each
+  against its sha1. Then it requires all of the following:
+  - the scan (`exiftool -ee`, tracks, STL headers) finds nothing personal;
+  - no asset document holds `metadata.location` or personal `metadata.exif` keys;
+  - no asset still has the bytes of an upload that has a stripped copy;
+  - every copy carries its expected `privacy` field.
+- **`hashes`.** An image record whose bucket file was stripped is now checked by decoded pixels: the
+  downloaded asset against the Wagtail original, with both decoders. It is no longer checked by file
+  sha1. Result: 98 equal to `file_hash`, 13 stripped copies with equal pixels, and 5 explained. Image
+  7 (an overwritten object whose bytes are `IMG_9514.jpg`'s) is now explained through the stripped
+  copy.
+- **`assets` and `videos`** expect the copy's sha1 for stripped files. A stripped original must have
+  the Wagtail upload's audio and video packets (compared on the downloaded asset).
+- **`compare`** lists the Presentation tool's `sanity.previewUrlSecret` documents by id only and
+  never reads them. Production now has 2 (preview sessions), and they hold secrets.
+
+| Check | staging | production |
+|---|---|---|
+| counts, references, keys, portableText, textParity, fieldParity, asciiArt, convergence, studioValidation | pass (as before) | pass |
+| assets | pass: 144 distinct assets, 24 as copies | pass |
+| hashes | pass: 98 equal, 13 equal pixels, 5 explained | pass |
+| videos | pass: 29/29 ready; 9 stripped originals with equal packets; 29/29 MP4s on the CDN | pass |
+| privacy | pass: 176 assets downloaded and scanned, 0 personal; 24/24 copies marked; 0 unstripped left | pass: 173 assets, same |
+
+### CDN
+
+For the 24 replaced production assets:
+
+- every old URL answers 404, and every new one 200;
+- the scaled and converted renditions of the 15 images (`w=400`, `w=1200&fm=jpg`, `w=800&fm=webp`,
+  `w=800&auto=format`) and the 9 new video files carry no personal tag.
+
+Even before this change, the image CDN served originals re-encoded and without metadata. Only the
+authenticated `?dlRaw=` download and the file URLs (videos) served the bytes with GPS.
+
+### Functions
+
+- **image-privacy** was deployed at 11:52:40 UTC, after both cleaning runs. It acts on images
+  created on or after 2026-11-26 unless `privacy.version` is `image-strip-v1` and the status is
+  `clean`, `stripped` or `failed`. The 24 copies are marked that way, and the other migrated assets
+  were created on 2026-11-25.
+- **Its logs (11:58 UTC) show one invocation, its own test document.** It did nothing on this
+  package's documents or assets.
+- **video-to-mp4** was last invoked at 10:06 UTC, before these runs. The patched video blocks keep
+  `file == conversion.outputAssetId`, so its filter does not match them.
+- **testimonial-ascii-art** was not invoked, because no testimonial was touched.
+
+### Code (`migration/wagtail-to-sanity/`)
+
+| Path | Change |
+|---|---|
+| `src/privacy/rules.ts` | The rules above, STL header check |
+| `src/privacy/exiftool.ts`, `scan.ts` | Scanning (exiftool, tracks, STL), exiftool tag removal |
+| `src/privacy/image.ts` | Image strip and its verification (pixels with two decoders, embedded images, ICC, orientation, every tag) |
+| `src/privacy/isobmff.ts`, `video.ts` | In-place ISO BMFF/QuickTime box stripper; packet and stream verification |
+| `src/privacy/copies.ts` | Copies and `privacy/privacy-map.json`; deterministic, re-verified on every use |
+| `src/privacy/repoint.ts` | Finds and moves asset-id uses (references, `asciiArtSource`, `conversion.*AssetId`, MP4 `source.id`); refuses unknown places |
+| `src/privacy/marker.ts`, `download.ts` | The `privacy` field (from the Functions' `studio/functions/privacy/constants.ts`); checked downloads |
+| `src/steps/privacy.ts` | Step `privacy` (after `extract`): copies, inventory, replace, delete, state and import record |
+| `src/steps/assets.ts`, `videos.ts` | Upload the stripped copy (never a file with personal metadata) with the `privacy` field; refuse without a current privacy map |
+| `src/steps/validate.ts` | New `privacy` check; pixel- and packet-based checks for copies |
+| `src/import-guard.ts` | `updateRecordAfterPatch` |
+| `src/compare.ts`, `src/comparison.ts` | `sanity.previewUrlSecret` listed, not compared |
+| `test/privacy.test.ts`, `test/privacy.integration.ts` | 24 unit tests, plus 7 tests with the real exiftool, ffmpeg and ImageMagick. These cover finding, stripping and verifying a photo, a PNG and a rotated video with a location and a timecode track; rejecting re-encoded or over-stripped copies; and determinism |
+
+`npm test`: 96 of 96 pass. `npm run test:ffmpeg`: 12 of 12. `npm run typecheck`: clean. ImageMagick and
+exiftool are now required tools (README).
+
+### Open
+
+1. **Policy difference with the image-privacy Function (owner decision).** The Function strips new
+   uploads much harder: all EXIF except orientation, all XMP, thumbnails, HDR gain maps and PNG
+   text. The migrated assets follow the owner's list, so they keep camera make and model, software,
+   capture times, XMP "Screenshot" comments, EXIF thumbnails and gain maps. The Function's date
+   cutoff leaves them alone. If the owner wants the stricter policy for existing assets too, the
+   rules here have to change. Rerunning the step then replaces those assets the same way.
+2. **Unstripped bytes outside the datasets.** This package did not touch them:
+   - the public bucket `images-for-cms` (until the WP6 lockdown);
+   - backups made before today (WP5);
+   - the local mirror `~/cjoshmartin-migration/gcs/`.
+3. **Staging test data of the image-privacy package:** the 3 probe images (`privacy-format-probe-t.*`)
+   and its live-test drafts. They make `compare` and staging's counts differ until that package
+   removes them.
+4. **This package imports `studio/functions/privacy/constants.ts`** for the marker's field name and
+   versions. That file belongs to the image-privacy package, which must commit it.

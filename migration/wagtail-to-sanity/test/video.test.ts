@@ -8,7 +8,8 @@ import {CONVERTED_ASSET_SETTINGS_FIELD, SETTINGS_VERSION} from '../../../studio/
 import {CONVERSION_DEVIATIONS, matchingDeviation} from '../src/conversion-deviations'
 import {findAssetMetadataEdits, type ExistingAsset} from '../src/steps/assets'
 import {argsTemplate, type ConvertedVideo} from '../src/steps/convert'
-import {conversionsOf, currentConversionsOf, originalMimeType, plannedMp4, plannedOriginal, type StoredFileAsset} from '../src/steps/videos'
+import type {PrivacyMap, StrippedCopy} from '../src/privacy/copies'
+import {conversionsOf, currentConversionsOf, originalMimeType, plannedMp4, plannedOriginal, plannedOriginalOfBucketFile, type StoredFileAsset} from '../src/steps/videos'
 import {
   conversionArgs,
   displayedSize,
@@ -125,11 +126,24 @@ describe('video assets', () => {
   } as unknown as ConvertedVideo
 
   it('plans the original with its Wagtail source and the MP4 with the video-to-mp4 source', () => {
-    assert.deepEqual(plannedOriginal(video).source, {name: 'wagtail', id: 'media-7', url: 'https://storage.googleapis.com/images-for-cms/media/IMG_3151.MOV'})
+    assert.deepEqual(plannedOriginalOfBucketFile(video).source, {name: 'wagtail', id: 'media-7', url: 'https://storage.googleapis.com/images-for-cms/media/IMG_3151.MOV'})
     const mp4 = plannedMp4(video, {_id: 'file-aaa-mov', originalFilename: 'IMG_3151.MOV'}, 'bbb')
     assert.deepEqual(mp4.source, {name: 'video-to-mp4', id: 'file-aaa-mov'})
     assert.equal(mp4.originalFilename, 'IMG_3151.mp4')
     assert.equal(mp4.sha1, 'bbb')
+  })
+
+  it('uploads the stripped copy of an original with personal metadata, with the same metadata', () => {
+    const copy = {originalSha1: 'aaa', file: 'stripped/aaa/IMG_3151.MOV', sha1: 'ccc', kind: 'video'} as StrippedCopy
+    const map = {copies: {aaa: copy}} as unknown as PrivacyMap
+    const planned = plannedOriginal(video, map)
+    assert.equal(planned.sha1, 'ccc')
+    assert.deepEqual(planned.strippedCopy, {originalSha1: 'aaa', file: 'stripped/aaa/IMG_3151.MOV'})
+    const {sha1: _a, strippedCopy: _b, ...rest} = planned
+    const {sha1: _c, ...bucket} = plannedOriginalOfBucketFile(video)
+    assert.deepEqual(rest, bucket)
+    // Without a copy the bucket file itself is planned.
+    assert.deepEqual(plannedOriginal(video, {copies: {}} as unknown as PrivacyMap), plannedOriginalOfBucketFile(video))
   })
 
   it('names the MP4 after the original asset id when the original has no file name', () => {
@@ -167,7 +181,7 @@ describe('video assets', () => {
   })
 
   it('refuses to overwrite metadata someone changed since the last run, and adopts the rest', () => {
-    const original = plannedOriginal(video)
+    const original = plannedOriginalOfBucketFile(video)
     const recorded = {...original, assetId: 'file-aaa-mov'}
     const edited: ExistingAsset = {_id: 'file-aaa-mov', _type: 'sanity.fileAsset', sha1hash: 'aaa', ...original, title: 'Renamed in the Studio'}
     const edits = findAssetMetadataEdits([original], new Map([['file:aaa', edited]]), {assets: {'file-aaa-mov': recorded}})

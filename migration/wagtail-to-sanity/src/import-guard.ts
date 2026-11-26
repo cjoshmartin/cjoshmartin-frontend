@@ -168,3 +168,70 @@ export function buildImportRecord(options: {
     documents: Object.fromEntries(Object.entries(documents).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
   }
 }
+
+export interface RecordUpdate {
+  record: ImportRecord
+  /** Documents whose entry now names the revision the patch left. */
+  updated: string[]
+  /** Patched documents whose entry was left as it was, and why. */
+  kept: {id: string; reason: string}[]
+}
+
+/**
+ * The record after another step of this migration patched migration documents (the privacy step
+ * moving references to stripped assets). For each patched document that was unchanged since the
+ * record before the patch, and that now equals what the transform produces (`expected`), the entry
+ * is moved to the new revision, so the next import does not mistake the migration's own patch for a
+ * Studio edit. A document that was already edited in the Studio keeps its old entry: the import
+ * keeps reporting that edit. `ndjsonSha256` becomes the new NDJSON's when every recorded document
+ * equals it.
+ */
+export function updateRecordAfterPatch(options: {
+  record: ImportRecord
+  before: readonly StoredDocument[]
+  after: readonly StoredDocument[]
+  expected: readonly StoredDocument[]
+  ndjsonSha256: string
+}): RecordUpdate {
+  const after = new Map(options.after.map((doc) => [doc._id, doc]))
+  const expected = new Map(options.expected.map((doc) => [doc._id, doc]))
+  const documents = {...options.record.documents}
+  const updated: string[] = []
+  const kept: {id: string; reason: string}[] = []
+  for (const doc of options.before) {
+    const recorded = documents[doc._id]
+    if (!recorded) {
+      kept.push({id: doc._id, reason: 'not in the record (not a migration document, or created since the last import)'})
+      continue
+    }
+    if (doc._rev !== recorded.rev && contentHash(doc) !== recorded.contentHash) {
+      kept.push({id: doc._id, reason: 'it was edited in the Studio before the patch'})
+      continue
+    }
+    const now = after.get(doc._id)
+    const wanted = expected.get(doc._id)
+    if (!now || typeof now._rev !== 'string' || !wanted) {
+      kept.push({id: doc._id, reason: !now ? 'it is gone after the patch' : !wanted ? 'the transform does not produce it' : 'it has no _rev'})
+      continue
+    }
+    if (contentHash(now) !== contentHash(wanted)) {
+      kept.push({id: doc._id, reason: 'after the patch it differs from the transformed document'})
+      continue
+    }
+    documents[doc._id] = {rev: now._rev, contentHash: contentHash(wanted)}
+    updated.push(doc._id)
+  }
+  const allEqual = Object.entries(documents).every(([id, entry]) => {
+    const wanted = expected.get(id)
+    return wanted !== undefined && contentHash(wanted) === entry.contentHash
+  }) && options.expected.every((doc) => documents[doc._id] !== undefined)
+  return {
+    record: {
+      ...options.record,
+      ndjsonSha256: allEqual ? options.ndjsonSha256 : options.record.ndjsonSha256,
+      documents: Object.fromEntries(Object.entries(documents).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
+    },
+    updated: updated.sort(),
+    kept: kept.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+  }
+}
