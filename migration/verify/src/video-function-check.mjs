@@ -31,6 +31,7 @@ import { createRequire } from 'node:module'
 import { parseArgs, promisify } from 'node:util'
 
 import {
+  CONVERTED_ASSET_SETTINGS_FIELD,
   CONVERTED_ASSET_SOURCE_NAME,
   CRF,
   OUTPUT_EXTENSION,
@@ -214,7 +215,7 @@ async function videoBlock(client, id) {
 
 async function convertedAssets(client, sourceId) {
   return client.fetch(
-    '*[_type == "sanity.fileAsset" && source.name == $name && source.id == $id] | order(_createdAt asc){_id, _createdAt, url, mimeType, extension, originalFilename, size, sha1hash, source}',
+    `*[_type == "sanity.fileAsset" && source.name == $name && source.id == $id] | order(_createdAt asc){_id, _createdAt, url, mimeType, extension, originalFilename, size, sha1hash, source, "settingsVersion": ${CONVERTED_ASSET_SETTINGS_FIELD}}`,
     { name: CONVERTED_ASSET_SOURCE_NAME, id: sourceId },
     { perspective: 'raw' },
   )
@@ -278,7 +279,9 @@ async function checkMp4(asset, source, dir) {
   const videoDuration = Number(v.duration)
   const frames = await countFrames(file)
   const times = compareFrameTimes(source.times, await frameTimes(file))
-  const decode = await run('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', '-xerror', '-i', file, '-map', '0', '-f', 'null', '-'])
+  // The null output keeps each frame's own time; otherwise ffmpeg retimes a variable-frame-rate
+  // video for the null muxer and logs "non monotonically increasing dts", which is not a decode error.
+  const decode = await run('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', '-xerror', '-i', file, '-map', '0', '-fps_mode:v', 'passthrough', '-enc_time_base:v', 'demux', '-f', 'null', '-'])
   check(decode.stderr.trim() === '', `decode errors: ${decode.stderr.trim()}`)
   return {
     file,
@@ -390,6 +393,7 @@ async function main() {
     const expectedName = convertedFilename(path.basename(copy), uploaded._id)
     check(asset.originalFilename === expectedName, `originalFilename ${asset.originalFilename}, expected ${expectedName}`)
     check(asset.source?.name === CONVERTED_ASSET_SOURCE_NAME && asset.source?.id === uploaded._id, `source ${JSON.stringify(asset.source)}`)
+    check(asset.settingsVersion === SETTINGS_VERSION, `the MP4 asset records ${CONVERTED_ASSET_SETTINGS_FIELD} ${asset.settingsVersion}, settings.ts ${SETTINGS_VERSION}`)
     check((await client.fetch('*[_id == $id][0]._id', { id: SCRATCH_ID }, { perspective: 'raw' })) === null, 'nothing was published')
     note(`block: file ${mp4Id}, original ${block.original.asset._ref}, conversion ${JSON.stringify(block.conversion)}`)
     note(`asset: ${asset.originalFilename}, ${asset.mimeType}, source ${asset.source.name}/${asset.source.id}, ${asset.size} bytes, the only MP4 made from the upload`)
