@@ -2,6 +2,14 @@
 
 Status: **draft, awaiting approval** · Written 2026-11-26
 
+> **Amended 2026-11-26: Mux dropped (owner decision).** Every video is stored in Sanity as an MP4
+> file asset, converted with the fixed settings in `studio/functions/video-to-mp4/settings.ts`, and
+> the original upload is kept as a hidden, read-only reference that is never served. Studio uploads
+> are converted automatically by the `video-to-mp4` Sanity Function. This replaces D7, the video
+> parts of §4, §7.1, §8, §9 (step 4), §10, §11, test 30 and §15–16 below; the contract is
+> "Videos (video contract v2)" in `docs/sanity-migration/schema-contract.md`. Those sections are
+> amended in place where an owner step depends on them.
+
 ## 1. Goal
 
 Retire the Django/Wagtail backend (`backend.cjoshmartin.com`, Dokku on 159.203.93.178) and the GCS media bucket (`images-for-cms`) as content sources. Move every page, snippet, image, document, and video into a new Sanity project. The Next.js frontend reads from Sanity. A weekly GitHub Actions job backs up the Sanity dataset to a private GCS bucket, and only writes a backup when the data has changed.
@@ -39,7 +47,7 @@ The full frontend data contract is in §6. It comes from a file-by-file audit of
 | D4 | Preview | **Visual Editing**: Presentation tool, Next draft mode, `defineLive`. |
 | D5 | Backups | **Private GCS bucket** in `com-cjoshmartin`, region us-central1, sized to stay in the always-free tier. Content-addressed asset store. Code is written and tested overnight. The bucket and access are provisioned in the morning. |
 | D6 | Cron | **GitHub Actions**, weekly, with a keepalive so the 60-day inactivity rule never disables it. |
-| D7 | Videos | **Mux** via `sanity-plugin-mux-input`. Basic quality, public playback. |
+| D7 | Videos | ~~**Mux** via `sanity-plugin-mux-input`. Basic quality, public playback.~~ **Superseded 2026-11-26:** MP4 file assets in Sanity (video contract v2), converted by the migration and, for Studio uploads, by the `video-to-mp4` Function; the original upload is kept, never served. |
 | D8 | Testimonial ASCII art | A **Sanity Function** regenerates it whenever a testimonial image changes. The migration uses the same generator code. |
 | D9 | Existing bugs | **Fix all of them** in the rewrite (§7.3). Each one gets a manual test. |
 | D10 | Decommission | Archive the backend code to a **private, archived** GitHub repo (with `secrets.json` scrubbed from history). Take a final Postgres dump and copy it, plus the Wagtail export, into the backup bucket. Destroy the Dokku app and its Postgres. Remove the `backend` DNS record. Remove all backend code from the frontend. |
@@ -291,10 +299,10 @@ Scripts are committed. Data lives outside the repo in `~/cjoshmartin-migration/`
    - Upload **all** content images and files from local disk to Sanity, with `source: {name:"wagtail", id, url}` and the title set.
    - Build a map from Wagtail id to Sanity asset id.
    - Re-runs don't create duplicates because Sanity names assets by their hash.
-4. **Videos**
-   - For each of the 29 media items, create a Mux asset from its GCS URL (the bucket is still public overnight), with `passthrough = wagtail-media-<id>` and `video_quality: basic`.
-   - Re-runs reuse an existing asset with the same passthrough instead of uploading again.
-   - Wait for `ready`, then create `mux.videoAsset` documents in the shape the plugin expects (read from the plugin's source).
+4. **Videos** (amended 2026-11-26: Mux dropped)
+   - `convert`: convert each of the 29 media files from the local bucket mirror with `buildFfmpegArgs` (ffmpeg 7.0 or newer) and check every output, including that every decoded frame of the original is in the MP4 at its own time.
+   - `videos`: upload each original and its MP4 as file assets (the MP4 with source `video-to-mp4`, the settings version recorded on it); re-runs reuse assets by content hash and reuse only MP4s made with the current settings.
+   - After `import`, `prune-mp4s` deletes the MP4s of the Wagtail videos made with other settings once nothing references them.
    - Wagtail media thumbnails are uploaded as image assets, with `source` linking them to their media id.
 5. **ASCII art:** generate `asciiArt` for every testimonial using the shared generator.
 6. **Import**
@@ -318,10 +326,9 @@ Scripts are committed. Data lives outside the repo in `~/cjoshmartin-migration/`
 **Bucket layout**
 ```
 snapshots/<ISO-timestamp>/data.ndjson.gz   # full raw export incl. drafts (documents only)
-snapshots/<ISO-timestamp>/manifest.json    # fingerprint, counts per _type, asset list (sha1 → path), mux list
+snapshots/<ISO-timestamp>/manifest.json    # fingerprint, counts per _type, asset list (sha1 → path)
 assets/images/<sha1>.<ext>                  # each Sanity image stored once
-assets/files/<sha1>.<ext>                   # each Sanity file stored once
-assets/mux/<muxAssetId>.<ext>               # original video for each mux.videoAsset (see below)
+assets/files/<sha1>.<ext>                   # each Sanity file stored once (videos included: MP4s and originals)
 markers/<ISO-timestamp>.json                # written last = snapshot complete; latest marker = newest name
 archive/                                    # one-time: wagtail export zip, dumpdata, final pg_dump, GCS file list
 ```
@@ -332,7 +339,7 @@ archive/                                    # one-time: wagtail export zip, dump
 3. **Back up:**
    - export the documents
    - upload each asset whose `assets/...<sha1>` object doesn't exist yet
-   - for Mux videos not yet stored, fetch the original through Mux's master-access API (the agent confirms the cost in Mux's docs; if it isn't free, the workflow downloads the highest available rendition instead and records which in the manifest)
+   - (amended 2026-11-26) videos are ordinary file assets now, so they are backed up like every other file; there is no Mux step
    - upload the snapshot files, then write the marker
 4. **Size check:** fail if the bucket is larger than 4 GB.
 
@@ -362,7 +369,7 @@ archive/                                    # one-time: wagtail export zip, dump
    - every `_ref` resolves
    - Portable Text has no raw HTML strings and every block has a `_key`
    - every Sanity image's `sha1hash` equals Wagtail's `file_hash`
-   - all 29 Mux assets are `ready`
+   - all 29 video blocks are `ready` MP4s made with the current `SETTINGS_VERSION`, with their originals kept (amended 2026-11-26; was "all 29 Mux assets are `ready`")
 3. **Text parity:** for every page and snippet, the normalized plain text of the Wagtail rich text matches the plain text of the Portable Text. Any difference fails the check, unless it's an allowlisted whitespace difference.
 4. **Schema:** `sanity documents validate` passes on both datasets.
 5. **ASCII art**
@@ -447,7 +454,7 @@ Mark each item pass or fail. Anything that fails blocks the merge.
     - discarding the draft reverts it
     - (Vercel preview protection may block the iframe; if so, check this one on production after merge)
 29. On a staging copy of a testimonial (use the dataset switcher), change the photo. Within about a minute `asciiArt` updates.
-30. Upload a short test video to a staging blog post. It goes to Mux and plays in the Studio preview.
+30. Upload a short test video to a staging blog post. Within about a minute the block shows "Ready": `file` is the converted MP4 and "Original upload" holds your file. It plays in the Presentation preview. (Amended 2026-11-26; it used to go to Mux.)
 31. Edit and publish a typo fix on production. It appears on the site within seconds, not an hour. Then revert it. *(Bug 11)*
 
 **H. Backups** (after merge and running `setup-gcp.sh`)
@@ -555,6 +562,7 @@ The PR is opened by me after WP8, using `gh pr create` from `sanity-migration`. 
 | Secret | Where it's stored |
 |---|---|
 | Sanity tokens (Editor for migration, Viewer for site, backups, and preview) | `~/cjoshmartin-migration/secrets.env` (mode 600), Vercel env vars (Preview tonight, Production in the morning), GitHub Actions secret (morning) |
-| Mux token | `secrets.env`. Entered once into the Studio Mux plugin, which stores it in the dataset's `secrets.mux` document. |
+| Mux token | No longer used (Mux dropped 2026-11-26). Revoke it in the Mux dashboard, then delete it from `secrets.env`. It was never entered into the Studio, so no `secrets.mux` document exists. |
+| Revalidation webhook secret | `SANITY_REVALIDATE_SECRET`: `secrets.env`, the production Vercel env var, and the Sanity webhook "Revalidate cjoshmartin.com" (added 2026-11-26, set up after the merge). |
 | GCP | No keys. Workload Identity Federation only. |
 | Old leaked `secrets.json` key | Revoked in the morning teardown, and scrubbed from the archived repo's history. |

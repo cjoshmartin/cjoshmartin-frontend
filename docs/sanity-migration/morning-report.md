@@ -3,6 +3,28 @@
 Written 2026-11-26 at about 01:05 UTC, at the end of the overnight run. The plan is
 [`../sanity-migration-plan.md`](../sanity-migration-plan.md).
 
+> **Superseded in part (2026-11-26, later that morning): Mux is gone.** You decided to drop Mux and
+> store every video in Sanity as an MP4. Everything below about Mux is history: blocker 1 ("19 of
+> the 29 videos are missing"), the Mux rows of the numbers, validation and parity tables,
+> unresolved findings 1 and 9, the Mux blocked step, morning steps 2 and 3, the Mux secrets in
+> step 6, and the Mux prerequisite of step 7. Steps 2, 3, 6 and 7 below are updated in place. Today:
+>
+> - All 29 videos are MP4 file assets in both datasets, converted with
+>   `studio/functions/video-to-mp4/settings.ts` (`h264-crf23-max1920-v2`, which keeps every frame of
+>   variable-frame-rate screen recordings at its own time), each with its original upload kept as
+>   a read-only reference. Validation passes 12 of 12 on both datasets, and they are identical.
+> - Every video uploaded in the Studio is converted automatically by the `video-to-mp4` Sanity
+>   Function. The site only plays converted MP4s.
+> - The 10 Mux assets are deleted, and no `mux.*` document is left. The Mux plugin, player and
+>   backup code are removed.
+> - Reports: [`reports/wp3-migration.md`](reports/wp3-migration.md) (package B),
+>   [`reports/a2-video-function.md`](reports/a2-video-function.md),
+>   [`reports/video-verification.md`](reports/video-verification.md) and
+>   [`reports/mux-removal-review.md`](reports/mux-removal-review.md) (review findings and fixes).
+>
+> Blocker 2 (the backup workflow's repository name) is fixed too (`scripts/backup/setup-gcp.sh`
+> uses `cjoshmartin/cjoshmartin-frontend`).
+
 ## Overall status
 
 **Everything in the plan has been built, deployed to a Vercel Preview and verified. It is not
@@ -277,29 +299,26 @@ This is plan §13 "Morning, with you", updated with tonight's findings. Run ever
 
 Pay most attention to the unresolved findings and the blocked steps above.
 
-### 2. Videos (blocker 1)
+### 2. Videos (was blocker 1, done)
 
-Switch the Mux environment from the free plan to Pay as you go in the Mux dashboard (it needs a
-billing method). Then:
+Nothing to upgrade or run: Mux is gone and all 29 videos are in both datasets (see the note at the
+top). To check them again (read-only):
 
 ```sh
 cd migration/wagtail-to-sanity
-npm run migrate -- --dataset staging --steps mux,videos
-npm run migrate -- --dataset production --confirm-production --steps mux,videos
 npm run migrate -- --dataset staging --steps validate
 npm run migrate -- --dataset production --confirm-production --steps validate
 npm run compare -- --datasets staging,production
 ```
 
-Both validations should pass 12 of 12, and compare should report the datasets identical. The
-`videos` step only adds the missing `mux.videoAsset` documents; it never touches Studio edits.
-If you decide not to upgrade, say so on the PR; the 19 videos then stay missing on the 4 pages
-listed above.
+Both validations should pass 12 of 12, and compare should report the datasets identical.
 
-### 3. Mux token in the Studio
+### 3. Mux token (was "Mux token in the Studio", no longer needed)
 
-Open <https://cjoshmartin.sanity.studio>, go to the **Videos** tool in each workspace (production,
-then staging), and enter the Mux token from `secrets.env` once each. Test 30 needs it.
+There is no Videos tool any more. Instead, **revoke the Mux access token** in the Mux dashboard
+(Settings, Access Tokens); it still authenticates (checked 2026-11-26) although nothing uses it.
+Then delete the `MUX_TOKEN_ID` and `MUX_TOKEN_SECRET` lines from
+`~/cjoshmartin-migration/secrets.env`.
 
 ### 4. Manual tests A–G
 
@@ -329,12 +348,39 @@ gh pr ready 6 --repo cjoshmartin/cjoshmartin-frontend
 Then merge PR #6 on GitHub. Right after the production deployment is live, run test 16 (Disqus)
 and test 28 (Presentation) on <https://cjoshmartin.com> if Preview blocked them, then test 31.
 
+**Revalidation webhook (after the merge).** `<SanityLive>` only refreshes cached pages while a
+browser has the site open; a change made while nobody does (a publish, a finished video
+conversion, a migration run) would otherwise stay invisible until the next deploy. The site has
+`POST /api/revalidate` for this. Create a random secret, add it to Vercel, then add a GROQ-powered
+webhook in the Sanity project (Manage, API, Webhooks):
+
+```sh
+openssl rand -hex 32   # the secret; keep it in secrets.env as SANITY_REVALIDATE_SECRET
+printf '%s' "$SANITY_REVALIDATE_SECRET" | vercel env add SANITY_REVALIDATE_SECRET production --sensitive --yes
+```
+
+| Webhook field | Value |
+|---|---|
+| Name | Revalidate cjoshmartin.com |
+| URL | `https://cjoshmartin.com/api/revalidate` |
+| Dataset | `production` |
+| Trigger on | Create, Update, Delete |
+| Filter | (empty: every document) |
+| Projection | `{_id, _type}` |
+| Drafts, versions | off |
+| HTTP method | POST |
+| Secret | the secret above |
+
+Redeploy production once the variable is set. Until then the route answers 500 and nothing else
+changes. On the Preview, the Data Cache may still hold pages from before the 2026-11-26 video
+rewrite, whose old MP4 URLs were deleted; a new Preview deployment (any push to the branch)
+starts with fresh data.
+
 ### 6. Backups
 
-1. **Fix the repository name (blocker 2).** In `scripts/backup/setup-gcp.sh`, change
-   `readonly GITHUB_REPO="cjoshmartin-com/cjoshmartin-frontend"` to
-   `readonly GITHUB_REPO="cjoshmartin/cjoshmartin-frontend"`, and update the same name in
-   `scripts/backup/README.md`. Commit that on `main` (or on this branch before merging).
+1. **Repository name (was blocker 2, done on this branch, commit `d01626c`).**
+   `scripts/backup/setup-gcp.sh` now has `readonly GITHUB_REPO="cjoshmartin/cjoshmartin-frontend"`,
+   and `scripts/backup/README.md` uses the same name.
 2. Run `! gcloud auth login` as the `com-cjoshmartin` owner, then
    `gcloud config set project com-cjoshmartin`.
 3. Review, then run:
@@ -348,8 +394,7 @@ and test 28 (Presentation) on <https://cjoshmartin.com> if Preview blocked them,
    Workload Identity pool and provider.
 4. Run the `gh variable set` and `gh secret set` commands it prints. The variables are
    `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_BACKUP_SERVICE_ACCOUNT`, `BACKUP_BUCKET` and
-   `SANITY_PROJECT_ID`. The secrets are `SANITY_BACKUP_TOKEN`, `MUX_TOKEN_ID` and
-   `MUX_TOKEN_SECRET`.
+   `SANITY_PROJECT_ID`. The secret is `SANITY_BACKUP_TOKEN` (the Mux secrets are gone with Mux).
 5. Run tests H32–H36. The workflow only authenticates from `main`, so this is after the merge. The
    first backup after any restore always writes a new snapshot.
 
@@ -360,7 +405,9 @@ Prerequisites (from `scripts/decommission/README.md`):
 - the site serves from Sanity
 - backups work
 - `gcloud` is logged in as the owner, and `gh` as an admin of `cjoshmartin-com`
-- for step 6 only, all 29 videos are on Mux; `04` checks this itself and refuses otherwise
+- for step 6 only, every video is stored in Sanity (published video blocks play converted MP4s,
+  and the 29 Wagtail originals are in production); `04` checks this itself and refuses otherwise.
+  It passed on 2026-11-26.
 
 Run each script as a dry-run first, read it, then repeat it with `--execute`.
 

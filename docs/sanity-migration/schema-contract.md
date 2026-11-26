@@ -51,7 +51,8 @@ Read these first. Everything else matches the brief.
 | `studio/schemaTypes/constants.ts` | `AUDIENCE_OPTIONS`, `DEFAULT_AUDIENCE`, `PROJECT_TYPE_OPTIONS`, `DEFAULT_PROJECT_TYPE`, `IMAGE_LAYOUT_OPTIONS`, `DEFAULT_IMAGE_LAYOUT`, `CODE_LANGUAGES`, `DEFAULT_CODE_LANGUAGE`, `INTERNAL_LINK_TYPES`, `HOME_PAGE_ID`, `VIDEO_CONVERSION_STATUSES`, and the types `Audience`, `ProjectType`, `ImageLayout`, `CodeLanguage`, `VideoConversionStatus` | none (plain TypeScript, safe to import from any package with a TS runtime) |
 | `studio/schemaTypes/shared/validation.ts` | `SLUG_PATTERN`, `validateSlugFormat`, `getYouTubeVideoId`, `validateYouTubeUrl`, `validateSitePath`, `validatePathOrAbsoluteUrl`, `fileAssetExtension` | none |
 | `studio/schemaTypes/shared/video-conversion.ts` | `videoNeedsConversion` (the contract's rule), `videoConversionState`, `videoConversionLabel` (the preview's status line), and the types `VideoValue`, `VideoConversionValue`, `FileValue`, `VideoConversionState` | none (a type-only import from `constants.ts`) |
-| `studio/functions/video-to-mp4/settings.ts` | The MP4 settings, see [MP4 settings](#mp4-settings): `SETTINGS_VERSION`, `buildFfmpegArgs`, `VIDEO_FILTER`, `expectedOutputSize`, `convertedFilename`, `CONVERTED_ASSET_SOURCE_NAME`, `OUTPUT_MIME_TYPE`, `OUTPUT_EXTENSION`, `MAX_DIMENSION`, `CRF`, `AUDIO_BITRATE`, `AUDIO_CHANNELS`, `X264_PRESETS`, `DEFAULT_PRESET`, `isX264Preset`, and the types `X264Preset`, `FfmpegArgsOptions`, `VideoSize` | none (no imports, only erasable TypeScript: runs under the Functions bundler, `tsx` and Node's type stripping) |
+| `studio/functions/video-to-mp4/settings.ts` | The MP4 settings, see [MP4 settings](#mp4-settings): `SETTINGS_VERSION`, `buildFfmpegArgs`, `VIDEO_FILTER`, `expectedOutputSize`, `convertedFilename`, `CONVERTED_ASSET_SOURCE_NAME`, `CONVERTED_ASSET_SETTINGS_FIELD`, `OUTPUT_MIME_TYPE`, `OUTPUT_EXTENSION`, `MAX_DIMENSION`, `CRF`, `AUDIO_BITRATE`, `AUDIO_CHANNELS`, `X264_PRESETS`, `DEFAULT_PRESET`, `isX264Preset`, `MIN_FFMPEG_VERSION`, `parseFfmpegVersion`, `checkFfmpegVersion`, and the types `X264Preset`, `FfmpegArgsOptions`, `VideoSize`, `FfmpegVersion` | none (no imports, only erasable TypeScript: runs under the Functions bundler, `tsx` and Node's type stripping) |
+| `studio/functions/video-to-mp4/frames.ts` | The frame-time check every converter runs: `compareFrameTimes`, `frameTimeProblems`, `FRAME_TIME_TOLERANCE_SECONDS`, and the showinfo parser the Function uses (`FrameTimesCollector`, `SHOWINFO_FILTER`) | none |
 | `studio/schemaTypes/index.ts` | `schemaTypes: SchemaTypeDefinition[]` (every type below except `code`, which its plugin adds), each type definition by name (`blogPost`, `project`, ...), and everything from `constants.ts` | `sanity`, `@sanity/icons` (resolved from `studio/node_modules`, so run `npm ci` in `studio/` first) |
 
 The Next.js app should not import from `studio/`. It uses `sanity.types.ts` and its own queries.
@@ -273,7 +274,7 @@ Video contract v2; the full rules are in [Videos](#videos-video-contract-v2).
     "message": "",
     "sourceAssetId": "file-<sha1>-mov",
     "outputAssetId": "file-<sha1>-mp4",
-    "settingsVersion": "h264-crf23-max1920-v1",
+    "settingsVersion": "h264-crf23-max1920-v2",
     "updatedAt": "2026-11-26T05:00:00.000Z"
   }
 }
@@ -284,11 +285,11 @@ Video contract v2; the full rules are in [Videos](#videos-video-contract-v2).
 | `file` | file, `accept: "video/*"` | yes | editable | The file the site plays. After conversion it is the converted MP4. Must reference an asset whose `mimeType` starts with `video/`. |
 | `original` | file | | read-only, hidden while empty | The file as uploaded, kept but never served. Set by the converter. |
 | `conversion` | object | | read-only, collapsed | Set by the converter. |
-| `conversion.status` | string `pending` \| `processing` \| `ready` \| `failed` | | | Titles Pending, Processing, Ready, Failed. Other values are a validation error. |
-| `conversion.message` | string | | | Failure reason or other converter details. |
+| `conversion.status` | string `pending` \| `processing` \| `ready` \| `failed` | | | Titles Pending, Processing, Ready, Failed. Other values are a validation error. `pending` with a message for the current file is a retryable problem (not the video's fault) that the converter retries. |
+| `conversion.message` | string | | | Failure reason, retry reason, or other converter details. |
 | `conversion.sourceAssetId` | string | | | `_id` of the original asset that was (or is being) converted. |
 | `conversion.outputAssetId` | string | | | `_id` of the MP4 asset produced. |
-| `conversion.settingsVersion` | string | | | `SETTINGS_VERSION` used, `h264-crf23-max1920-v1`. |
+| `conversion.settingsVersion` | string | | | `SETTINGS_VERSION` the MP4 was made with, `h264-crf23-max1920-v2` today. |
 | `conversion.updatedAt` | datetime | | | When the converter last wrote `conversion`. |
 
 The asset ids are plain strings, not references, so they never block deleting an asset.
@@ -351,34 +352,78 @@ the 29 Wagtail videos):
 
 1. Takes `file.asset._ref` as the source asset.
 2. Looks for an existing asset with `source.name == "video-to-mp4" && source.id == <source asset _id>`
-   and reuses it instead of converting again (idempotent, no duplicate conversions).
-3. Otherwise converts with `buildFfmpegArgs` (below) and uploads the MP4 as a file asset with
+   **and `videoToMp4SettingsVersion == SETTINGS_VERSION`** and reuses it instead of converting again
+   (idempotent, no duplicate conversions, never an MP4 made with other settings).
+3. Otherwise converts with `buildFfmpegArgs` (below; ffmpeg 7.0 or newer), checks that every decoded
+   frame of the source is in the MP4 at its own time (within 1 ms, measured from the first frame)
+   and no other frame is (`frames.ts`), and uploads the MP4 as a file asset with
    `originalFilename` `<original base name>.mp4` (`convertedFilename`), `mimeType` `video/mp4` and
-   `source: {name: "video-to-mp4", id: <source asset _id>}` (`CONVERTED_ASSET_SOURCE_NAME`).
+   `source: {name: "video-to-mp4", id: <source asset _id>}` (`CONVERTED_ASSET_SOURCE_NAME`). Right
+   after the upload it sets `videoToMp4SettingsVersion` (`CONVERTED_ASSET_SETTINGS_FIELD`) on that
+   asset document to `SETTINGS_VERSION`.
 4. Sets `original` to the source file, `file` to the MP4, and `conversion` to
-   `{status: "ready", sourceAssetId, outputAssetId, settingsVersion: SETTINGS_VERSION, updatedAt}`.
-   While working it may write `status: "processing"`; on failure `status: "failed"` with
-   `sourceAssetId` and `message`, leaving `file` as it was.
+   `{status: "ready", sourceAssetId, outputAssetId, settingsVersion, updatedAt}`, where
+   `settingsVersion` is the version recorded on the MP4 asset. While working it may write
+   `status: "processing"`. When the video itself cannot be converted: `status: "failed"` with
+   `sourceAssetId` and `message`, leaving `file` as it was. When the problem is not the video's
+   fault (the converter's setup, a download, an API error): `status: "pending"` with
+   `sourceAssetId`, `message` and `updatedAt`, retried by the first event 10 minutes or more later.
+
+**Old conversions after a settings change.** A ready block never needs conversion, so blocks
+converted with an earlier `SETTINGS_VERSION` keep their MP4 until they are redone on purpose:
+
+- **Wagtail videos:** rerun the migration. Its `convert` and `videos` steps make and upload new MP4s,
+  `import` points the blocks at them, and `prune-mp4s` then deletes the MP4s of the Wagtail
+  originals made with other settings, once nothing references them. On 2026-11-26 all 29 went from
+  `h264-crf23-max1920-v1` to `h264-crf23-max1920-v2` this way.
+- **Studio uploads:** point `file` back at the original (`original`), or remove the block and add
+  the video again; the Function converts it with the current settings. If an editor picks an MP4
+  the converter made with older settings, the Function itself points `file` back at that MP4's
+  original (`source.id`) and converts it; when the original is gone, it converts the old MP4 like
+  any other upload.
+
+MP4 assets made before `videoToMp4SettingsVersion` existed have no such field; no converter
+reuses them.
 
 **Studio.** The block preview's title is the `file` asset's `originalFilename`; its subtitle is
-"No video file", "Converting to MP4..." (needs conversion and no failure for this file), "Ready"
-(`file` is the MP4) or "Conversion failed: <message>" (status `failed` and `sourceAssetId` is the
-current file; a failure recorded for an earlier file does not count). A failed conversion is also
-a validation warning on the block.
+"No video file", "Converting to MP4..." (needs conversion and no failure for this file), "Waiting
+to retry the conversion: <message>" (`pending` with a message for this file), "Ready" (`file` is
+the MP4) or "Conversion failed: <message>" (status `failed` and `sourceAssetId` is the current
+file; a failure recorded for an earlier file does not count). A failed conversion is a validation
+error on the block, so a document with one cannot be published. While a document is open, the
+block's input restarts a stuck conversion (`processing` older than 20 minutes, `pending` older than
+10 minutes, or no status on a document unchanged for 20 minutes) by writing `pending` to it.
+
+**Site.** The site only plays a block whose `file` is its converted MP4 (`conversion.status` is
+`ready`, `file.asset._ref == conversion.outputAssetId`, `video/mp4`). A block that is still being
+converted, or whose conversion failed, renders nothing: its `file` is the original upload, which
+is never served.
 
 ### MP4 settings
 
 Single source of truth: [`studio/functions/video-to-mp4/settings.ts`](../../studio/functions/video-to-mp4/settings.ts).
-`SETTINGS_VERSION = "h264-crf23-max1920-v1"`. `buildFfmpegArgs({input, output, preset, hasAudio})`
-returns the ffmpeg arguments (without the executable):
+`SETTINGS_VERSION = "h264-crf23-max1920-v2"` (v1, until 2026-11-26, had no `-fps_mode`/`-enc_time_base`
+options and dropped or resampled frames of variable-frame-rate video). `buildFfmpegArgs({input,
+output, preset, hasAudio})` returns the ffmpeg arguments (without the executable); they need ffmpeg
+7.0 or newer (`MIN_FFMPEG_VERSION`, `checkFfmpegVersion`):
 
 ```
 -hide_banner -nostdin -y -autorotate -i <input>
 -map 0:V:0 [-map 0:a:0 -c:a aac -b:a 128k -ac 2 | -an]
 -vf scale=w='if(gte(iw,ih),max(2,2*trunc(min(iw,1920)/2)),max(2,2*trunc(min(ih,1920)*iw/ih/2)))':h='if(gte(iw,ih),max(2,2*trunc(min(iw,1920)*ih/iw/2)),max(2,2*trunc(min(ih,1920)/2)))':out_range=tv,format=yuv420p
 -c:v libx264 -profile:v high -pix_fmt yuv420p -crf 23 -preset <preset>
+-fps_mode:v passthrough -enc_time_base:v demux
 -map_metadata -1 -map_chapters -1 -movflags +faststart -f mp4 <output>
 ```
+
+- Every decoded frame is encoded once, at its own time, in the input stream's time base
+  (`-fps_mode:v passthrough -enc_time_base:v demux`). A variable-frame-rate input such as a screen
+  recording keeps its timing: no frame dropped, duplicated or moved. Both options are needed:
+  without them ffmpeg encodes at a constant rate taken from the average (v1); with only
+  `-enc_time_base:v demux`, ffmpeg 7.0.2 encodes a 90 kHz time base input at 90,000 frames per
+  second. Checked frame by frame on the 29 Wagtail videos with ffmpeg 7.0.2 (the Function's binary)
+  and 9.0.1.
+- ffmpeg 7.0 or newer: in 6.x, `-autorotate` before `-i` takes a value and swallows the `-i`.
 
 - H.264 High profile, yuv420p, CRF 23. Rotation metadata is applied to the pixels (`-autorotate`),
   so the output has none and its width and height are the displayed size.
@@ -408,11 +453,12 @@ body[]{
   ...,
   _type == "video" => {
     _key,
-    "url": file.asset->url,
-    "mimeType": file.asset->mimeType,
-    "filename": file.asset->originalFilename,
     "status": conversion.status,
-    "converted": defined(file.asset._ref) && file.asset._ref == conversion.outputAssetId
+    "url": select(
+      defined(file.asset._ref) && file.asset._ref == conversion.outputAssetId
+        && conversion.status == "ready" && file.asset->mimeType == "video/mp4" => file.asset->url
+    ),
+    "filename": file.asset->originalFilename
   }
 }
 ```
@@ -438,21 +484,19 @@ Errors:
 - `youtube.url` that is not a YouTube video URL.
 - `stlModel` without an `.stl` file, or `scale` not an integer in 1..1000.
 - `video` without a `file`, or whose `file` asset is missing or not a `video/*` MIME type;
-  `conversion.status` outside its list; `imageBlock` without an image; `fileLink` without a file;
-  `code` with blank code.
+  `conversion.status` outside its list; a `video` whose MP4 conversion failed for its current file;
+  `imageBlock` without an image; `fileLink` without a file; `code` with blank code.
 - Redirect `source`/`destination` format, duplicate `source`, `destination` equal to `source`.
 - Duplicate `medium` or `technology` title ignoring case.
 - Strong references to documents that don't exist or aren't published (Sanity's own check).
 
 Warnings (reported, never fail `npm run validate`): missing image alt text, testimonial without a
-photo, service link without link text, SEO title over 70 or description over 160 characters, a
-`video` whose MP4 conversion failed for its current file, and Sanity's own "File type ... is not
-accepted" for a non-video `file`.
+photo, service link without link text, SEO title over 70 or description over 160 characters, and
+Sanity's own "File type ... is not accepted" for a non-video `file`.
 
-Until the migrated video blocks are converted to v2, `npm run validate` and `npm run validate:staging`
-fail on purpose: each old block (`{asset: {_type: "mux.video", ...}}`) has no `file` ("Upload or
-select a video", 29 in each dataset on 2026-11-26), and each remaining `mux.videoAsset` document
-(10) is a document type the schema no longer has.
+All 29 migrated video blocks are contract v2 and `ready` (`h264-crf23-max1920-v2`), and no
+`mux.*` document is left: `npm run validate` and `npm run validate:staging` report 0 errors (on
+2026-11-26; the only warnings are 2 SEO descriptions over 160 characters).
 
 ## Presentation tool routes
 

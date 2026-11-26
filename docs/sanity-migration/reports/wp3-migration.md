@@ -656,6 +656,14 @@ not trigger it either.
 
 ### Open
 
+> **Update (fix round 1, same day):** items 1 to 3 are resolved; see
+> [mux-removal-review.md](mux-removal-review.md). The settings are now `h264-crf23-max1920-v2` with
+> `-fps_mode:v passthrough -enc_time_base:v demux` (not `-enc_time_base:v demux` alone, which makes
+> the Function's ffmpeg 7.0.2 encode media 14 at 90,000 fps). All 29 videos were reconverted and
+> keep every frame; the MP4 assets record their settings version, the reuse lookup includes it, and
+> the new `prune-mp4s` step deleted the 29 v1 MP4s in each dataset. `scripts/decommission` checks
+> the v2 blocks.
+
 1. **Media 14 and variable frame rates (owner of `settings.ts`, high for future uploads).** The v1
    arguments drop frames from bursty variable-frame-rate input, and the result depends on the
    ffmpeg version. The Function converts Studio uploads with the same arguments, and iPhone
