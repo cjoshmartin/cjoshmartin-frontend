@@ -17,6 +17,11 @@ Written 2026-11-26 at about 01:05 UTC, at the end of the overnight run. The plan
 >   Function. The site only plays converted MP4s.
 > - The 10 Mux assets are deleted, and no `mux.*` document is left. The Mux plugin, player and
 >   backup code are removed.
+> - Video traffic now counts toward the Sanity Free plan's 100 GB/month bandwidth. A full view of
+>   the heaviest page (`squid-games-nerf-gun`, 8 autoplaying videos) downloads up to 58 MiB, so
+>   about 1,600 such views a month would hit the cap. At the cap, the Free plan blocks the public
+>   API until the month resets. See plan §15 and finding R2-6 in
+>   [`reports/mux-removal-review.md`](reports/mux-removal-review.md).
 > - Reports: [`reports/wp3-migration.md`](reports/wp3-migration.md) (package B),
 >   [`reports/a2-video-function.md`](reports/a2-video-function.md),
 >   [`reports/video-verification.md`](reports/video-verification.md) and

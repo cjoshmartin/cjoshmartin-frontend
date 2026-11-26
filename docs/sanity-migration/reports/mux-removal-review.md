@@ -58,7 +58,7 @@ Blueprint are redeployed. The live checks on staging pass.
 | 12 | Owner checklist and schema contract still describe Mux (review) | medium | Fixed |
 | 13 | Site plays the raw upload while unconverted or failed (review) | low | Fixed: only converted MP4s play; a failed conversion is a validation error |
 | 14 | Infrastructure problems recorded as permanent failures (review) | low | Fixed: retryable `pending` with a 10 minute back-off |
-| 15 | No sweep for a dead run (review) | low | Fixed in the Studio (stuck check while a document is open); a scheduled sweep is an owner decision |
+| 15 | No sweep for a dead run (review) | low | Fixed in the Studio (stuck check while a document is open); a scheduled sweep is an owner decision. **Corrected in round 2:** the check only ran while the block's dialog was open; see R2-1 |
 | 16 | Reused or adopted MP4s labelled with the current settings version (review) | low | Fixed |
 | 17 | `/tmp` space for large low-bitrate uploads (review) | low | Fixed and reproduced on a RAM disk |
 | 18 | Trigger test only checks its own field list (review) | low | Fixed: the expected fields come from `studio/schema.json` |
@@ -387,6 +387,10 @@ orchestrator test (broken binary, then retried after the delay with a working co
 **Confirmed.** Partly fixed: the dead-run case is fixed in the Studio. The scheduled sweep is
 **left for the owner**.
 
+> **Corrected in round 2 (R2-1).** The input component below only ran while the video block's
+> edit dialog was open, not while the document was open. Round 2 moved the check to the document
+> form's root input.
+
 **Done: the Studio checks open documents.** The `video` type has an input component,
 `studio/components/VideoConversionInput.tsx`. While a document is open, it checks the block
 in the draft and the published document right away and then every minute.
@@ -495,3 +499,226 @@ were rerun afterwards: 12 of 12 each.
    stack promotion and a robot token.
 5. **Push the branch.** This package did not push. A new Preview deployment then shows the v2
    MP4s; the current one may still have pages with the deleted v1 URLs in its Data Cache.
+
+## Round 2 (2026-11-26, 09:20 to 10:10 UTC)
+
+Status: **6 of 6 findings from recheck 1 handled.** 3 are fixed and verified: the stuck check,
+the settings version of failed conversions, and the plan's risk table. 3 are owner steps, and each
+was re-confirmed read-only with nothing changed: the public originals, the revalidation webhook and
+the Mux token.
+
+The main change: the Studio's stuck-conversion check is now the **document form's root input**.
+Round 1 attached it to the video block's input, but Sanity mounts that input only inside the
+block's edit dialog. The real Studio build was tested live on staging this time, not a script that
+imitates it.
+
+### Commits (branch `sanity-migration`)
+
+| Commit | What |
+|---|---|
+| `f67bd9b` | The stuck check moves to `VideoConversionWatcher` (root input of every document type that can hold videos); a failed conversion is final only for its settings version (R2-1, R2-5); tests, the contract and the Function README |
+| `63f9b68` | Plan §15: the quotas row with the measured asset volume and the new bandwidth risk, and the Mux backup-cost row marked superseded (R2-6) |
+| (this report's commit) | This section, correction notes on round 1's finding 15, and a bandwidth note in the morning report's current-state summary |
+
+### Deployments
+
+| What | Result |
+|---|---|
+| Studio (`https://cjoshmartin.sanity.studio`) | `npx sanity@latest deploy --yes` (6.25.0, the same as the local version) after `f67bd9b`: 2 of 2 schemas deployed, Studio deployed. `schema.json` is unchanged. The served `static/sanity-DV5W5ioL.js` has the same sha256 as the local build (`306c2c2e…`) and contains the watcher's request tags. |
+| Blueprint `cjoshmartin-functions` (`ST-jc4gwa3c4t`) | `f67bd9b` changed a comment in `trigger.ts`, so the stack was redeployed to keep the deployed code equal to the commit: operation `OP-z27urztvpm`, with `npm_config_platform=linux npm_config_arch=arm64`. The plan showed the same filter. `video-to-mp4` is now asset `AS-4nz5puavgi`; `testimonial-ascii-art` is still `AS-dac26sc8in`. The bundled ffmpeg is ELF aarch64, 51,134,160 bytes, sha256 `6bb182d0…`, the pinned binary. |
+| Datasets | No migration rerun was needed. No content changed, apart from the scratch documents of the live checks, which were cleaned up. |
+
+### Findings
+
+| # | Finding (source) | Severity | Resolution |
+|---|---|---|---|
+| R2-1 | The stuck check only runs while the video block's edit dialog is open (recheck 1) | medium | Fixed: document-level root input; verified live in the Studio build |
+| R2-2 | Kept originals are publicly downloadable, 5 with GPS tags (recheck 1, finding 10) | medium | Re-confirmed, unchanged; **owner decision** |
+| R2-3 | Revalidation webhook and secret not configured (recheck 1, finding 6) | low | Re-confirmed: no webhook exists, the code is unchanged and correct; **owner step** after the merge |
+| R2-4 | Mux token still stored and valid (recheck 1, finding 19) | low | Re-confirmed: both lines set, the token still authenticates; **owner action** (Mux dashboard) |
+| R2-5 | The Studio treats a failed conversion as final under any settings version; the Function does not (recheck 1) | low | Fixed: the Studio compares the settings version the way the Function does, and nudges an old-settings failure |
+| R2-6 | Plan risk table still says videos live on Mux (recheck 1) | low | Fixed, plus the bandwidth risk this change introduces |
+
+### R2-1. The stuck check ran only while the block's dialog was open
+
+**Confirmed** in the installed `sanity` 6.25.0 (`lib/PerspectiveProvider-iaAV2XW5.js`).
+`BlockObject` passes the member's input (`memberItem.input`) as `children` to the block component.
+`DefaultBlockObjectComponent` renders `children` only in `open && jsx(ObjectEditModal, ...)`. So
+`VideoConversionInput` was mounted only while an editor had that block's edit dialog open. Round
+1's live check sent the nudge patch from a script, so it never exercised the component.
+
+The effects were as the recheck said. A dead run, a due retry or a missed event waited for the next
+edit of the document, so a published video could stay missing. The retry note shown to editors
+("or while the document is open in the Studio") promised a retry that did not happen.
+
+**Fix** (`f67bd9b`):
+
+- **`studio/components/VideoConversionWatcher.tsx`** is registered as `form.components.input` in
+  both workspaces (`sanity.config.ts`). This follows Sanity's documented root-input pattern (guide
+  "Create a document form progress component"). It wraps the input with `id === 'root'` of every
+  document type in `VIDEO_FIELDS_BY_TYPE`, the list the Function watches, which a test compares
+  with `schema.json`. Every other input renders as before.
+- **While the document's form is open**, in any field group, with no block or dialog needed, it
+  checks the draft and the published document right away and then every minute. That works
+  whichever version the form shows (draft, published, or a release version through
+  `getPublishedId`).
+- It covers every video block of the watched fields, in **one patch per document**, with
+  `ifRevisionId`. A 409 is skipped: the other change is itself an event, and the next check looks
+  again.
+- **Rate limits:**
+  - each block is nudged at most once per `RETRY_DELAY_SECONDS`, tracked across the browser tab,
+    so a document open in several panes or tools is nudged once;
+  - a check never overlaps a slow previous one.
+- The block-level `VideoConversionInput.tsx` and the `components.input` of the `video` type are
+  removed.
+- **What the retry note says** (`RETRY_NOTE`, unchanged): "on the next change to the document, or
+  while the document is open in the Studio". That is now true.
+- **Docs:** the comment in `trigger.ts`, the Function README ("Stuck blocks", "Retrying"), the
+  contract's Studio paragraph and its module table, and a pointer in `video.ts`.
+
+**Live check on staging** (`~/cjoshmartin-migration/tmp/fix-r2/scripts/watcher-check.mjs`). It ran
+on the real Studio build (`sanity preview` on localhost, headless Chrome for Testing, signed in
+with the editor token through the Studio's token storage). The script wrote nothing after creating
+the draft. **11 of 11 checks pass:**
+
+| Step | Result |
+|---|---|
+| A scratch draft blog post with a unique `step_count.mp4` upload, `pending` for that file, due 75 s later | Function: no invocation while it was not due |
+| The document opened, then the form switched to the **SEO group** | 0 video block previews on the page, no video dialog: the rich text is not rendered at all |
+| The first check | Sent 4.2 s after opening (`sanity.studio.video-conversion.check`, 200); no nudge, the retry was not due |
+| Once the retry was due | The Studio's next check sent the nudge (`video-conversion.retry` mutation, 200) **3.6 s after the retry was due**, with the SEO group still shown. It was the only nudge. The listener showed the write came from the Studio's token: `pending`, "Retry requested by the Studio at 09:49:45.033Z (the retry was due)." |
+| The Function | `processing` 3 s later, `ready` 7.0 s after the nudge. The MP4 is `video/mp4`, source `video-to-mp4`/the upload, `videoToMp4SettingsVersion` `h264-crf23-max1920-v2`. The block preview shows "Ready". No page errors. |
+| Cleanup | 0 drafts, 0 assets, 0 leases left |
+
+Two earlier attempts stopped before the nudge: the Studio's "free upgrade" card covered the group
+tab, so the script now selects the tab with a DOM click event. Both attempts cleaned up after
+themselves. In both, the first check request was sent on open.
+
+**Cost:** one query per open document form per minute (about 1,440 a day for a form left open all
+day). The Free plan includes 250k API requests a month, and Sanity's docs exempt requests made by
+the Studio.
+
+**Still not covered:** documents nobody opens wait for their next edit. A scheduled sweep would
+cover them. It needs the one-way promotion of the Blueprint stack to organization scope and a robot
+token, so it stays the owner's decision (round 1, finding 15).
+
+### R2-5. A failed conversion and the settings version
+
+**Confirmed.** The Function treats `failed` as final only when `conversion.settingsVersion` equals
+`SETTINGS_VERSION` (`isFailedForCurrentFile`, `PENDING_VIDEO_PREDICATE`). The Studio treated every
+`failed` for the current file as final: it was a validation error, and the stuck check skipped it.
+The Function always records the settings version on a failure (`conversionValue` in `patches.ts`).
+No failed blocks exist today (0 in each dataset, checked anonymously).
+
+**Fix** (`f67bd9b`, `studio/schemaTypes/shared/video-conversion.ts`):
+
+- **The settings version is a parameter.** `videoConversionState` and `videoConversionNudge` take
+  `currentSettingsVersion`, and every caller passes `SETTINGS_VERSION` from
+  `functions/video-to-mp4/settings.ts`. That keeps one source of truth, and the helpers keep only
+  type imports, so `migration/verify` can still load them with Node's type stripping.
+- **What the Studio shows.** A failure under other settings, or with no settings version, is
+  `waiting`. The preview reads "Waiting to retry the conversion: it failed with older settings
+  (<version>) and is converted again with the current settings. The last error: <message>". It is
+  not a validation error, so the document can be published. The preview now selects
+  `conversion.settingsVersion`.
+- **The nudge.** The stuck check has a new reason, `settings-changed`, used once the failure is
+  older than `RETRY_DELAY_SECONDS`. The nudge keeps `failed` and only sets `updatedAt` to now.
+  The write is the event, and the Function decides with its own `SETTINGS_VERSION`. So while the
+  Studio and the Function are deployed with different settings, in either order:
+  - the block is not converted again with the settings it already failed with;
+  - it is touched at most once per retry delay, and since `updatedAt` is in the document, this
+    holds across tabs too.
+
+**Tests** (`studio/test/video-conversion.test.ts`, 27 tests):
+
+- labels for failures under the current, an older and no settings version;
+- the Studio's final-failure rule equals `isFailedForCurrentFile` for every combination of
+  settings version and source;
+- nudge cases at the edges of the delay. Each nudged block matches the Function's GROQ filter
+  (groq-js) and `isPendingVideo`, and is not nudged again right away;
+- a Studio deployed with newer settings than the Function nudges, but the Function's filter skips
+  the block.
+
+The migration's test (`documents.test.ts`) passes the version too.
+
+**Live:** not exercised. The live Function retries an old-settings failure on the event that
+creates it, so the Studio-only path cannot be set up without a settings change. Both datasets
+validate with 0 errors under the new rule.
+
+### R2-2. Kept originals are public (round 1, finding 10)
+
+**Re-confirmed, read-only, unchanged.** An anonymous GROQ query on the API CDN returns the 29
+Wagtail originals in each dataset. An anonymous ranged GET of `IMG_0169.MOV` from production
+answers 206. The options and the owner action are as in round 1. Nothing was changed: the owner's
+brief says to keep the original, and the choice changes what "original" means. One addition:
+making the datasets private would also hide the originals' listing, but the Free plan only allows
+public datasets (Sanity's pricing page lists "2 datasets (public only)").
+
+### R2-3. Revalidation webhook (round 1, finding 6)
+
+**Re-confirmed.** `sanity hook list` returns no webhooks, and the route and the cache tag are
+unchanged since round 1. Setting them up needs the production Vercel env var, which this package
+may not touch, and the route only exists after the merge. So it stays morning report step 5.
+
+The sitemap note is not a code defect. In next-sanity 13.5.1, `sanityFetch` first looks up the
+sync tags with a plain `client.fetch`, without `next` options
+(`dist/live/conditions/react-server/index.js`). That lookup is the entry without the tag that
+`next build` stored, and it only decides which sync tags the data fetch gets. The data fetch itself
+carries `sanity-content`, so the webhook refreshes the sitemap's content.
+
+### R2-4. Mux token (round 1, finding 19)
+
+**Re-confirmed.** `MUX_TOKEN_ID` and `MUX_TOKEN_SECRET` are still set in `secrets.env` (checked for
+presence only). `GET https://api.mux.com/video/v1/assets?limit=1` with them still answers 200
+(only the status was printed). No code reads them. Revoking needs the Mux dashboard (Settings,
+Access Tokens). Morning report step 3.
+
+### R2-6. The plan's risk table
+
+**Fixed** (`63f9b68`). The quotas row now gives the measured volume, read anonymously from both
+datasets: 465.9 MiB each, of which 110 images are 108.5 MiB, the 29 kept originals 261.2 MiB, the
+29 MP4s 86.0 MiB and 5 other files 10.2 MiB. That is about 0.9 GiB for the project, and 96
+documents per dataset. The neighbouring "Mux master-access cost for backups" row was stale too, and
+is marked superseded.
+
+**New risk, recorded in that row: bandwidth.** The Free plan's 100 GB/month bandwidth covers API,
+CDN and asset traffic. Without Mux, the site serves the MP4s from Sanity's CDN, and every video
+autoplays:
+
+- one full view of `squid-games-nerf-gun` (8 videos) downloads up to 58.35 MiB of MP4s, so about
+  1,600 such views in a month use the whole quota;
+- on the Free plan that blocks the public API and CDN until the month resets (Sanity's "Plans and
+  payments" docs), so the site's content stops loading;
+- Sanity emails the admins at 80 % and 100 %, and Growth turns the block into overage.
+
+The other pages with videos carry 9.0, 8.7, 6.0, 3.2 and 0.8 MiB. The 100 GB asset and 10k
+document quotas are not at risk.
+
+### Round 2 verification summary
+
+| Check | Result |
+|---|---|
+| Studio: `npm test`, `npm run typecheck`, `eslint .`, prettier on the changed files, `npm run build` | 61 of 61, pass, pass, pass, pass |
+| Studio: `schema:extract` | `schema.json` unchanged |
+| Function: `npm run typecheck`, `npm test` | pass, 103 of 103 |
+| Migration: `npm test`, `npm run typecheck` | 71 of 71, pass |
+| Verify harness: `npm test`, and loading the helpers with Node's type stripping | 18 of 18; loads |
+| Studio validation, production and staging (`--level error`) | 96 valid documents each, 0 errors |
+| Live Studio check on staging (R2-1) | 11 of 11, cleaned up |
+| Live Function check on staging after the redeploy (`video-function-check.mjs`, media 15 `IMG_0169.MOV`) | All checks pass: `ready` after 32.5 s, H.264 High 1440x1920, AAC stereo, 594 of 594 frames at their times, decodes cleanly, the only MP4 of the upload; 63 file assets and 269 documents before and after |
+| Served Studio bundle | Same sha256 as the local build |
+
+Outputs outside git: `~/cjoshmartin-migration/tmp/fix-r2/` (the scripts, the Studio check's log,
+`result.json` and screenshots, the probes and the Function check's JSON).
+
+### Owner actions after round 2
+
+The round 1 list stands, with one addition:
+
+1. **Revoke the Mux token** in the Mux dashboard, then delete both lines from `secrets.env` (R2-4).
+2. **Decide what happens to the kept originals** (R2-2).
+3. **After the merge, set up the revalidation webhook** and `SANITY_REVALIDATE_SECRET` (R2-3).
+4. **Optional: a scheduled sweep** for conversions in documents nobody opens (R2-1).
+5. **Push the branch** (this package did not push).
+6. **New: keep an eye on bandwidth** once the site serves videos from Sanity (R2-6). Upgrading to
+   Growth, or moving the heaviest page's videos off autoplay, would remove the hard stop.
