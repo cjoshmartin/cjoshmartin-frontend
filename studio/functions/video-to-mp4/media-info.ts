@@ -47,14 +47,32 @@ const ROTATION_LINE = /(?:displaymatrix|display matrix):\s*rotation of (-?\d+(?:
 const DURATION_LINE = /^\s*Duration: (?:(\d+):(\d{2}):(\d{2}(?:\.\d+)?)|N\/A)/
 const INPUT_LINE = /^Input #0, ([^ ]+), from /
 
+const LOG_LEVEL_TAG =
+  /^(?:\[[^\]]+ @ 0x[0-9a-f]+\]\s*)*\[(quiet|panic|fatal|error|warning|info|verbose|debug|trace)\]/i
+
 /**
- * ffmpeg's own error lines, for a failure message: without the `[in#0 @ 0x...]` prefixes, without
+ * The level of a line logged with `-loglevel level+<level>` (`[error] ...` or
+ * `[in#0 @ 0x...] [error] ...`), or null for a line without a level tag.
+ */
+export function ffmpegLogLevel(line: string): string | null {
+  return LOG_LEVEL_TAG.exec(line)?.[1]?.toLowerCase() ?? null
+}
+
+/** Whether a level-tagged line is only informational (kept out of failure messages). */
+export function isInformationalLogLine(line: string): boolean {
+  const level = ffmpegLogLevel(line)
+  return level === 'info' || level === 'verbose' || level === 'debug' || level === 'trace'
+}
+
+/**
+ * ffmpeg's own error lines, for a failure message: without the `[in#0 @ 0x...]` prefixes and the
+ * `[error]` level tags of `-loglevel level+...`, without
  * "Error opening input file <path>" (it only names the temporary file) and without repeats.
  */
 export function ffmpegErrorLines(text: string, max = 4): string[] {
   const lines: string[] = []
   for (const raw of text.split('\n')) {
-    const line = raw.replace(/^\s*(?:\[[^\]]+ @ 0x[0-9a-f]+\]\s*)+/i, '').trim()
+    const line = raw.replace(/^\s*(?:\[[^\]]+ @ 0x[0-9a-f]+\]\s*)*(?:\[[a-z]+\]\s*)?/i, '').trim()
     if (
       line === '' ||
       line === 'At least one output file must be specified' ||

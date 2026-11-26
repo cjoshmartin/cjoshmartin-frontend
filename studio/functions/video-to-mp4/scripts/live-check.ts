@@ -38,6 +38,7 @@ import {sha1File} from '../ffmpeg'
 import {inspectMp4} from '../mp4'
 import {LEASE_FIELD} from '../patches'
 import {
+  CONVERTED_ASSET_SETTINGS_FIELD,
   CONVERTED_ASSET_SOURCE_NAME,
   convertedFilename,
   expectedOutputSize,
@@ -158,9 +159,10 @@ async function convertedAssets(client: SanityClient, sourceId: string) {
       originalFilename: string
       size: number
       source: {name: string; id: string}
+      settingsVersion?: string
     }[]
   >(
-    '*[_type == "sanity.fileAsset" && source.name == $name && source.id == $id]{_id, url, mimeType, originalFilename, size, source}',
+    `*[_type == "sanity.fileAsset" && source.name == $name && source.id == $id]{_id, url, mimeType, originalFilename, size, source, "settingsVersion": ${CONVERTED_ASSET_SETTINGS_FIELD}}`,
     {name: CONVERTED_ASSET_SOURCE_NAME, id: sourceId},
     {perspective: 'raw', useCdn: false},
   )
@@ -426,6 +428,10 @@ async function main() {
       `one MP4 for the upload (${outputs.map((o) => o._id).join(', ')})`,
     )
     check(outputs[0].mimeType === 'video/mp4', `mimeType ${outputs[0].mimeType}`)
+    check(
+      outputs[0].settingsVersion === SETTINGS_VERSION,
+      `the MP4 asset records ${CONVERTED_ASSET_SETTINGS_FIELD} ${outputs[0].settingsVersion}`,
+    )
     check(
       outputs[0].originalFilename === convertedFilename(path.basename(firstFile), mov),
       `originalFilename ${outputs[0].originalFilename}`,

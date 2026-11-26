@@ -88,10 +88,19 @@ export function verifyFfmpegBinary(binary: string, expectedSha256: string): Prom
 export interface ProcessResult {
   code: number | null
   signal: NodeJS.Signals | null
-  /** The last STDERR_TAIL_BYTES of stderr. */
+  /** The last STDERR_TAIL_BYTES of stderr, without the lines `onStderrLine` consumed. */
   stderr: string
   killedAtDeadline: boolean
   wallMs: number
+}
+
+export interface RunFfmpegOptions {
+  /**
+   * Called with every complete stderr line (and the last, unterminated one). Return true to
+   * consume the line, so it is left out of `stderr`; for example the per-frame showinfo lines,
+   * which would otherwise push the error messages out of the kept tail.
+   */
+  onStderrLine?: (line: string) => boolean
 }
 
 const STDERR_TAIL_BYTES = 16_000
@@ -104,6 +113,7 @@ export function runFfmpeg(
   binary: string,
   args: string[],
   deadline: number,
+  options: RunFfmpegOptions = {},
 ): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
     const started = Date.now()
@@ -113,10 +123,26 @@ export function runFfmpeg(
     }
     const child = spawn(binary, args, {stdio: ['ignore', 'ignore', 'pipe']})
     let stderr = ''
+    let partial = ''
+    let lineError: unknown
     let killedAtDeadline = false
+    const keep = (line: string) => {
+      if (lineError === undefined && options.onStderrLine) {
+        try {
+          if (options.onStderrLine(line)) return
+        } catch (error) {
+          // A line the caller cannot handle ends the run; the error is raised once ffmpeg exits.
+          lineError = error
+          child.kill('SIGKILL')
+        }
+      }
+      stderr = (stderr + line + '\n').slice(-STDERR_TAIL_BYTES)
+    }
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', (chunk: string) => {
-      stderr = (stderr + chunk).slice(-STDERR_TAIL_BYTES)
+      const lines = (partial + chunk).split(/\r?\n/)
+      partial = lines.pop() ?? ''
+      for (const line of lines) keep(line)
     })
     const timer = setTimeout(() => {
       killedAtDeadline = true
@@ -128,6 +154,11 @@ export function runFfmpeg(
     })
     child.on('close', (code, signal) => {
       clearTimeout(timer)
+      if (partial !== '') keep(partial)
+      if (lineError !== undefined) {
+        reject(lineError)
+        return
+      }
       resolve({code, signal, stderr, killedAtDeadline, wallMs: Date.now() - started})
     })
   })

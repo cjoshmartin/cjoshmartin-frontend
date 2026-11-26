@@ -1,7 +1,8 @@
 /**
  * The orchestrator's ContentStore and Converter on top of @sanity/client: revision-checked
- * patches, the queries for other blocks using the same upload and for an earlier conversion, and
- * the upload of a converted MP4 as a file asset with source {name: "video-to-mp4", id: <upload>}.
+ * patches, the queries for other blocks using the same upload and for an earlier conversion with
+ * the current settings, and the upload of a converted MP4 as a file asset with
+ * source {name: "video-to-mp4", id: <upload>} and the settings version recorded on it.
  */
 import {createReadStream} from 'node:fs'
 import {rm} from 'node:fs/promises'
@@ -11,7 +12,7 @@ import {ClientError, type SanityClient} from '@sanity/client'
 
 import {convertToMp4, removeStaleWorkDirs, type ConvertOptions} from './convert'
 import {
-  ConversionFailure,
+  RetryableConversionError,
   type AssetDocument,
   type ContentStore,
   type Converter,
@@ -19,8 +20,10 @@ import {
 } from './orchestrator'
 import type {PatchOps} from './patches'
 import {
+  CONVERTED_ASSET_SETTINGS_FIELD,
   CONVERTED_ASSET_SOURCE_NAME,
   OUTPUT_MIME_TYPE,
+  SETTINGS_VERSION,
   convertedFilename,
   type X264Preset,
 } from './settings'
@@ -54,8 +57,13 @@ export function createSanityStore(client: SanityClient): ContentStore {
     },
     async findConvertedAsset(sourceAssetId) {
       return raw.fetch<AssetDocument | null>(
-        `*[_type == "sanity.fileAsset" && source.name == $name && source.id == $id && mimeType == $mimeType] | order(_createdAt asc)[0]`,
-        {name: CONVERTED_ASSET_SOURCE_NAME, id: sourceAssetId, mimeType: OUTPUT_MIME_TYPE},
+        `*[_type == "sanity.fileAsset" && source.name == $name && source.id == $id && mimeType == $mimeType && ${CONVERTED_ASSET_SETTINGS_FIELD} == $settingsVersion] | order(_createdAt asc)[0]`,
+        {
+          name: CONVERTED_ASSET_SOURCE_NAME,
+          id: sourceAssetId,
+          mimeType: OUTPUT_MIME_TYPE,
+          settingsVersion: SETTINGS_VERSION,
+        },
         {tag: 'video-to-mp4.reuse'},
       )
     },
@@ -80,13 +88,13 @@ export function createSanityConverter(
 ): Converter {
   return {
     async convert(source: AssetDocument) {
-      if (!source.url) throw new ConversionFailure(`${source._id} has no URL`)
+      if (!source.url) throw new RetryableConversionError(`${source._id} has no URL yet`)
       let ffmpegPath: string
       try {
         ffmpegPath = await options.ffmpeg()
       } catch (error) {
-        throw new ConversionFailure(
-          `The converter is not set up correctly: ${(error as Error).message}. Ask the site owner to redeploy it.`,
+        throw new RetryableConversionError(
+          `the converter is not set up correctly (${(error as Error).message}); the site owner has to redeploy it`,
         )
       }
       // Lambda runs one invocation per container at a time, so any work directory left in /tmp
@@ -139,6 +147,13 @@ export function createSanityConverter(
             `${asset._id} already existed with source ${JSON.stringify(assetSource ?? null)}; using it`,
           )
         }
+        // Recorded before any block points at the MP4, so a later run reuses it only while the
+        // settings are the same. If this run dies first, the next one converts again: the bytes
+        // are the same, so the upload returns this asset, and the field is set then.
+        await client
+          .patch(asset._id)
+          .set({[CONVERTED_ASSET_SETTINGS_FIELD]: SETTINGS_VERSION})
+          .commit({visibility: 'sync'})
         const {input, expectedSize, output} = converted
         const audioTrack = output.tracks.some((t) => t.handler === 'soun')
         const rotation = input.video.rotation ? `, rotated ${input.video.rotation}°` : ''

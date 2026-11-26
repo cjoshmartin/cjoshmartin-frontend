@@ -8,9 +8,11 @@
  *    convert the same upload at the same time, even for different documents. If another run holds
  *    it, mark the block `processing` ("waiting") and stop: the holder delivers its result to every
  *    waiting block when it is done.
- * 3. Mark the block `processing`, then produce the MP4: adopt the file if it already is a
- *    converted MP4, reuse an earlier conversion of the same upload (asset `source`), or convert
- *    and upload a new one.
+ * 3. Mark the block `processing`, then produce the MP4: adopt the file if it already is an MP4
+ *    converted with the current settings, swap an MP4 made with older settings back to its
+ *    original upload (converted by the next run), reuse an earlier conversion of the same upload
+ *    with the current settings (asset `source` and CONVERTED_ASSET_SETTINGS_FIELD), or convert and
+ *    upload a new one.
  * 4. Deliver the result to the block and to every other draft or published block that uses the
  *    same upload (a draft published mid-conversion is converted in its published document without
  *    a second conversion), release the lease, then deliver once more to blocks that started
@@ -20,7 +22,12 @@
  * that was read (ifRevisionID), retried after re-reading on a conflict, so a concurrent edit is
  * never overwritten and a block that changed meanwhile is left alone.
  */
-import {CONVERTED_ASSET_SOURCE_NAME, OUTPUT_MIME_TYPE} from './settings'
+import {
+  CONVERTED_ASSET_SETTINGS_FIELD,
+  CONVERTED_ASSET_SOURCE_NAME,
+  OUTPUT_MIME_TYPE,
+  SETTINGS_VERSION,
+} from './settings'
 import {
   documentResultOps,
   LEASE_FIELD,
@@ -38,6 +45,7 @@ import {
   isFreshProcessing,
   needsConversion,
   nextPendingVideo,
+  RETRY_NOTE,
   videoBlocks,
   type SanityDocumentLike,
 } from './trigger'
@@ -55,6 +63,8 @@ export interface AssetDocument {
   originalFilename?: string
   sha1hash?: string
   source?: {name?: string; id?: string; url?: string}
+  /** On a converted MP4: the SETTINGS_VERSION it was made with. */
+  [CONVERTED_ASSET_SETTINGS_FIELD]?: unknown
   [LEASE_FIELD]?: unknown
 }
 
@@ -66,13 +76,27 @@ export interface ContentStore {
   patchIfRevision(id: string, revision: string, ops: PatchOps): Promise<'ok' | 'conflict'>
   /** Ids of draft and published documents with a video block whose `file` is this asset. */
   documentsUsingFile(assetId: string): Promise<string[]>
-  /** The oldest MP4 asset with source {name: "video-to-mp4", id: sourceAssetId}, or null. */
+  /**
+   * The oldest MP4 asset with source {name: "video-to-mp4", id: sourceAssetId} made with the
+   * current settings (CONVERTED_ASSET_SETTINGS_FIELD == SETTINGS_VERSION), or null.
+   */
   findConvertedAsset(sourceAssetId: string): Promise<AssetDocument | null>
 }
 
-/** A conversion that failed for a reason the editor should see (bad file, too long, ...). */
+/**
+ * A conversion that failed because of the video itself (not a video, too long, cannot be
+ * decoded, ...). Recorded as `failed`, final until the file changes.
+ */
 export class ConversionFailure extends Error {
   override name = 'ConversionFailure'
+}
+
+/**
+ * A conversion that failed for a reason that is not the video's fault (the converter's setup, a
+ * download, ...). Recorded as `pending` and retried after RETRY_DELAY_SECONDS.
+ */
+export class RetryableConversionError extends Error {
+  override name = 'RetryableConversionError'
 }
 
 export interface Converter {
@@ -104,7 +128,10 @@ export type RunOutcome =
   | {kind: 'no-target'; assetId: string}
   | {kind: 'done'; assetId: string; result: ConversionResult; patchedDocuments: string[]}
 
-/** Raised after the result was recorded when the conversion hit an unexpected error. */
+/**
+ * Raised after the result was recorded (as `pending`, to be retried) when the conversion hit an
+ * unexpected error, so it shows in the Function logs.
+ */
 export class UnexpectedConversionError extends Error {
   override name = 'UnexpectedConversionError'
 }
@@ -237,6 +264,11 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
       fileAssetId: assetId,
       message,
     })
+    const retry = (reason: string): ConversionResult => ({
+      status: 'retry',
+      fileAssetId: assetId,
+      message: `Could not convert yet: ${reason}. ${RETRY_NOTE}`,
+    })
     const asset = (await store.getDocument(assetId)) as AssetDocument | null
     if (!asset) {
       return {result: failed('The uploaded file no longer exists. Upload the video again.')}
@@ -246,19 +278,38 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
     }
 
     if (asset.source?.name === CONVERTED_ASSET_SOURCE_NAME && asset.mimeType === OUTPUT_MIME_TYPE) {
-      // The editor picked an MP4 this converter made earlier: use it as it is.
       const originalId = typeof asset.source.id === 'string' ? asset.source.id : undefined
       const original = originalId ? await store.getDocument(originalId) : null
-      return {
-        result: {
-          status: 'ready',
-          fileAssetId: assetId,
-          sourceAssetId: originalId ?? assetId,
-          outputAssetId: assetId,
-          original: original && originalId ? {assetId: originalId} : null,
-          message: 'This file is already an MP4 made by the converter; it was used as it is.',
-        },
+      const madeWith = asset[CONVERTED_ASSET_SETTINGS_FIELD]
+      if (madeWith === SETTINGS_VERSION) {
+        // The editor picked an MP4 this converter made with the current settings: use it as it is.
+        return {
+          result: {
+            status: 'ready',
+            fileAssetId: assetId,
+            sourceAssetId: originalId ?? assetId,
+            outputAssetId: assetId,
+            original: original && originalId ? {assetId: originalId} : null,
+            settingsVersion: SETTINGS_VERSION,
+            message: 'This file is already an MP4 made by the converter; it was used as it is.',
+          },
+        }
       }
+      if (original && originalId && original._type === 'sanity.fileAsset') {
+        // An MP4 made with older settings: convert its original again rather than the MP4 itself.
+        return {
+          result: {
+            status: 'restart',
+            fileAssetId: assetId,
+            originalAssetId: originalId,
+            message: `${assetId} was made with older settings (${typeof madeWith === 'string' ? madeWith : 'not recorded'}); its original upload is converted again.`,
+          },
+        }
+      }
+      // An old MP4 whose original is gone is converted like any other upload.
+      log(
+        `${assetId}: an MP4 made with older settings (${typeof madeWith === 'string' ? madeWith : 'not recorded'}) whose original no longer exists; converting it`,
+      )
     }
 
     const existing = await store.findConvertedAsset(assetId)
@@ -271,6 +322,7 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
           sourceAssetId: assetId,
           outputAssetId: existing._id,
           original: 'current-file',
+          settingsVersion: SETTINGS_VERSION,
           message: `Reused the MP4 converted earlier from this upload (${existing.originalFilename ?? existing._id}).`,
         },
       }
@@ -285,15 +337,15 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
           sourceAssetId: assetId,
           outputAssetId: output.outputAssetId,
           original: 'current-file',
+          settingsVersion: SETTINGS_VERSION,
           message: output.message,
         },
       }
     } catch (error) {
       if (error instanceof ConversionFailure) return {result: failed(error.message)}
+      if (error instanceof RetryableConversionError) return {result: retry(error.message)}
       return {
-        result: failed(
-          `Unexpected error while converting: ${errorText(error)}. Remove the video block and add the video again to retry.`,
-        ),
+        result: retry(`unexpected error while converting (${errorText(error)})`),
         unexpected: error,
       }
     }
@@ -372,7 +424,7 @@ export async function runVideoToMp4(options: RunOptions): Promise<RunOutcome> {
       }
       if (produced.unexpected !== undefined) {
         throw new UnexpectedConversionError(
-          `${assetId}: conversion failed unexpectedly (recorded as failed): ${errorText(produced.unexpected)}`,
+          `${assetId}: conversion failed unexpectedly (recorded as pending, to be retried): ${errorText(produced.unexpected)}`,
           {cause: produced.unexpected},
         )
       }

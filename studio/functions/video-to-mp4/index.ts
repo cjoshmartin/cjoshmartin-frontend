@@ -5,8 +5,10 @@
  * with a Portable Text video block that needs conversion, draft or published, in production or
  * staging. One run handles one block (orchestrator.ts): it marks the block `processing`, converts
  * the upload with the fixed settings in settings.ts (or reuses an earlier conversion of the same
- * upload), uploads the MP4, and points `file` at it, keeping the upload in `original`. Failures
- * are recorded as `failed` with a message, with `file` left on the upload.
+ * upload made with the same settings), uploads the MP4, and points `file` at it, keeping the
+ * upload in `original`. A video that cannot be converted is recorded as `failed` with a message,
+ * with `file` left on the upload; a problem that is not the video's fault is recorded as `pending`
+ * and retried after RETRY_DELAY_SECONDS (trigger.ts).
  */
 import {randomUUID} from 'node:crypto'
 
@@ -83,7 +85,11 @@ export const handler = documentEventHandler<VideoEventData>(async ({context, eve
       const summary =
         result.status === 'ready'
           ? `ready: ${result.fileAssetId} -> ${result.outputAssetId}`
-          : `failed: ${result.message}`
+          : result.status === 'restart'
+            ? `restart: ${result.fileAssetId} was made with older settings; file set back to ${result.originalAssetId}`
+            : result.status === 'retry'
+              ? `pending (retried later): ${result.message}`
+              : `failed: ${result.message}`
       log(
         `${documentId}: ${summary}; patched ${outcome.patchedDocuments.join(', ') || 'no document'} in ${elapsed}`,
       )

@@ -10,14 +10,18 @@ import {describe, it} from 'node:test'
 import {
   AUDIO_BITRATE,
   buildFfmpegArgs,
+  checkFfmpegVersion,
   convertedFilename,
+  CONVERTED_ASSET_SETTINGS_FIELD,
   CONVERTED_ASSET_SOURCE_NAME,
   CRF,
   DEFAULT_PRESET,
   expectedOutputSize,
   isX264Preset,
   MAX_DIMENSION,
+  MIN_FFMPEG_VERSION,
   OUTPUT_MIME_TYPE,
+  parseFfmpegVersion,
   SETTINGS_VERSION,
   VIDEO_FILTER,
   X264_PRESETS,
@@ -106,18 +110,60 @@ function valueAfter(args: string[], flag: string): string | undefined {
 
 describe('settings constants', () => {
   it('matches the video contract v2', () => {
-    assert.equal(SETTINGS_VERSION, 'h264-crf23-max1920-v1')
+    assert.equal(SETTINGS_VERSION, 'h264-crf23-max1920-v2')
     assert.equal(MAX_DIMENSION, 1920)
     assert.equal(CRF, 23)
     assert.equal(AUDIO_BITRATE, '128k')
     assert.equal(OUTPUT_MIME_TYPE, 'video/mp4')
     assert.equal(CONVERTED_ASSET_SOURCE_NAME, 'video-to-mp4')
+    assert.equal(CONVERTED_ASSET_SETTINGS_FIELD, 'videoToMp4SettingsVersion')
     assert.equal(DEFAULT_PRESET, 'medium')
+    assert.deepEqual(MIN_FFMPEG_VERSION, {major: 7, minor: 0})
+  })
+})
+
+describe('ffmpeg version check', () => {
+  it('reads release versions as ffmpeg -version prints them', () => {
+    assert.deepEqual(
+      parseFfmpegVersion(
+        'ffmpeg version 9.0.1 Copyright (c) 2000-2026 the FFmpeg developers\nbuilt with clang',
+      ),
+      {major: 9, minor: 0, patch: 1, text: '9.0.1'},
+    )
+    assert.deepEqual(
+      parseFfmpegVersion(
+        'ffmpeg version 7.0.2-static https://johnvansickle.com/ffmpeg/  Copyright (c) 2000-2024',
+      ),
+      {major: 7, minor: 0, patch: 2, text: '7.0.2-static'},
+    )
+    assert.deepEqual(parseFfmpegVersion('ffmpeg version n7.1 Copyright'), {
+      major: 7,
+      minor: 1,
+      patch: 0,
+      text: '7.1',
+    })
+    assert.equal(parseFfmpegVersion('ffmpeg version N-112233-gabcdef0 Copyright'), null)
+    assert.equal(parseFfmpegVersion('something else'), null)
+  })
+
+  it('accepts 7.0 and newer and refuses older or unknown builds', () => {
+    assert.equal(checkFfmpegVersion('ffmpeg version 7.0.2-static https://x').text, '7.0.2-static')
+    assert.equal(checkFfmpegVersion('ffmpeg version 9.0.1 Copyright').major, 9)
+    // 6.x reads `-autorotate` as taking a value, which swallows the `-i` after it.
+    assert.throws(
+      () => checkFfmpegVersion('ffmpeg version 6.0 Copyright'),
+      /6\.0 is too old.*7\.0 or newer/,
+    )
+    assert.throws(() => checkFfmpegVersion('ffmpeg version 6.1.2 Copyright'), /too old/)
+    assert.throws(
+      () => checkFfmpegVersion('ffmpeg version N-112233-gabcdef0 Copyright'),
+      /cannot read a release version/,
+    )
   })
 })
 
 describe('buildFfmpegArgs', () => {
-  it('builds the exact v1 argument list for a video with audio', () => {
+  it('builds the exact v2 argument list for a video with audio', () => {
     // If this changes, the output files change: bump SETTINGS_VERSION in the same commit.
     assert.deepEqual(
       buildFfmpegArgs({input: '/in/IMG_0169.MOV', output: '/out/a.mp4', hasAudio: true}),
@@ -150,6 +196,10 @@ describe('buildFfmpegArgs', () => {
         '23',
         '-preset',
         'medium',
+        '-fps_mode:v',
+        'passthrough',
+        '-enc_time_base:v',
+        'demux',
         '-map_metadata',
         '-1',
         '-map_chapters',
@@ -172,7 +222,17 @@ describe('buildFfmpegArgs', () => {
     assert.equal(valueAfter(args, '-ac'), undefined)
     // The video settings are the same with and without audio.
     const withAudio = buildFfmpegArgs({input: 'in.mov', output: 'out.mp4', hasAudio: true})
-    for (const flag of ['-vf', '-c:v', '-profile:v', '-pix_fmt', '-crf', '-preset', '-movflags']) {
+    for (const flag of [
+      '-vf',
+      '-c:v',
+      '-profile:v',
+      '-pix_fmt',
+      '-crf',
+      '-preset',
+      '-fps_mode:v',
+      '-enc_time_base:v',
+      '-movflags',
+    ]) {
       assert.equal(valueAfter(args, flag), valueAfter(withAudio, flag), flag)
     }
   })
@@ -181,6 +241,15 @@ describe('buildFfmpegArgs', () => {
     const args = buildFfmpegArgs({input: 'in.mov', output: 'out.mp4', hasAudio: true})
     const maps = args.flatMap((arg, index) => (arg === '-map' ? [args[index + 1]] : []))
     assert.deepEqual(maps, ['0:V:0', '0:a:0'])
+  })
+
+  it('encodes every decoded frame once, at its own time, in the input time base', () => {
+    // Without both options ffmpeg encodes at a constant rate from the average (v1); with only
+    // -enc_time_base:v demux, ffmpeg 7.0.2 encodes a 90 kHz time base input at 90,000 fps.
+    const args = buildFfmpegArgs({input: 'in.mov', output: 'out.mp4', hasAudio: false})
+    assert.equal(valueAfter(args, '-fps_mode:v'), 'passthrough')
+    assert.equal(valueAfter(args, '-enc_time_base:v'), 'demux')
+    assert.ok(args.indexOf('-fps_mode:v') > args.indexOf('-i'), 'an output option')
   })
 
   it('autorotates the input, strips metadata and chapters, and writes a faststart MP4', () => {

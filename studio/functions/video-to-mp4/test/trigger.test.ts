@@ -5,6 +5,7 @@
  * (no loops).
  */
 import assert from 'node:assert/strict'
+import {readFileSync} from 'node:fs'
 import {describe, it} from 'node:test'
 
 import {evaluate, parse} from 'groq-js'
@@ -18,6 +19,7 @@ import {
   needsConversion,
   nextPendingVideo,
   PENDING_VIDEO_PREDICATE,
+  RETRY_DELAY_SECONDS,
   STALE_PROCESSING_SECONDS,
   VIDEO_FIELDS_BY_TYPE,
   VIDEO_TO_MP4_FILTER,
@@ -84,6 +86,33 @@ const blockCases: {name: string; block: VideoBlock; pending: boolean; needs: boo
   {
     name: 'status pending',
     block: video('a', {file: file(MOV), conversion: {status: 'pending'}}),
+    pending: true,
+    needs: true,
+  },
+  {
+    name: 'pending retry of the current file, written less than the retry delay ago',
+    block: video('a', {
+      file: file(MOV),
+      conversion: {status: 'pending', sourceAssetId: MOV, updatedAt: ago(RETRY_DELAY_SECONDS - 1)},
+    }),
+    pending: false,
+    needs: true,
+  },
+  {
+    name: 'pending retry of the current file, due (older than the retry delay)',
+    block: video('a', {
+      file: file(MOV),
+      conversion: {status: 'pending', sourceAssetId: MOV, updatedAt: ago(RETRY_DELAY_SECONDS + 1)},
+    }),
+    pending: true,
+    needs: true,
+  },
+  {
+    name: 'pending retry of an earlier file',
+    block: video('a', {
+      file: file(WEBM),
+      conversion: {status: 'pending', sourceAssetId: MOV, updatedAt: ago(10)},
+    }),
     pending: true,
     needs: true,
   },
@@ -217,11 +246,44 @@ describe('pending video rule', () => {
   }
 })
 
+/**
+ * Every document field of type `blockContent` (the Portable Text type that offers the video
+ * block) in the extracted Studio schema, studio/schema.json (`npm run schema:extract`).
+ */
+function blockContentFieldsFromSchema(): Record<string, string[]> {
+  const schema = JSON.parse(
+    readFileSync(new URL('../../../schema.json', import.meta.url), 'utf8'),
+  ) as {
+    name: string
+    type: string
+    attributes?: Record<string, {value?: {type?: string; name?: string}}>
+  }[]
+  const result: Record<string, string[]> = {}
+  for (const type of schema) {
+    if (type.type !== 'document') continue
+    for (const [field, attribute] of Object.entries(type.attributes ?? {})) {
+      if (attribute.value?.type === 'inline' && attribute.value.name === 'blockContent') {
+        result[type.name] = [...(result[type.name] ?? []), field].sort()
+      }
+    }
+  }
+  return result
+}
+
 describe('event filter scope', () => {
   const pendingBlock = video('v', {file: file(MOV)})
 
+  it('watches exactly the blockContent fields of the Studio schema (schema.json)', () => {
+    const fromSchema = blockContentFieldsFromSchema()
+    assert.ok(Object.keys(fromSchema).length > 0, 'schema.json lists no blockContent field')
+    const watched = Object.fromEntries(
+      Object.entries(VIDEO_FIELDS_BY_TYPE).map(([type, fields]) => [type, [...fields].sort()]),
+    )
+    assert.deepEqual(watched, fromSchema)
+  })
+
   it('matches every rich-text field that offers the video block', async () => {
-    for (const [type, fields] of Object.entries(VIDEO_FIELDS_BY_TYPE)) {
+    for (const [type, fields] of Object.entries(blockContentFieldsFromSchema())) {
       for (const field of fields) {
         const doc: Doc = {
           _id: `drafts.${type}-x`,
@@ -299,6 +361,7 @@ describe("no loops: the Function's own patches stop the filter", () => {
       sourceAssetId: MOV,
       outputAssetId: MP4,
       original: 'current-file',
+      settingsVersion: SETTINGS_VERSION,
       message: 'ok',
     }
     const failed: ConversionResult = {status: 'failed', fileAssetId: MOV, message: 'broken'}
@@ -311,5 +374,45 @@ describe("no loops: the Function's own patches stop the filter", () => {
     const nextYear = new Date(NOW.getTime() + 365 * 24 * 3600 * 1000)
     assert.equal(await filterMatches(broken, 'staging', nextYear), false)
     assert.equal(videoNeedsConversion((converted.body as VideoBlock[])[0] as never), false)
+  })
+})
+
+describe('retryable problems and old conversions', () => {
+  const location = {field: 'body', key: 'v'}
+  const start = post([video('v', {file: file(MOV)})])
+  const block = video('v', {file: file(MOV)})
+
+  it('a retry (pending) stops the filter until the retry delay has passed', async () => {
+    const retry: ConversionResult = {status: 'retry', fileAssetId: MOV, message: 'download failed'}
+    const waiting = applyPatch(start, resultOps({...location, block}, retry, NOW))
+    const conversion = (waiting.body as VideoBlock[])[0].conversion
+    assert.equal(conversion?.status, 'pending')
+    assert.equal(conversion?.sourceAssetId, MOV)
+    assert.equal(await filterMatches(waiting), false)
+    const soon = new Date(NOW.getTime() + (RETRY_DELAY_SECONDS - 1) * 1000)
+    assert.equal(await filterMatches(waiting, 'staging', soon), false)
+    const later = new Date(NOW.getTime() + (RETRY_DELAY_SECONDS + 1) * 1000)
+    assert.equal(await filterMatches(waiting, 'staging', later), true)
+    assert.equal(nextPendingVideo(waiting, later)?.key, 'v')
+  })
+
+  it('a restart points file at the original, which then needs conversion', async () => {
+    const old = post([
+      video('v', {
+        file: file(MP4),
+        original: file(WEBM),
+        conversion: {status: 'processing', sourceAssetId: MP4, updatedAt: ago(5)},
+      }),
+    ])
+    const restart: ConversionResult = {
+      status: 'restart',
+      fileAssetId: MP4,
+      originalAssetId: MOV,
+      message: 'old settings',
+    }
+    const oldBlock = (old.body as VideoBlock[])[0]
+    const restarted = applyPatch(old, resultOps({...location, block: oldBlock}, restart, NOW))
+    assert.deepEqual((restarted.body as VideoBlock[])[0], video('v', {file: file(MOV)}))
+    assert.equal(await filterMatches(restarted), true)
   })
 })

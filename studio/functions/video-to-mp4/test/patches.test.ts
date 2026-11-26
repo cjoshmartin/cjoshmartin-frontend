@@ -86,6 +86,7 @@ describe('resultOps', () => {
     sourceAssetId: MOV,
     outputAssetId: MP4,
     original: 'current-file',
+    settingsVersion: SETTINGS_VERSION,
     message: 'Converted',
   }
 
@@ -121,6 +122,43 @@ describe('resultOps', () => {
         },
       },
     })
+  })
+
+  it('ready records the settings version the result names', () => {
+    const ops = resultOps(located(block), {...ready, settingsVersion: 'h264-older'}, NOW)
+    const conversion = ops.set?.['body[_key=="v"].conversion'] as {settingsVersion?: string}
+    assert.equal(conversion.settingsVersion, 'h264-older')
+  })
+
+  it('retry: conversion becomes pending with the message, file stays', () => {
+    const retry: ConversionResult = {status: 'retry', fileAssetId: MOV, message: 'later'}
+    assert.deepEqual(resultOps(located(block), retry, NOW), {
+      set: {
+        'body[_key=="v"].conversion': {
+          status: 'pending',
+          message: 'later',
+          sourceAssetId: MOV,
+          settingsVersion: SETTINGS_VERSION,
+          updatedAt: NOW.toISOString(),
+        },
+      },
+    })
+  })
+
+  it('restart: file becomes the original, conversion and original are removed', () => {
+    const restart: ConversionResult = {
+      status: 'restart',
+      fileAssetId: MP4,
+      originalAssetId: MOV,
+      message: 'old settings',
+    }
+    assert.deepEqual(
+      resultOps(located({_type: 'video', _key: 'v', file: file(MP4)}), restart, NOW),
+      {
+        set: {'body[_key=="v"].file': file(MOV)},
+        unset: ['body[_key=="v"].conversion', 'body[_key=="v"].original'],
+      },
+    )
   })
 
   it('adopted MP4 without an existing original unsets original', () => {
@@ -161,6 +199,27 @@ describe('resultOps', () => {
       'body[_key=="origin"].conversion',
       'body[_key=="waiting"].conversion',
     ])
+    const retryOps = documentResultOps(
+      doc,
+      {status: 'retry', fileAssetId: MOV, message: 'later'},
+      {documentId: 'drafts.p', field: 'body', key: 'origin'},
+      NOW,
+    )
+    assert.deepEqual(Object.keys(retryOps?.set ?? {}).sort(), [
+      'body[_key=="origin"].conversion',
+      'body[_key=="waiting"].conversion',
+    ])
+    // Written once: a block already waiting to retry is left alone.
+    const retried = applyPatch(doc, retryOps!)
+    assert.equal(
+      documentResultOps(
+        retried,
+        {status: 'retry', fileAssetId: MOV, message: 'later'},
+        {documentId: 'drafts.p', field: 'body', key: 'origin'},
+        NOW,
+      ),
+      null,
+    )
     const readyOps = documentResultOps(
       doc,
       {
@@ -169,6 +228,7 @@ describe('resultOps', () => {
         sourceAssetId: MOV,
         outputAssetId: MP4,
         original: 'current-file',
+        settingsVersion: SETTINGS_VERSION,
         message: '',
       },
       {documentId: 'x', field: 'body', key: 'k'},

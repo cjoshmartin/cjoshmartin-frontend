@@ -9,7 +9,12 @@ import {evaluate, parse} from 'groq-js'
 
 import type {AssetDocument, ContentStore, StoredDocument} from '../orchestrator'
 import type {PatchOps} from '../patches'
-import {CONVERTED_ASSET_SOURCE_NAME, OUTPUT_MIME_TYPE} from '../settings'
+import {
+  CONVERTED_ASSET_SETTINGS_FIELD,
+  CONVERTED_ASSET_SOURCE_NAME,
+  OUTPUT_MIME_TYPE,
+  SETTINGS_VERSION,
+} from '../settings'
 import {documentsUsingFileQuery} from '../trigger'
 
 type Doc = Record<string, unknown> & {_id: string; _type: string}
@@ -146,8 +151,13 @@ export class MemoryStore implements ContentStore {
 
   async findConvertedAsset(sourceAssetId: string): Promise<AssetDocument | null> {
     return this.query<AssetDocument | null>(
-      `*[_type == "sanity.fileAsset" && source.name == $name && source.id == $id && mimeType == $mimeType] | order(_createdAt asc)[0]`,
-      {name: CONVERTED_ASSET_SOURCE_NAME, id: sourceAssetId, mimeType: OUTPUT_MIME_TYPE},
+      `*[_type == "sanity.fileAsset" && source.name == $name && source.id == $id && mimeType == $mimeType && ${CONVERTED_ASSET_SETTINGS_FIELD} == $settingsVersion] | order(_createdAt asc)[0]`,
+      {
+        name: CONVERTED_ASSET_SOURCE_NAME,
+        id: sourceAssetId,
+        mimeType: OUTPUT_MIME_TYPE,
+        settingsVersion: SETTINGS_VERSION,
+      },
     )
   }
 }

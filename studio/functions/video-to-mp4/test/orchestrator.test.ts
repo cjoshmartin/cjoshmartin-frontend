@@ -9,6 +9,7 @@ import {beforeEach, describe, it} from 'node:test'
 
 import {
   ConversionFailure,
+  RetryableConversionError,
   runVideoToMp4,
   UnexpectedConversionError,
   type AssetDocument,
@@ -16,8 +17,17 @@ import {
   type RunOptions,
 } from '../orchestrator'
 import {LEASE_FIELD, newLease} from '../patches'
-import {CONVERTED_ASSET_SOURCE_NAME, SETTINGS_VERSION} from '../settings'
-import {STALE_PROCESSING_SECONDS, VIDEO_TO_MP4_FILTER, type VideoBlock} from '../trigger'
+import {
+  CONVERTED_ASSET_SETTINGS_FIELD,
+  CONVERTED_ASSET_SOURCE_NAME,
+  SETTINGS_VERSION,
+} from '../settings'
+import {
+  RETRY_DELAY_SECONDS,
+  STALE_PROCESSING_SECONDS,
+  VIDEO_TO_MP4_FILTER,
+  type VideoBlock,
+} from '../trigger'
 import {evaluate, parse} from 'groq-js'
 import {MemoryStore} from './memory-store'
 
@@ -43,15 +53,27 @@ function videoOf(store: MemoryStore, id: string, key = 'v'): VideoBlock | undefi
   return body?.find((b) => b._key === key)
 }
 
-async function filterMatches(store: MemoryStore, id: string): Promise<boolean> {
+async function filterMatches(store: MemoryStore, id: string, now = new Date()): Promise<boolean> {
   const doc = store.get(id)
   if (!doc) return false
   const tree = parse(`*[${VIDEO_TO_MP4_FILTER}]._id`)
   const result = await (
-    await evaluate(tree, {dataset: [doc], sanity: {projectId: 'j3vdh6ti', dataset: 'staging'}})
+    await evaluate(tree, {
+      dataset: [doc],
+      sanity: {projectId: 'j3vdh6ti', dataset: 'staging'},
+      timestamp: now,
+    })
   ).get()
   return (result as string[]).length === 1
 }
+
+/** An MP4 asset this converter made from `sourceId`, with `settingsVersion` recorded on it. */
+const convertedAsset = (id: string, sourceId: string, settingsVersion?: string) =>
+  fileAsset(id, {
+    mimeType: 'video/mp4',
+    source: {name: CONVERTED_ASSET_SOURCE_NAME, id: sourceId},
+    ...(settingsVersion === undefined ? {} : {[CONVERTED_ASSET_SETTINGS_FIELD]: settingsVersion}),
+  })
 
 /** A converter whose conversions finish when the test says so. */
 class FakeConverter implements Converter {
@@ -73,6 +95,7 @@ class FakeConverter implements Converter {
         mimeType: 'video/mp4',
         originalFilename: 'IMG_0169.mp4',
         source: {name: CONVERTED_ASSET_SOURCE_NAME, id: source._id},
+        [CONVERTED_ASSET_SETTINGS_FIELD]: SETTINGS_VERSION,
       }),
     )
     return {outputAssetId: MP4, message: 'Converted IMG_0169.MOV to MP4'}
@@ -157,12 +180,7 @@ describe('runVideoToMp4', () => {
   })
 
   it('reuses an earlier conversion of the same upload instead of converting again', async () => {
-    store.put(
-      fileAsset(OLD_MP4, {
-        mimeType: 'video/mp4',
-        source: {name: CONVERTED_ASSET_SOURCE_NAME, id: MOV},
-      }),
-    )
+    store.put(convertedAsset(OLD_MP4, MOV, SETTINGS_VERSION))
     const converter = new FakeConverter(store)
     const outcome = await runVideoToMp4(options({converter}))
     assert.equal(outcome.kind, 'done')
@@ -171,7 +189,19 @@ describe('runVideoToMp4', () => {
     assert.deepEqual(after.file, file(OLD_MP4))
     assert.deepEqual(after.original, file(MOV))
     assert.equal(after.conversion?.status, 'ready')
+    assert.equal(after.conversion?.settingsVersion, SETTINGS_VERSION)
     assert.match(after.conversion?.message ?? '', /Reused/)
+  })
+
+  it('does not reuse a conversion made with other settings, or without a recorded version', async () => {
+    store.put(convertedAsset(OLD_MP4, MOV, 'h264-crf23-max1920-v1'))
+    store.put(convertedAsset('file-6666666666666666666666666666666666666666-mp4', MOV))
+    const converter = new FakeConverter(store)
+    await runVideoToMp4(options({converter}))
+    assert.deepEqual(converter.calls, [MOV])
+    const after = videoOf(store, 'drafts.blogPost-1')!
+    assert.deepEqual(after.file, file(MP4))
+    assert.equal(after.conversion?.settingsVersion, SETTINGS_VERSION)
   })
 
   it('does not reuse assets of another source name or another upload', async () => {
@@ -189,12 +219,7 @@ describe('runVideoToMp4', () => {
   })
 
   it('uses an MP4 the converter made as it is when an editor picks it for a new block', async () => {
-    store.put(
-      fileAsset(OLD_MP4, {
-        mimeType: 'video/mp4',
-        source: {name: CONVERTED_ASSET_SOURCE_NAME, id: MOV},
-      }),
-    )
+    store.put(convertedAsset(OLD_MP4, MOV, SETTINGS_VERSION))
     store.put({
       _id: 'drafts.blogPost-1',
       _type: 'blogPost',
@@ -208,7 +233,51 @@ describe('runVideoToMp4', () => {
     assert.deepEqual(after.original, file(MOV))
     assert.equal(after.conversion?.sourceAssetId, MOV)
     assert.equal(after.conversion?.outputAssetId, OLD_MP4)
+    assert.equal(after.conversion?.settingsVersion, SETTINGS_VERSION)
     assert.equal(await filterMatches(store, 'drafts.blogPost-1'), false)
+  })
+
+  it('swaps an MP4 made with older settings back to its original, which the next run converts', async () => {
+    store.put(convertedAsset(OLD_MP4, MOV, 'h264-crf23-max1920-v1'))
+    store.put({
+      _id: 'drafts.blogPost-1',
+      _type: 'blogPost',
+      body: [{_type: 'video', _key: 'v', file: file(OLD_MP4)}],
+    })
+    const converter = new FakeConverter(store)
+    const first = await runVideoToMp4(options({converter}))
+    assert.equal(first.kind, 'done')
+    assert.deepEqual(converter.calls, [])
+    assert.deepEqual(videoOf(store, 'drafts.blogPost-1'), {
+      _type: 'video',
+      _key: 'v',
+      file: file(MOV),
+    })
+    assert.equal(store.get(OLD_MP4)?.[LEASE_FIELD], undefined, 'lease on the old MP4 released')
+    // The restart patch is an update event that matches; the next run converts the original.
+    assert.equal(await filterMatches(store, 'drafts.blogPost-1'), true)
+    await runVideoToMp4(options({converter, runId: 'run-b'}))
+    assert.deepEqual(converter.calls, [MOV])
+    const after = videoOf(store, 'drafts.blogPost-1')!
+    assert.deepEqual(after.file, file(MP4))
+    assert.deepEqual(after.original, file(MOV))
+    assert.equal(after.conversion?.settingsVersion, SETTINGS_VERSION)
+  })
+
+  it('converts an MP4 made with older settings like any upload when its original is gone', async () => {
+    store.put(convertedAsset(OLD_MP4, WEBM))
+    store.put({
+      _id: 'drafts.blogPost-1',
+      _type: 'blogPost',
+      body: [{_type: 'video', _key: 'v', file: file(OLD_MP4)}],
+    })
+    const converter = new FakeConverter(store)
+    await runVideoToMp4(options({converter}))
+    assert.deepEqual(converter.calls, [OLD_MP4])
+    const after = videoOf(store, 'drafts.blogPost-1')!
+    assert.equal(after.conversion?.status, 'ready')
+    assert.equal(after.conversion?.sourceAssetId, OLD_MP4)
+    assert.deepEqual(after.original, file(OLD_MP4))
   })
 
   it('records a failure, leaves file on the upload, and does not run again for it', async () => {
@@ -237,13 +306,43 @@ describe('runVideoToMp4', () => {
     assert.equal(converter.calls.length, 1)
   })
 
-  it('records an unexpected error as failed, then rethrows it for the logs', async () => {
+  it('records an unexpected error as pending (retried later), then rethrows it for the logs', async () => {
     const converter = new FakeConverter(store, 'immediate', new TypeError('boom'))
     await assert.rejects(runVideoToMp4(options({converter})), UnexpectedConversionError)
     const after = videoOf(store, 'drafts.blogPost-1')!
-    assert.equal(after.conversion?.status, 'failed')
-    assert.match(after.conversion?.message ?? '', /Unexpected error while converting: boom/)
+    assert.equal(after.conversion?.status, 'pending')
+    assert.match(after.conversion?.message ?? '', /unexpected error while converting \(boom\)/)
     assert.equal(store.get(MOV)?.[LEASE_FIELD], undefined)
+  })
+
+  it("records a problem that is not the video's fault as pending and retries it after the delay", async () => {
+    const broken = new FakeConverter(
+      store,
+      'immediate',
+      new RetryableConversionError('the converter is not set up correctly (bad binary)'),
+    )
+    const outcome = await runVideoToMp4(options({converter: broken}))
+    assert.equal(outcome.kind, 'done')
+    const after = videoOf(store, 'drafts.blogPost-1')!
+    assert.deepEqual(after.file, file(MOV))
+    assert.equal(after.conversion?.status, 'pending')
+    assert.equal(after.conversion?.sourceAssetId, MOV)
+    assert.match(
+      after.conversion?.message ?? '',
+      /Could not convert yet: the converter is not set up/,
+    )
+    assert.match(after.conversion?.message ?? '', /retried automatically/)
+    // Not retried by its own patch or a quick re-save...
+    assert.equal(await filterMatches(store, 'drafts.blogPost-1'), false)
+    const again = await runVideoToMp4(options({converter: broken, runId: 'run-b'}))
+    assert.equal(again.kind, 'nothing-to-do')
+    // ... but by the first event after the retry delay, after a redeploy fixed the converter.
+    const later = new Date(Date.now() + (RETRY_DELAY_SECONDS + 1) * 1000)
+    assert.equal(await filterMatches(store, 'drafts.blogPost-1', later), true)
+    const fixed = new FakeConverter(store)
+    await runVideoToMp4(options({converter: fixed, runId: 'run-c', now: () => later}))
+    assert.deepEqual(fixed.calls, [MOV])
+    assert.equal(videoOf(store, 'drafts.blogPost-1')?.conversion?.status, 'ready')
   })
 
   it('records failed when the upload no longer exists', async () => {

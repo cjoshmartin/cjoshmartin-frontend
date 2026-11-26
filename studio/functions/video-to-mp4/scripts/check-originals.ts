@@ -24,7 +24,7 @@ import {sha1File, sha256File, verifyFfmpegBinary} from '../ffmpeg'
 import {rotationSwapsSides} from '../media-info'
 import {ConversionFailure} from '../orchestrator'
 import {parseSimpleRange} from '../range-proxy'
-import {expectedOutputSize, isX264Preset, X264_PRESETS} from '../settings'
+import {checkFfmpegVersion, expectedOutputSize, isX264Preset, X264_PRESETS} from '../settings'
 
 const run = promisify(execFile)
 const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg'
@@ -68,6 +68,8 @@ async function main() {
   const {stdout: resolved} = await run('/bin/sh', ['-c', `command -v "${FFMPEG}"`])
   const ffmpegPath = await verifyFfmpegBinary(resolved.trim(), await sha256File(resolved.trim()))
   const {stdout: version} = await run(ffmpegPath, ['-hide_banner', '-version'])
+  // The settings need ffmpeg 7.0 or newer; refuse anything else before converting.
+  checkFfmpegVersion(version)
 
   const files = (await readdir(directory))
     .filter((name) => VIDEO_EXTENSIONS.has(path.extname(name).toLowerCase()))
@@ -187,7 +189,7 @@ async function main() {
             ok: problems.length === 0,
             problems,
             input: `${parsed.video.codec} ${parsed.video.width}x${parsed.video.height}${parsed.video.rotation ? ` rot ${parsed.video.rotation}` : ''}${parsed.hasAudio ? ` + ${parsed.firstAudioCodec}` : ''}`,
-            output: `${result.expectedSize.width}x${result.expectedSize.height}${a.length ? ' + aac' : ''}`,
+            output: `${result.expectedSize.width}x${result.expectedSize.height}${a.length ? ' + aac' : ''}, ${result.frames.output} of ${result.frames.input} frames at their times`,
             inputBytes: size,
             outputBytes: result.outputBytes,
             seconds: Number(((Date.now() - started) / 1000).toFixed(1)),

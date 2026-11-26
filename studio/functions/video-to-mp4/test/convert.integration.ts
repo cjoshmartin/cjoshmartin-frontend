@@ -34,7 +34,8 @@ import {
   sha256File,
   verifyFfmpegBinary,
 } from '../ffmpeg'
-import {ConversionFailure} from '../orchestrator'
+import {ConversionFailure, RetryableConversionError} from '../orchestrator'
+import {checkFfmpegVersion} from '../settings'
 import {parseSimpleRange} from '../range-proxy'
 
 const run = promisify(execFile)
@@ -83,6 +84,30 @@ interface ProbeStream {
   side_data_list?: unknown[]
 }
 
+/** Decoded frame times of the first video stream, in seconds, from ffprobe. */
+async function frameTimes(file: string): Promise<number[]> {
+  const {stdout} = await run(
+    FFPROBE,
+    [
+      '-v',
+      'error',
+      '-select_streams',
+      'V:0',
+      '-show_entries',
+      'frame=best_effort_timestamp_time',
+      '-of',
+      'csv=p=0',
+      file,
+    ],
+    {maxBuffer: 1 << 26},
+  )
+  return stdout
+    .split('\n')
+    .map((line) => line.split(',')[0].trim())
+    .filter(Boolean)
+    .map(Number)
+}
+
 async function ffprobe(
   file: string,
 ): Promise<{streams: ProbeStream[]; format: {duration: string; tags?: Record<string, string>}}> {
@@ -112,8 +137,8 @@ before(async () => {
   const {stdout: resolved} = await run('/bin/sh', ['-c', `command -v "${FFMPEG}"`])
   const ffmpegPath = resolved.trim()
   const {stdout: version} = await run(ffmpegPath, ['-hide_banner', '-version'])
-  const major = Number(/^ffmpeg version n?(\d+)/.exec(version)?.[1])
-  assert.ok(major >= 7, `${ffmpegPath} is ffmpeg ${major}; the conversion tests need 7.0 or newer`)
+  // Throws for ffmpeg older than 7.0 (see settings.ts MIN_FFMPEG_VERSION).
+  checkFfmpegVersion(version)
   binary = await verifyFfmpegBinary(ffmpegPath, await sha256File(ffmpegPath))
   server = createServer((req, res) => {
     const file = path.join(workDir, path.basename(decodeURIComponent(req.url ?? '')))
@@ -149,6 +174,48 @@ after(async () => {
 })
 
 describe('convertToMp4 with a real ffmpeg', {timeout: TIMEOUT}, () => {
+  it('keeps every frame of a bursty variable-frame-rate screen recording at its own time', async () => {
+    // Like media/step_count.mp4: a burst of 20 frames 20 ms apart, then 6 frames 0.5 s apart, in
+    // a 90 kHz time base. Settings v1 dropped or resampled such frames.
+    const input = await generate('step_like.mp4', [
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=size=1004x2176:rate=50:duration=0.52',
+      '-vf',
+      "setpts='if(lt(N,20),N*0.02,0.4+(N-19)*0.5)/TB'",
+      '-fps_mode',
+      'passthrough',
+      '-enc_time_base',
+      '1/90000',
+      '-video_track_timescale',
+      '90000',
+      '-c:v',
+      'libx264',
+      '-preset',
+      'ultrafast',
+      '-bf',
+      '0',
+      '-pix_fmt',
+      'yuv420p',
+    ])
+    const expected = await frameTimes(input)
+    assert.equal(expected.length, 26, 'the generated input has 26 frames')
+    const result = await convertToMp4(await source(input, 'video/mp4'), options())
+    try {
+      assert.deepEqual(result.frames, {input: 26, output: 26})
+      const actual = await frameTimes(result.outputPath)
+      assert.equal(actual.length, expected.length)
+      const relative = (times: number[]) => times.map((t) => t - times[0])
+      const out = relative(actual)
+      relative(expected).forEach((t, i) => {
+        assert.ok(Math.abs(out[i] - t) < 0.001, `frame ${i}: ${out[i]} s, input ${t} s`)
+      })
+    } finally {
+      await rm(result.workDir, {recursive: true, force: true})
+    }
+  })
+
   it('rotated iPhone-style HEVC with mono audio and metadata, downloaded to /tmp', async () => {
     const raw = await generate('IMG_raw.MOV', [
       '-f',
@@ -340,7 +407,7 @@ describe('convertToMp4 with a real ffmpeg', {timeout: TIMEOUT}, () => {
     )
   })
 
-  it('fails when the download does not match the asset (size or sha1)', async () => {
+  it('a download that does not match the asset (size or sha1) is a retryable problem', async () => {
     const input = await generate('small.mp4', [
       '-f',
       'lavfi',
@@ -350,10 +417,11 @@ describe('convertToMp4 with a real ffmpeg', {timeout: TIMEOUT}, () => {
       'libx264',
     ])
     const bad = {...(await source(input)), sha1hash: '0'.repeat(40)}
-    await assert.rejects(
-      convertToMp4(bad, options()),
-      /Could not download the uploaded file \(sha1/,
-    )
+    await assert.rejects(convertToMp4(bad, options()), (error: unknown) => {
+      assert.ok(error instanceof RetryableConversionError, String(error))
+      assert.match(error.message, /the uploaded file could not be downloaded \(sha1/)
+      return true
+    })
   })
 
   it('stops ffmpeg at the deadline and says so', async () => {

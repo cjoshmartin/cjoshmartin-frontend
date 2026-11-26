@@ -10,13 +10,23 @@
  * Function works on a block that needs conversion unless it is already being handled:
  * - `processing` for the current file, written less than STALE_PROCESSING_SECONDS ago (a
  *   conversion is running; an older one belongs to a run that died and is retried), or
- * - `failed` for the current file with the current SETTINGS_VERSION (retrying would fail the same
- *   way, and the failure patch itself must not trigger another run). Uploading another file, or
- *   removing the block and adding the video again, starts a new conversion.
+ * - `pending` for the current file, written less than RETRY_DELAY_SECONDS ago: the last attempt
+ *   hit a problem that was not the video's fault (the converter's setup, a download, an API
+ *   error) and is retried by the first event after the delay, or
+ * - `failed` for the current file with the current SETTINGS_VERSION: the video itself cannot be
+ *   converted with these settings (retrying would fail the same way, and the failure patch itself
+ *   must not trigger another run). Uploading another file, or removing the block and adding the
+ *   video again, starts a new conversion.
+ *
+ * Nothing sends an event by itself when a `processing` or `pending` mark goes stale. The Studio
+ * does: while a document with such a block is open, it touches the block (see
+ * studio/components/VideoConversionInput.tsx), which starts the retry.
  *
  * Recursion guard: every patch the Function writes leaves each block it touches either converted
- * (`file` is the MP4), `processing` for the current file, or `failed` for the current file, so
- * the update event caused by that patch no longer matches for that block.
+ * (`file` is the MP4), `processing` or freshly `pending` for the current file, `failed` for the
+ * current file, or pointing at another file that does need conversion (an old conversion swapped
+ * back to its original upload, which is converted by the next run), so the update event caused by
+ * a patch matches a block at most once more.
  */
 import {SETTINGS_VERSION} from './settings'
 
@@ -31,6 +41,16 @@ export const FUNCTION_TIMEOUT_SECONDS = 900
  * Function timeout plus 5 minutes for event delivery and clock skew), so the block is retried.
  */
 export const STALE_PROCESSING_SECONDS = FUNCTION_TIMEOUT_SECONDS + 5 * 60
+
+/**
+ * A `pending` status (a retryable problem) is retried by the first event at least this long after
+ * it was written. Long enough that the Function's own pending patch and quick re-saves do not
+ * retry it in a loop, short enough that a redeploy or a passing network problem is retried soon.
+ */
+export const RETRY_DELAY_SECONDS = 10 * 60
+
+/** Ends the message of a `pending` (retryable) status, so the editor knows nothing is needed. */
+export const RETRY_NOTE = `It is retried automatically, ${RETRY_DELAY_SECONDS / 60} minutes after this attempt or later: on the next change to the document, or while the document is open in the Studio.`
 
 /**
  * Every Portable Text field (type `blockContent`, which offers the `video` block) per document
@@ -81,6 +101,8 @@ export const PENDING_VIDEO_PREDICATE = [
     `(conversion.status == "failed" && conversion.settingsVersion == ${JSON.stringify(SETTINGS_VERSION)})` +
     ' || ' +
     `(conversion.status == "processing" && coalesce(dateTime(conversion.updatedAt) > dateTime(now()) - ${STALE_PROCESSING_SECONDS}, false))` +
+    ' || ' +
+    `(conversion.status == "pending" && coalesce(dateTime(conversion.updatedAt) > dateTime(now()) - ${RETRY_DELAY_SECONDS}, false))` +
     '))',
 ].join(' && ')
 
@@ -179,12 +201,19 @@ export function needsConversion(block: Pick<VideoBlock, 'file' | 'conversion'>):
   return current !== undefined && current !== block.conversion?.outputAssetId
 }
 
-/** Whether `conversion.updatedAt` is a valid time less than STALE_PROCESSING_SECONDS before `now`. */
-export function isFreshTimestamp(updatedAt: string | undefined, now: Date): boolean {
+/**
+ * Whether `conversion.updatedAt` is a valid time less than `maxAgeSeconds` (by default
+ * STALE_PROCESSING_SECONDS) before `now`.
+ */
+export function isFreshTimestamp(
+  updatedAt: string | undefined,
+  now: Date,
+  maxAgeSeconds: number = STALE_PROCESSING_SECONDS,
+): boolean {
   if (typeof updatedAt !== 'string') return false
   const time = Date.parse(updatedAt)
   if (Number.isNaN(time)) return false
-  return time > now.getTime() - STALE_PROCESSING_SECONDS * 1000
+  return time > now.getTime() - maxAgeSeconds * 1000
 }
 
 /** A conversion of the block's current file is running (processing, not stale). */
@@ -202,6 +231,24 @@ export function isFreshProcessing(
   )
 }
 
+/**
+ * The last attempt for the current file hit a retryable problem less than RETRY_DELAY_SECONDS ago
+ * (`pending` written by the Function), so the block waits before it is tried again.
+ */
+export function isWaitingToRetry(
+  block: Pick<VideoBlock, 'file' | 'conversion'>,
+  now: Date,
+): boolean {
+  const current = fileAssetId(block.file)
+  const conversion = block.conversion
+  return (
+    current !== undefined &&
+    conversion?.sourceAssetId === current &&
+    conversion.status === 'pending' &&
+    isFreshTimestamp(conversion.updatedAt, now, RETRY_DELAY_SECONDS)
+  )
+}
+
 /** The current file failed to convert with the current settings. */
 export function isFailedForCurrentFile(block: Pick<VideoBlock, 'file' | 'conversion'>): boolean {
   const current = fileAssetId(block.file)
@@ -216,7 +263,12 @@ export function isFailedForCurrentFile(block: Pick<VideoBlock, 'file' | 'convers
 
 /** Mirrors PENDING_VIDEO_PREDICATE: the Function should work on this block. */
 export function isPendingVideo(block: VideoBlock, now: Date): boolean {
-  return needsConversion(block) && !isFreshProcessing(block, now) && !isFailedForCurrentFile(block)
+  return (
+    needsConversion(block) &&
+    !isFreshProcessing(block, now) &&
+    !isWaitingToRetry(block, now) &&
+    !isFailedForCurrentFile(block)
+  )
 }
 
 /** Every video block of the document's watched fields, in document order. */

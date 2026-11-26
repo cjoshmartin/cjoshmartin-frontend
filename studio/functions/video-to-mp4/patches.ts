@@ -6,6 +6,7 @@ import {SETTINGS_VERSION} from './settings'
 import {
   fileAssetId,
   isFailedForCurrentFile,
+  isWaitingToRetry,
   needsConversion,
   STALE_PROCESSING_SECONDS,
   videoBlocks,
@@ -43,16 +44,22 @@ export function fileReference(assetId: string): FileValue {
   return {_type: 'file', asset: {_type: 'reference', _ref: assetId}}
 }
 
+/**
+ * `conversion` with the given status. `settingsVersion` is the version of the settings that made
+ * (or are making) the MP4: SETTINGS_VERSION unless a ready result names the version recorded on
+ * the MP4 asset it uses.
+ */
 function conversionValue(
   status: ConversionStatus,
   fields: Omit<ConversionValue, 'status' | 'settingsVersion' | 'updatedAt'>,
   now: Date,
+  settingsVersion: string = SETTINGS_VERSION,
 ): ConversionValue {
   return {
     status,
     ...fields,
     ...(fields.message === undefined ? {} : {message: truncateMessage(fields.message)}),
-    settingsVersion: SETTINGS_VERSION,
+    settingsVersion,
     updatedAt: now.toISOString(),
   }
 }
@@ -111,9 +118,23 @@ export type ConversionResult =
        * an asset id, or null to remove it (the original of an adopted MP4 no longer exists).
        */
       original: 'current-file' | {assetId: string} | null
+      /** `conversion.settingsVersion`: the settings the MP4 was made with (recorded on its asset). */
+      settingsVersion: string
       message: string
     }
+  /** The video cannot be converted with these settings; final until the file changes. */
   | {status: 'failed'; fileAssetId: string; message: string}
+  /**
+   * A problem that is not the video's fault (the converter's setup, a download, an API error):
+   * recorded as `pending` and retried by the first event after RETRY_DELAY_SECONDS.
+   */
+  | {status: 'retry'; fileAssetId: string; message: string}
+  /**
+   * `file` is an MP4 this converter made with older settings and its original upload still exists:
+   * `file` goes back to that original (and `conversion` and `original` are removed), so the next
+   * run converts the original with the current settings, under the original's own lease.
+   */
+  | {status: 'restart'; fileAssetId: string; originalAssetId: string; message: string}
 
 /**
  * Ready: `file` becomes the MP4, `original` the upload, `conversion` ready. Failed: only
@@ -121,15 +142,21 @@ export type ConversionResult =
  */
 export function resultOps(video: LocatedVideo, result: ConversionResult, now: Date): PatchOps {
   const path = (child: string) => blockPath(video.field, video.key, child)
-  if (result.status === 'failed') {
+  if (result.status === 'failed' || result.status === 'retry') {
     return {
       set: {
         [path('conversion')]: conversionValue(
-          'failed',
+          result.status === 'failed' ? 'failed' : 'pending',
           {message: result.message, sourceAssetId: result.fileAssetId},
           now,
         ),
       },
+    }
+  }
+  if (result.status === 'restart') {
+    return {
+      set: {[path('file')]: fileReference(result.originalAssetId)},
+      unset: [path('conversion'), path('original')],
     }
   }
   const set: Record<string, unknown> = {
@@ -142,6 +169,7 @@ export function resultOps(video: LocatedVideo, result: ConversionResult, now: Da
         outputAssetId: result.outputAssetId,
       },
       now,
+      result.settingsVersion,
     ),
   }
   const unset: string[] = []
@@ -156,23 +184,25 @@ export function resultOps(video: LocatedVideo, result: ConversionResult, now: Da
 }
 
 /**
- * Whether `result` should be written to this block. A ready result goes to every block whose
- * `file` is still that upload and not yet converted. A failure only goes to the block this run
- * started from and to blocks that are waiting for this run (`processing` for the same upload);
- * other blocks with the same upload get their own run.
+ * Whether `result` should be written to this block. A ready or restart result goes to every block
+ * whose `file` is still that upload and not yet converted. A failure or retry only goes to the
+ * block this run started from and to blocks that are waiting for this run (`processing` for the
+ * same upload); other blocks with the same upload get their own run.
  */
 export function shouldReceiveResult(
   video: LocatedVideo,
   result: ConversionResult,
   origin: {documentId: string; field: string; key: string},
   documentId: string,
+  now: Date,
 ): boolean {
   if (fileAssetId(video.block.file) !== result.fileAssetId) return false
   if (!needsConversion(video.block)) return false
-  if (result.status === 'ready') return true
+  if (result.status === 'ready' || result.status === 'restart') return true
   // Already recorded (by this run's first delivery, or another run): writing it again would only
   // cause another update event.
   if (isFailedForCurrentFile(video.block)) return false
+  if (result.status === 'retry' && isWaitingToRetry(video.block, now)) return false
   const isOrigin =
     documentId === origin.documentId && video.field === origin.field && video.key === origin.key
   const conversion = video.block.conversion
@@ -190,7 +220,7 @@ export function documentResultOps(
 ): PatchOps | null {
   return mergeOps(
     videoBlocks(doc)
-      .filter((video) => shouldReceiveResult(video, result, origin, doc._id))
+      .filter((video) => shouldReceiveResult(video, result, origin, doc._id, now))
       .map((video) => resultOps(video, result, now)),
   )
 }
