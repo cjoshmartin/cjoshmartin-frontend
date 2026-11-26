@@ -35,7 +35,7 @@ current code is in [URLs](#urls).
 |---|---|
 | Pull request (draft) | <https://github.com/cjoshmartin/cjoshmartin-frontend/pull/6> |
 | Vercel Preview, branch alias (always the newest build of `sanity-migration`) | <https://cjoshmartin-frontend-git-a08979-josh-martins-projects-0186b4e9.vercel.app> |
-| Vercel Preview of this push | recorded in the PR description, "Vercel Preview" (the deployment of the last commit, which only changes this report) |
+| Vercel Preview of `ae39de7` (the current site code; later commits change only documentation) | <https://cjoshmartin-frontend-276cohxjs-josh-martins-projects-0186b4e9.vercel.app> ([inspector](https://vercel.com/josh-martins-projects-0186b4e9/cjoshmartin-frontend/HX3Vr7FkuBHBds3mFFg6JKgLpkbU)); the newest deployment is listed in the PR description |
 | Studio | <https://cjoshmartin.sanity.studio> (redirects to the Sanity Dashboard) |
 | Studio, production workspace | <https://cjoshmartin.sanity.studio/production> |
 | Studio, staging workspace | <https://cjoshmartin.sanity.studio/staging> |
@@ -232,7 +232,7 @@ production at 10:13:43 UTC, **12 of 12 pass on both**, with identical figures.
 | What | Result |
 |---|---|
 | Frontend `npm run lint` / `tsc --noEmit` / `npm test`, at `1018045` (this package) | 0 errors (the 2 old warnings) / clean / 13 of 13 |
-| Vercel Preview build of the pushed branch | see the PR description ("Vercel Preview") |
+| Vercel Preview build of `ae39de7` | Ready at 10:24 UTC in 47 s: 19 app routes including `/api/revalidate`, plus the proxy. The GitHub "Vercel" status is `success` |
 | Clean `next build` of `e673fe0` (the last commit that changes the site) | pass, 19 app routes plus the proxy, including `/api/revalidate` (fix round 1) |
 | Studio `npm test` / typecheck / `eslint .` / `sanity build` | 61 of 61 / pass / pass / pass (recheck 2) |
 | `video-to-mp4` Function `npm test` / `test:ffmpeg` / `check-originals` on the 29 originals | 103 of 103 / 9 of 9 / 29 of 29 (fix rounds 1 and 2, recheck 2) |
@@ -354,8 +354,8 @@ sweep (a one-way stack promotion). The overnight Mux upload refusal
 4. **Vercel.** The Preview variables are the same 4 Sanity ones scoped to `sanity-migration`, plus
    the old `NEXT_PUBLIC_POSTHOG_*` and `API_URL`. No Mux-related variable exists in any
    environment, so nothing was removed. No Production or Development variable was touched.
-5. **Secret scan.** `gitleaks git` (8.30.1) over the 61 branch commits after `origin/main` (this
-   package's commit included), and `gitleaks dir` over `docs/`: no leaks. An exact-value scan of the
+5. **Secret scan.** `gitleaks git` (8.30.1) over the branch commits after `origin/main` (61,
+   including `ae39de7`; repeated before each push), and `gitleaks dir` over `docs/`: no leaks. An exact-value scan of the
    branch's full patch history, every tracked file in the working tree and the new PR description
    for the 5 token values in `secrets.env` and `.env.local` (Sanity write and read tokens, the
    site's read token, the Mux token id and secret): 0 hits. No value was printed.
