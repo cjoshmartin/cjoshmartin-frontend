@@ -211,13 +211,16 @@ site() { # old|new
   done
 }
 site old
-# videos READY BLOCKS UNRESOLVED: what the production dataset reports about Mux videos.
+# videos BLOCKS NOT_READY ORIGINALS: what the production dataset reports about its video blocks
+# (contract v2) and which Wagtail originals (source ids, comma-separated) it holds.
 mkdir -p "$FAKE_ROOT/sanity" "$MIGRATION_DIR/extracted"
 printf '{"format_version": 1, "media": [{"id": 1}, {"id": 2}, {"id": 3}]}\n' >"$MIGRATION_DIR/extracted/export.json"
 videos() {
-  printf '{"result": {"ready": %s, "blocks": %s, "unresolved": %s}}\n' "$1" "$2" "$3" >"$FAKE_ROOT/sanity/production.json"
+  local originals
+  originals="$(printf '%s' "$3" | python3 -I -c 'import json, sys; print(json.dumps([x for x in sys.stdin.read().split(",") if x]))')"
+  printf '{"result": {"blocks": %s, "notReady": %s, "originals": %s}}\n' "$1" "$2" "$originals" >"$FAKE_ROOT/sanity/production.json"
 }
-videos 2 3 1
+videos 3 1 media-1,media-2
 touch "$FAKE_ROOT/dokku/apps/cjoshmartin-django" "$FAKE_ROOT/dokku/apps/other-app"
 echo "postgres:16.1" >"$FAKE_ROOT/dokku/services/cjoshmartin-db/image"
 echo "cjoshmartin-django" >"$FAKE_ROOT/dokku/services/cjoshmartin-db/links"
@@ -376,21 +379,26 @@ check "04 deleted no keys" no_key_deletes
 
 site new
 calls_mark
-run "04 --execute refuses while a video is not on Mux" 1 "$SCRIPTS/04-gcs-lockdown.sh" --execute --include-legacy-sa
-check "04 names the missing videos" log_has "2 of 3 Wagtail videos have a ready mux.videoAsset in production, and 1 of 3 published video blocks do not resolve"
+run "04 --execute refuses while a video is not in Sanity" 1 "$SCRIPTS/04-gcs-lockdown.sh" --execute --include-legacy-sa
+check "04 names the unconverted blocks and the missing originals" log_has "1 of 3 published video blocks do not play a converted MP4 with its original kept; 1 of 3 Wagtail video originals are not in production (media-3)"
 check "04 refused before changing anything (videos)" no_mutating_calls
-videos 3 3 1
+videos 3 0 media-1,media-2
 calls_mark
-run "04 --execute refuses while a video block does not resolve" 1 "$SCRIPTS/04-gcs-lockdown.sh" --execute --include-legacy-sa
+run "04 --execute refuses while a Wagtail original is missing" 1 "$SCRIPTS/04-gcs-lockdown.sh" --execute --include-legacy-sa
+check "04 names the missing original" log_has "1 of 3 Wagtail video originals are not in production (media-3)"
+check "04 refused before changing anything (originals)" no_mutating_calls
+videos 3 1 media-1,media-2,media-3
+calls_mark
+run "04 --execute refuses while a video block is not converted" 1 "$SCRIPTS/04-gcs-lockdown.sh" --execute --include-legacy-sa
 check "04 refused before changing anything (video blocks)" no_mutating_calls
 rm "$FAKE_ROOT/sanity/production.json"
 run "04 --execute refuses when the dataset cannot be queried" 1 "$SCRIPTS/04-gcs-lockdown.sh" --execute --include-legacy-sa
 check "04 reports the failed query" log_has "could not query the production dataset"
-videos 3 3 0
+videos 3 0 media-1,media-2,media-3
 export FAKE_IGNORE_MANAGED_BY=1
 calls_mark
 run "04 --execute --include-legacy-sa" 0 "$SCRIPTS/04-gcs-lockdown.sh" --execute --include-legacy-sa
-check "04 checked the videos first" log_has "ok 3 videos, 3 published video blocks"
+check "04 checked the videos first" log_has "ok 3 published video blocks play converted MP4s; the 3 Wagtail originals are in production"
 unset FAKE_IGNORE_MANAGED_BY
 check "04 no public bindings left" sh -c "! grep -q -E 'allUsers|allAuthenticatedUsers' '$FAKE_ROOT/gcs/images-for-cms/iam.json'"
 check "04 kept project bindings" grep -q projectOwner "$FAKE_ROOT/gcs/images-for-cms/iam.json"

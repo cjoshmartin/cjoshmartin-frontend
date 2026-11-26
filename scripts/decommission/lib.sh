@@ -238,45 +238,53 @@ decom_site_cut_over() {
 # The public (published) query endpoint of the production dataset.
 DECOM_SANITY_QUERY_URL="https://j3vdh6ti.api.sanity.io/v2025-02-19/data/query/production"
 
-# Succeeds when every Wagtail video is on Mux: production has a ready `mux-video-<id>` document
-# for each media item in the Wagtail export, and every video block of a published post or project
-# resolves to a video document. The migration's mux step creates Mux assets only from the public
-# images-for-cms URLs, so the bucket must stay public until this holds. On failure the reason is
-# printed and left in DECOM_MUX_REASON.
-DECOM_MUX_REASON=""
-decom_mux_videos_complete() {
-  local export_json="$DECOM_MIGRATION_DIR/extracted/export.json" expected query url body verdict
-  DECOM_MUX_REASON=""
+# Succeeds when every video is stored in Sanity (video contract v2, Mux is gone): every video block
+# of a published document in production plays a converted MP4 (`file` is a `video/mp4` asset,
+# `conversion.status` is "ready" and `conversion.outputAssetId` is that file) and keeps its original
+# upload (`original` resolves to an asset), and production holds the original of every media item
+# of the Wagtail export as a file asset (source wagtail, id media-<id>). Once that holds, no video
+# depends on the public images-for-cms URLs any more. On failure the reason is printed and left in
+# DECOM_VIDEOS_REASON.
+DECOM_VIDEOS_REASON=""
+decom_videos_complete() {
+  local export_json="$DECOM_MIGRATION_DIR/extracted/export.json" media_ids query url body verdict
+  DECOM_VIDEOS_REASON=""
   if [ ! -s "$export_json" ]; then
-    DECOM_MUX_REASON="$export_json is missing; it gives the number of Wagtail videos"
-  elif ! expected="$(python3 -I -c 'import json, sys; print(len(json.load(open(sys.argv[1]))["media"]))' "$export_json")"; then
-    DECOM_MUX_REASON="cannot read the media list from $export_json"
+    DECOM_VIDEOS_REASON="$export_json is missing; it lists the Wagtail videos"
+  elif ! media_ids="$(python3 -I -c 'import json, sys; print(" ".join(str(m["id"]) for m in json.load(open(sys.argv[1]))["media"]))' "$export_json")"; then
+    DECOM_VIDEOS_REASON="cannot read the media list from $export_json"
   else
-    query='{"ready": count(*[_type == "mux.videoAsset" && string::startsWith(_id, "mux-video-") && status == "ready"]), "blocks": math::sum(*[_type in ["blogPost", "project"]]{"n": count(body[_type == "video"])}.n), "unresolved": math::sum(*[_type in ["blogPost", "project"]]{"n": count(body[_type == "video" && !defined(asset.asset->_id)])}.n)}'
+    query='{"blocks": math::sum(*[_type in ["blogPost", "project", "flexPage", "testimonial", "homePage", "person", "service"]]{"n": count((coalesce(body, []) + coalesce(bio, []) + coalesce(description, []))[_type == "video"])}.n), "notReady": math::sum(*[_type in ["blogPost", "project", "flexPage", "testimonial", "homePage", "person", "service"]]{"n": count((coalesce(body, []) + coalesce(bio, []) + coalesce(description, []))[_type == "video" && !(file.asset->mimeType == "video/mp4" && conversion.status == "ready" && file.asset._ref == conversion.outputAssetId && defined(original.asset->_id))])}.n), "originals": *[_type == "sanity.fileAsset" && source.name == "wagtail" && source.id match "media-*"].source.id}'
     url="$DECOM_SANITY_QUERY_URL?query=$(python3 -I -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$query")&perspective=published"
     printf '    + [read-only] %s\n' "$(decom_quote curl -fsS "$url")" >&2
     if ! body="$(curl -fsS --max-time 30 "$url")"; then
-      DECOM_MUX_REASON="could not query the production dataset"
+      DECOM_VIDEOS_REASON="could not query the production dataset"
     elif ! verdict="$(printf '%s' "$body" | python3 -I -c '
 import json, sys
-expected = int(sys.argv[1])
+expected = ["media-%s" % i for i in sys.argv[1].split()]
 r = json.load(sys.stdin)["result"]
-ready, blocks, unresolved = r["ready"], r["blocks"] or 0, r["unresolved"] or 0
-if ready != expected or unresolved:
-    print("%d of %d Wagtail videos have a ready mux.videoAsset in production, and %d of %d published video blocks do not resolve. Finish the videos first (migration/wagtail-to-sanity: --steps mux,videos)" % (ready, expected, unresolved, blocks))
+blocks, not_ready = r["blocks"] or 0, r["notReady"] or 0
+missing = [m for m in expected if m not in set(r["originals"] or [])]
+problems = []
+if not_ready:
+    problems.append("%d of %d published video blocks do not play a converted MP4 with its original kept" % (not_ready, blocks))
+if missing:
+    problems.append("%d of %d Wagtail video originals are not in production (%s)" % (len(missing), len(expected), ", ".join(missing)))
+if problems:
+    print("; ".join(problems) + ". Finish the videos first (migration/wagtail-to-sanity: npm run migrate -- --dataset production --confirm-production)")
 else:
-    print("ok %d videos, %d published video blocks" % (ready, blocks))
-' "$expected")"; then
-      DECOM_MUX_REASON="could not parse the production query result"
+    print("ok %d published video blocks play converted MP4s; the %d Wagtail originals are in production" % (blocks, len(expected)))
+' "$media_ids")"; then
+      DECOM_VIDEOS_REASON="could not parse the production query result"
     else
       case "$verdict" in
         ok\ *) decom_say "    $verdict" ;;
-        *) DECOM_MUX_REASON="$verdict" ;;
+        *) DECOM_VIDEOS_REASON="$verdict" ;;
       esac
     fi
   fi
-  if [ -n "$DECOM_MUX_REASON" ]; then
-    decom_say "    $DECOM_MUX_REASON"
+  if [ -n "$DECOM_VIDEOS_REASON" ]; then
+    decom_say "    $DECOM_VIDEOS_REASON"
     return 1
   fi
   return 0

@@ -11,8 +11,9 @@
 # Nothing is deleted from the bucket. Re-running is safe: bindings and keys that are already
 # gone are skipped. Removing allUsers makes every old image URL return 403, so this refuses
 # to run until https://cjoshmartin.com no longer references images-for-cms. It also refuses
-# until every Wagtail video is on Mux, because the migration creates Mux assets from the
-# bucket's public URLs (videos Mux's free plan refused can only be migrated while it is public).
+# until every video is stored in Sanity: every published video block plays a converted MP4 and
+# keeps its original, and production holds the original of every Wagtail video, so no video still
+# depends on the bucket's public URLs.
 #
 # --authenticated-users-only removes just the allAuthenticatedUsers bindings (which today
 # include roles/storage.admin, i.e. any Google account can administer the bucket). It keeps
@@ -131,7 +132,7 @@ if [ "$AUTH_USERS_ONLY" -eq 1 ]; then
   decom_skip "cutover check (not needed: allUsers read access is kept)"
 else
   decom_check_online "$DECOM_SITE_URL is served from Sanity and no longer references images-for-cms or the backend" decom_site_cut_over
-  decom_check_online "every Wagtail video is on Mux (production has a ready mux.videoAsset for each, and every video block resolves)" decom_mux_videos_complete
+  decom_check_online "every video is stored in Sanity (published video blocks play converted MP4s with their originals kept, and every Wagtail original is in production)" decom_videos_complete
 fi
 
 POLICY=""
