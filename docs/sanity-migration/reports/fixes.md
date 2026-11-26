@@ -94,7 +94,7 @@ Staging and production are identical again (`npm run compare`: 221 of 221 shared
 | Testimonial art in a browser (Chrome for Testing, 1440 px) | new vs old site, same testimonial: 1 wrapper span, 525 colored spans, 14 `br`, 540 text nodes, identical color and character sequence, identical rendered width (194 px). Hover sets the art to opacity 0 |
 | ASCII art round trip | all 9 production values parse and re-serialize byte for byte |
 | Resume in a browser | `/resume` and `/resume/pdf`: `charterregular` and `charteritalic` load, the body font is `charterregular`, and no response is 400 or above. `/fonts/charter/*` is 200 with `text/css` and `font/woff` |
-| Crop dimensions against the live CDN | 6 of 6 crop and width combinations on the production author photo: the predicted size equals the PNG the CDN returns |
+| Crop dimensions against the live CDN | 6 of 6 crop and width combinations on the production author photo: the predicted size equals the PNG the CDN returns. (This holds for those 6 cases only. Round 2 found that the CDN's `fit=max` height can differ, and changed the URLs to ask for the exact size; see R2-4.) |
 | Migration `npm test` / `npm run typecheck` | 49/49 / clean |
 | Migration validation, staging and production | 9 of 12 checks pass on each. The 39 failures (counts 1, references 19, mux 19) are exactly the 19 videos Mux refused, as before. textParity and fieldParity pass (938 fields, up from 912, because of the new live-API tag checks); convergence and studioValidation pass |
 | Public read of production | 3 published redirects; `redirect-1` and `drafts.redirect-1` invisible without a token; `project-43` technologies are cricut, Fusion 360 |
@@ -125,3 +125,105 @@ same-content rule (new `_rev`s, unchanged content, accepted).
    `plausible.technicalchicago.com` again. Nothing in this repo changes.
 3. **Local test backups (R1-18).** Josh can delete them after review (the command is in
    wp8-review.md, note 10).
+
+## Round 2 (2026-11-26)
+
+Branch `sanity-migration`. Commits, oldest first:
+
+| Commit | What |
+|---|---|
+| `2b56f55` | Request the exact image size the `<img>` attributes state (R2-4) |
+| `8911387` | Guard asset metadata, and check for Studio edits before any write (R2-3) |
+| the commit that adds this section | the round-2 sections of this file and of `wp8-review.md`, and a pointer from round 1's CDN claim to R2-4 |
+
+R2-1 (videos) and R2-2 (Plausible) are still blocked outside the repo, and no code changed for
+them. See [wp8-review.md](wp8-review.md), round 2, notes 1 and 2.
+
+### What changed
+
+**Frontend**
+- `sanity/lib/imageDimensions.ts`: `sizedTo(builder, size)` returns
+  `builder.width(size.width).height(size.height).fit('crop')`. `fitWidth` never returns a height
+  of 0, and its comment no longer says it matches `fit=max`.
+- `sanity/lib/image.ts`: `imageUrl(image, maxWidth)` is now
+  `sizedTo(urlFor(image), scaledDimensions(image, maxWidth)).auto('format').url()`. The signatures
+  of `imageUrl`, `scaledDimensions` and `getImageDimensions` are unchanged. Every caller of
+  `imageUrl` now gets a URL with `w`, `h` and `fit=crop`. The CDN delivers exactly
+  `scaledDimensions(image, maxWidth)`, never wider than `maxWidth` and never scaled up.
+- `test/imageDimensions.test.ts`: `sizedTo` is checked with 4 asset sizes, 5 crops, 2 hotspots and
+  8 widths. For each case it asserts:
+  - the URL asks for exactly the `fitWidth` size
+  - the rect stays inside the editor's crop
+  - the rect has the requested aspect ratio to within one source pixel
+  - the rect loses only the height rounding
+  - a crop no wider than the maximum is delivered as is
+
+  `fitWidth` also has a test for the height clamp.
+
+**Migration (`migration/wagtail-to-sanity`)**
+- `src/steps/assets.ts`:
+  - `uploadAssets(paths, dataset, secrets, {discardStudioEdits})` now takes options. Before any
+    upload or patch, it compares the existing assets with `state/assets-<dataset>.json`, the map
+    its last run wrote, and refuses on edits unless `discardStudioEdits` is set.
+  - New exports: `findAssetMetadataEdits(planned, existingByKey, previous)` (pure),
+    `differingMetadata(a, b)`, `readAssetMap(paths, dataset)`, `assetMapPath(paths, dataset)` and
+    the `ExistingAsset` type.
+- `src/cli.ts`:
+  - when the steps include `import`, `checkForStudioEdits` runs once before the first step
+  - `--discard-studio-edits` is passed to the `assets` step too
+- `test/assets.test.ts` (new, 6 tests). The README describes the new check.
+
+### Data written to Sanity and Mux
+
+| When (UTC, 2026-11-26) | Where | What |
+|---|---|---|
+| 00:11 | Mux | `--steps mux --allow-pending-videos`: 10 reused, 0 created, media 11–29 refused again (free plan). `state/mux-map.json` unchanged apart from `updatedAt` |
+| 00:12 | staging | Reproduction: the title of `image-02b16b06…` set to a test value. The `assets` step of `daf942a` reset it |
+| 00:12–00:13 | staging | Guard test (below): the title edited again and `drafts.project-43` opened, then the draft deleted and the title restored with `--steps assets --discard-studio-edits` |
+| 00:13 | staging | Default full run (no `--steps`). The `assets` step wrote nothing, and the import re-imported the same NDJSON (sha256 `e18150f9…`, the same as round 1). New revisions, same content hashes |
+| 00:14 | production | `--steps assets,validate`: 0 uploaded, 0 metadata updates, so nothing was written; validation is read-only |
+
+Staging and production are identical again (`npm run compare`: 221 of 221 shared ids identical,
+NDJSON byte-identical). In both datasets, all 115 assets equal `state/assets-<dataset>.json`.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| R2-3 reproduction on HEAD `daf942a` (staging) | After a title edit, `--steps assets` printed "updated metadata of image-02b16b06… (title)" and the title was back to `IMG_3367`. The edit was lost without a warning |
+| R2-3 guard, default full run with a document edit and an asset edit (staging) | The new early check refused (`created since the last import: drafts.project-43`) before `extract`. The asset kept its edited title and `_rev` |
+| R2-3 guard, default full run with only the asset edit | `extract` ran, then `assets` refused before writing: `image-02b16b06… (title): changed since the last run`. The import never ran: the import record and the asset map are byte-identical to before |
+| R2-3 override | `--steps assets --discard-studio-edits` printed the warning, restored `IMG_3367`, and the asset map is byte-identical to before the test |
+| R2-3 default full run without edits (staging) | Early check and import check both pass. The `assets` step reports 0 uploaded and 0 metadata updates. Import and validation ran (9 of 12; see below) |
+| Migration `npm test` / `npm run typecheck` | 55/55 (6 new) / clean |
+| R2-4: CDN before the fix (`w` + `fit=max`) | The 53 resized renditions the site serves: 3 heights off by 1 px. 121 random crop and width cases: 34 off, up to 10 px in height, and one returned 96 wide for `w=97` |
+| R2-4: CDN after the fix (`w` + `h` + `fit=crop` via `sizedTo`) | 174 of 174 renditions are exactly the requested size |
+| R2-4: animated GIFs | 6 GIF renditions × 3 `Accept` headers (AVIF, WebP, `*/*`): animated with both URL forms. The bytes are identical, both for renditions that are not resized and for one that is (800 → 400) |
+| Frontend `npm run lint` / `npx tsc --noEmit` / `npm test` | 0 errors (the same 2 pre-existing warnings) / clean / 13/13 |
+| `next build` of HEAD `8911387` (`git archive` into `~/cjoshmartin-migration/tmp/fixes-r2-build`, production dataset) | Passes: 18 app routes plus the proxy |
+| Images on that build | 29 routes (every published page plus the listings), all 200. 89 Sanity `<img>` (69 distinct URLs), all with `w`, `h` and `fit=crop`, and 0 delivered sizes differ from the request. All 62 whose attributes come from `scaledDimensions` match the delivered pixels exactly. The other 27 use fixed layout sizes that are the same on `main` (portfolio previews 150x150, blog cards 480x320, author photo `width=400`). This round did not change them |
+| Validation, staging and production | 9 of 12 checks pass on each. The 39 failures (counts 1, references 19, mux 19) are exactly the 19 videos Mux refuses (R2-1). textParity, fieldParity (938 fields), convergence and studioValidation pass |
+| Mux recheck (R2-1) | 10 assets, and creating an eleventh is still refused |
+| Plausible recheck (R2-2) | Still TLS alert 80 with no certificate, and HTTP 503 |
+| WP7 parity crawl, rerun on that build against the live old site (47 routes, 1440 and 390 px) | **0 unexpected**, the same as round 1: 3 routes are the same, 44 have expected differences only. No new classifier rule was needed |
+
+All logs and evidence are in `~/cjoshmartin-migration/reports/fixes-r2/` (outside git):
+- `guard-test.log` (the R2-3 sequence)
+- `route-images.json` (every `<img>` on the build)
+- `exact-out-final.json`, `out1.json` and `out-site.json` (CDN sizes after and before the fix)
+- `gif-animation.log`
+- the Mux and Plausible rechecks
+
+The parity report is in `~/cjoshmartin-migration/reports/parity-fixes-r2/`. Validation reports are in
+`~/cjoshmartin-migration/reports/validation-{staging,production}.{json,md}`.
+
+### Still open after round 2
+
+1. **19 videos (R2-1, R1-6).** This is blocked until the Mux environment leaves the free plan.
+   Then run `cd migration/wagtail-to-sanity && npm run migrate -- --dataset staging --steps mux,videos`,
+   then the same with `--dataset production --confirm-production`. Josh must resolve this or
+   explicitly accept it before merge.
+2. **Plausible (R2-2, R1-4).** The server at `49.13.164.251` has to serve a certificate for
+   `plausible.technicalchicago.com` again. Nothing in this repo changes.
+3. **Local test backups (R1-18).** These are unchanged. Josh can delete them after review (the
+   command is in wp8-review.md, round 1, note 10).

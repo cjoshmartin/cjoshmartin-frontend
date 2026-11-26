@@ -34,7 +34,7 @@ One more defect was found while fixing these (R1-19 below) and was fixed too.
 | R1-10 | GCS lockdown is not gated on pending Mux videos | medium | WP8 | **Fixed.** `04-gcs-lockdown.sh` refuses to run until production has a ready `mux-video-<id>` for each Wagtail media item and every published video block resolves. Today it refuses: 10 of 29. The README lists it as a prerequisite. | `549e2e8` |
 | R1-11 | (duplicate of R1-1) | low | WP8 | See R1-1. | |
 | R1-12 | (duplicate of R1-2) | low | WP8 | See R1-2. | |
-| R1-13 | Image width/height ignore the Studio crop | low | WP8 | **Fixed.** Dimensions are computed from the crop rect, rounded exactly like `@sanity/image-url`'s `rect` parameter. A check against the live CDN matched for 6 crop and width combinations. | `1fc4f4a` |
+| R1-13 | Image width/height ignore the Studio crop | low | WP8 | **Fixed.** Dimensions are computed from the crop rect, rounded exactly like `@sanity/image-url`'s `rect` parameter. A check against the live CDN matched for 6 crop and width combinations. (Round 2 found that the scaled height could still be a pixel off; see R2-4.) | `1fc4f4a` |
 | R1-14 | `restore.mjs --latest` can restore another dataset's snapshot without warning | low | WP8 | **Fixed.** The source dataset is `--from-dataset`, which defaults to the target `--dataset`. `--latest` only considers that dataset, and `--snapshot` is refused when its marker names another dataset. | `500a61f` |
 | R1-15 | Testimonial `asciiArt` rendered as raw HTML | low | WP8 | **Fixed.** See note 7. | `a686e36` |
 | R1-16 | Whether the Viewer backup token can read `secrets.mux` is untested | medium | WP5b | **Tested; behaviour documented.** See note 8. | `500a61f` (README) |
@@ -125,3 +125,70 @@ One more defect was found while fixing these (R1-19 below) and was fixed too.
     public `mux.videoAsset.data`, and reruns would no longer converge. The `mux` step now stores
     the asset's steady state (`master_access: "none"`, no `master`). The rewritten map is
     identical to the original one, including key order.
+
+## Round 2 (2026-11-26)
+
+Recheck 1 (2026-11-25, 23:48 UTC) raised 4 findings. Two of them are the round-1 blockers outside
+the repo, which are still open. The other two are new, and both are fixed.
+
+| Status | Count | Findings |
+|---|---|---|
+| Fixed in round 2 | 2 | R2-3, R2-4 |
+| Still blocked outside this repo | 2 | R2-1 (R1-6, Mux plan), R2-2 (R1-4, Plausible server) |
+
+### Findings
+
+| # | Finding | Severity | Source | Resolution | Commit |
+|---|---|---|---|---|---|
+| R2-1 | 19 of 29 videos still missing in production (R1-6 unresolved, external blocker) | high | recheck 1 | **Still blocked: Mux free plan.** See note 1. | none |
+| R2-2 | Plausible analytics still fails TLS (R1-4 unresolved, outside the repo) | low | recheck 1 | **Still blocked: Plausible server.** See note 2. | none |
+| R2-3 | The import guard does not cover the `assets` step of a default full rerun | low | recheck 1 | **Fixed.** See note 3. | `8911387` |
+| R2-4 | Scaled image height can be 1px off from the CDN after `fit=max` | low | recheck 1 | **Fixed.** See note 4. | `2b56f55` |
+
+### Notes
+
+1. **Videos (R2-1).** Rechecked on 2026-11-26 at 00:11 UTC. `GET /video/v1/assets` lists
+   exactly 10 assets (passthrough `wagtail-media-1` to `-10`, all `ready`). A rerun of the `mux`
+   step was refused again with `400 "Free plan is limited to 10 assets"`. It created nothing, and
+   the Mux map is unchanged apart from its timestamp. Validation of both datasets is still 9 of 12.
+   The 39 failures (counts 1, references 19, mux 19) are all these 19 videos. Only Josh can unblock
+   it, because the upgrade needs a billing method. The follow-up is unchanged:
+   `--steps mux,videos` on staging, then on production with `--confirm-production`.
+   **Before merge, this must be resolved, or Josh must accept it explicitly.**
+2. **Plausible (R2-2).** Rechecked on 2026-11-26 at 00:11 UTC. `plausible.technicalchicago.com`
+   (49.13.164.251) still ends the TLS handshake with alert 80 and presents no certificate, and
+   plain HTTP still returns 503. `main` has the same `PlausibleProvider` configuration, so this is
+   not a regression of this branch. The fix belongs on that server, which is outside this work's
+   scope. Nothing in this repo changes.
+3. **Asset metadata (R2-3).** Confirmed by reproduction. On staging, the title of
+   `image-02b16b06…` was set to a test value. Then the `assets` step of `daf942a` (before the fix)
+   reset it without a warning ("1 metadata updates"). The fix has two parts:
+   - The `assets` step now has its own record: `state/assets-<dataset>.json`, which it already
+     wrote and which holds the metadata each asset was left with. Before it uploads or patches
+     anything, the step compares every existing asset with that record. It refuses and lists the
+     asset when the `title`, `description`, `originalFilename` or `source` differs from what it
+     would set and also from what its last run left. Without a record, metadata that names this
+     migration as its source counts as changed. Assets that others uploaded are adopted, as on the
+     first run (WP2's testimonial photos).
+   - When a run includes `import`, the import's Studio-edit check now also runs before the first
+     step. So a default full rerun that the import would refuse stops before `assets` writes or
+     `mux` creates anything. The import checks again, because the dataset can change during the
+     run.
+
+   `--discard-studio-edits` overrides both. Before relying on the records, a check confirmed that
+   all 115 assets in both datasets still equal them.
+4. **Image heights (R2-4).** Confirmed, and wider than reported. The CDN's `fit=max` rounding is
+   not documented, and no single formula describes it: some heights round down and some round
+   up. For the 53 resized renditions the site serves (production has no crops), the CDN height
+   differed from the prediction on 3. For example, a 2400x1600 image at 1600 came back 1066 high,
+   not 1067. On 121 random crop and width cases it differed on 34. The difference reached 10 px on
+   very narrow crops, and once the CDN even returned an image 96 wide for `w=97`. So the size
+   could not be predicted reliably. Now `imageUrl` asks for it: `w` and `h` from `fitWidth`, with
+   `fit=crop`, which the image API documents as filling the requested size exactly. Results:
+   - 174 of 174 renditions (the same 53 + 121 cases) now come back at exactly the requested size
+   - animated GIFs stay animated: the 6 GIF renditions checked are byte-identical with both URL forms
+   - on a build of this branch, all 62 Sanity `<img>` whose attributes come from
+     `scaledDimensions` match the delivered pixels exactly
+
+   The requested aspect ratio differs from the crop's only by the rounding of the height to whole
+   pixels. `@sanity/image-url` trims the crop rect by that much, so nothing is distorted.
