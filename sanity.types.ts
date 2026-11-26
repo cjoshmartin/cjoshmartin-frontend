@@ -15,32 +15,13 @@
 export declare const internalGroqTypeReferenceTo: unique symbol;
 
 // Source: schema.json
-export type Summarize = {
-  jobId?: string;
-  completedAt?: number;
-  title?: string;
-  description?: string;
-  tags?: Array<string>;
-};
-
-export type AnalyzeStructure = {
-  jobId?: string;
-  completedAt?: number;
-  title?: string;
-  summary?: string;
-  tags?: Array<string>;
-};
-
-export type Moderate = {
-  jobId?: string;
-  completedAt?: number;
-  exceedsThreshold?: boolean;
-  maxScores?: MaxScores;
-};
-
-export type MaxScores = {
-  sexual?: number;
-  violence?: number;
+export type Conversion = {
+  status?: "pending" | "processing" | "ready" | "failed";
+  message?: string;
+  sourceAssetId?: string;
+  outputAssetId?: string;
+  settingsVersion?: string;
+  updatedAt?: string;
 };
 
 export type SanityFileAssetReference = {
@@ -78,7 +59,17 @@ export type Divider = {
 
 export type Video = {
   _type: "video";
-  asset?: MuxVideo;
+  file?: {
+    asset?: SanityFileAssetReference;
+    media?: unknown;
+    _type: "file";
+  };
+  original?: {
+    asset?: SanityFileAssetReference;
+    media?: unknown;
+    _type: "file";
+  };
+  conversion?: Conversion;
 };
 
 export type StlModel = {
@@ -476,18 +467,6 @@ export type FlexPage = {
   legacy?: Legacy;
 };
 
-export type MuxVideoAssetReference = {
-  _ref: string;
-  _type: "reference";
-  _weak?: boolean;
-  [internalGroqTypeReferenceTo]?: "mux.videoAsset";
-};
-
-export type MuxVideo = {
-  _type: "mux.video";
-  asset?: MuxVideoAssetReference;
-};
-
 export type SanityReleaseMetadata = {
   _type: "sanity.releaseMetadata";
   title?: string;
@@ -524,160 +503,6 @@ export type SystemRelease = {
     _key: string;
   }>;
   userId?: string;
-};
-
-export type MuxVideoAsset = {
-  _id: string;
-  _type: "mux.videoAsset";
-  _createdAt: string;
-  _updatedAt: string;
-  _rev: string;
-  status?: string;
-  assetId?: string;
-  playbackId?: string;
-  filename?: string;
-  thumbTime?: number;
-  data?: MuxAssetData;
-  robotsJobs?: Array<
-    {
-      _key: string;
-    } & MuxRobotsJob
-  >;
-  robotsOutputs?: MuxRobotsOutputs;
-  robotsDirectiveRuns?: Array<
-    {
-      _key: string;
-    } & MuxRobotsDirectiveRun
-  >;
-  robotsPendingCreates?: Array<
-    {
-      _key: string;
-    } & MuxRobotsPendingCreate
-  >;
-};
-
-export type MuxRobotsOutputs = {
-  _type: "mux.robotsOutputs";
-  summarize?: Summarize;
-  analyzeStructure?: AnalyzeStructure;
-  moderate?: Moderate;
-};
-
-export type MuxAssetData = {
-  _type: "mux.assetData";
-  resolution_tier?: string;
-  upload_id?: string;
-  created_at?: string;
-  id?: string;
-  status?: string;
-  max_stored_resolution?: string;
-  passthrough?: string;
-  encoding_tier?: string;
-  video_quality?: string;
-  master_access?: string;
-  aspect_ratio?: string;
-  duration?: number;
-  max_stored_frame_rate?: number;
-  mp4_support?: string;
-  max_resolution_tier?: string;
-  thumbnail_time?: number;
-  tracks?: Array<
-    {
-      _key: string;
-    } & MuxTrack
-  >;
-  playback_ids?: Array<
-    {
-      _key: string;
-    } & MuxPlaybackId
-  >;
-  static_renditions?: MuxStaticRenditions;
-  master?: MuxMasterFile;
-};
-
-export type MuxRobotsPendingCreate = {
-  _type: "mux.robotsPendingCreate";
-  requestId?: string;
-  kind?: string;
-  workflow?: string;
-  directiveId?: string;
-  requestedAt?: number;
-  apiVersion?: string;
-};
-
-export type MuxRobotsDirectiveRun = {
-  _type: "mux.robotsDirectiveRun";
-  runId?: string;
-  directiveId?: string;
-  status?: string;
-  startedAt?: number;
-  completedAt?: number;
-  jobIds?: Array<string>;
-};
-
-export type MuxRobotsJob = {
-  _type: "mux.robotsJob";
-  id?: string;
-  workflow?: string;
-  status?: string;
-  created_at?: number;
-  updated_at?: number;
-  units_consumed?: number;
-  error?: string;
-  thumbnailApplied?: boolean;
-};
-
-export type MuxMasterFile = {
-  _type: "mux.masterFile";
-  status?: string;
-  url?: string;
-};
-
-export type MuxStaticRenditions = {
-  _type: "mux.staticRenditions";
-  status?: string;
-  files?: Array<
-    {
-      _key: string;
-    } & MuxStaticRenditionFile
-  >;
-};
-
-export type MuxStaticRenditionFile = {
-  _type: "mux.staticRenditionFile";
-  name?: string;
-  ext?: string;
-  height?: number;
-  width?: number;
-  bitrate?: number;
-  filesize?: string;
-  type?: string;
-  status?: string;
-  resolution_tier?: string;
-  resolution?: string;
-  id?: string;
-  passthrough?: string;
-};
-
-export type MuxPlaybackId = {
-  _type: "mux.playbackId";
-  id?: string;
-  policy?: string;
-};
-
-export type MuxTrack = {
-  _type: "mux.track";
-  id?: string;
-  type?: string;
-  max_width?: number;
-  max_frame_rate?: number;
-  duration?: number;
-  max_height?: number;
-  language_code?: string;
-  name?: string;
-  status?: string;
-  text_source?: string;
-  text_type?: string;
 };
 
 export type Code = {
@@ -786,10 +611,7 @@ export type Geopoint = {
 };
 
 export type AllSanitySchemaTypes =
-  | Summarize
-  | AnalyzeStructure
-  | Moderate
-  | MaxScores
+  | Conversion
   | SanityFileAssetReference
   | FileLinkFile
   | Legacy
@@ -824,21 +646,8 @@ export type AllSanitySchemaTypes =
   | TechnologyReference
   | Project
   | FlexPage
-  | MuxVideoAssetReference
-  | MuxVideo
   | SanityReleaseMetadata
   | SystemRelease
-  | MuxVideoAsset
-  | MuxRobotsOutputs
-  | MuxAssetData
-  | MuxRobotsPendingCreate
-  | MuxRobotsDirectiveRun
-  | MuxRobotsJob
-  | MuxMasterFile
-  | MuxStaticRenditions
-  | MuxStaticRenditionFile
-  | MuxPlaybackId
-  | MuxTrack
   | Code
   | SanityImagePaletteSwatch
   | SanityImagePalette
@@ -851,7 +660,7 @@ export type AllSanitySchemaTypes =
 
 // Source: ../sanity/lib/queries.ts
 // Variable: HOME_PAGE_QUERY
-// Query: *[_id == "homePage"][0]{    _id,    _type,    title,    "bio": bio[]{  ...,  _type == "block" => {    markDefs[]{      ...,      _type == "internalLink" => {        "target": reference->{_type, "slug": slug.current}      },      _type == "fileLink" => {        "url": file.asset->url      }    }  },  _type == "stlModel" => {    "fileUrl": file.asset->url,    "fileName": file.asset->originalFilename  },  _type == "video" => {    "playbackId": asset.asset->playbackId,    "status": asset.asset->status  }},    author->{      firstName,      lastName,      jobTitle,      location,      email,      github,      image    },    "testimonials": testimonials[]->{  _id,  firstName,  lastName,  jobTitle,  relationship,  link,  body,  asciiArt,  image},    "services": services[@->audience == $audience]->{      _id,      title,      "description": description[]{  ...,  _type == "block" => {    markDefs[]{      ...,      _type == "internalLink" => {        "target": reference->{_type, "slug": slug.current}      },      _type == "fileLink" => {        "url": file.asset->url      }    }  },  _type == "stlModel" => {    "fileUrl": file.asset->url,    "fileName": file.asset->originalFilename  },  _type == "video" => {    "playbackId": asset.asset->playbackId,    "status": asset.asset->status  }},      link,      linkText,      image    }  }
+// Query: *[_id == "homePage"][0]{    _id,    _type,    title,    "bio": bio[]{  _type != "video" => {...},  _type == "block" => {    markDefs[]{      ...,      _type == "internalLink" => {        "target": reference->{_type, "slug": slug.current}      },      _type == "fileLink" => {        "url": file.asset->url      }    }  },  _type == "stlModel" => {    "fileUrl": file.asset->url,    "fileName": file.asset->originalFilename  },  _type == "video" => {    _type,    _key,    "url": file.asset->url,    "mimeType": file.asset->mimeType,    "filename": file.asset->originalFilename  }},    author->{      firstName,      lastName,      jobTitle,      location,      email,      github,      image    },    "testimonials": testimonials[]->{  _id,  firstName,  lastName,  jobTitle,  relationship,  link,  body,  asciiArt,  image},    "services": services[@->audience == $audience]->{      _id,      title,      "description": description[]{  _type != "video" => {...},  _type == "block" => {    markDefs[]{      ...,      _type == "internalLink" => {        "target": reference->{_type, "slug": slug.current}      },      _type == "fileLink" => {        "url": file.asset->url      }    }  },  _type == "stlModel" => {    "fileUrl": file.asset->url,    "fileName": file.asset->originalFilename  },  _type == "video" => {    _type,    _key,    "url": file.asset->url,    "mimeType": file.asset->mimeType,    "filename": file.asset->originalFilename  }},      link,      linkText,      image    }  }
 export type HOME_PAGE_QUERY_RESULT =
   | {
       _id: "homePage";
@@ -983,11 +792,11 @@ export type HOME_PAGE_QUERY_RESULT =
             fileName: string | null;
           }
         | {
-            _key: string;
             _type: "video";
-            asset?: MuxVideo;
-            playbackId: string | null;
-            status: string | null;
+            _key: string;
+            url: string | null;
+            mimeType: string | null;
+            filename: string | null;
           }
         | {
             _key: string;
@@ -1132,11 +941,11 @@ export type HOME_PAGE_QUERY_RESULT =
               fileName: string | null;
             }
           | {
-              _key: string;
               _type: "video";
-              asset?: MuxVideo;
-              playbackId: string | null;
-              status: string | null;
+              _key: string;
+              url: string | null;
+              mimeType: string | null;
+              filename: string | null;
             }
           | {
               _key: string;
@@ -1160,15 +969,6 @@ export type HOME_PAGE_QUERY_RESULT =
       _id: "homePage";
       _type: "medium";
       title: string | null;
-      bio: null;
-      author: null;
-      testimonials: null;
-      services: null;
-    }
-  | {
-      _id: "homePage";
-      _type: "mux.videoAsset";
-      title: null;
       bio: null;
       author: null;
       testimonials: null;
@@ -1271,11 +1071,11 @@ export type HOME_PAGE_QUERY_RESULT =
             fileName: string | null;
           }
         | {
-            _key: string;
             _type: "video";
-            asset?: MuxVideo;
-            playbackId: string | null;
-            status: string | null;
+            _key: string;
+            url: string | null;
+            mimeType: string | null;
+            filename: string | null;
           }
         | {
             _key: string;
@@ -1470,7 +1270,7 @@ export type PROJECTS_LIST_QUERY_RESULT = Array<{
 
 // Source: ../sanity/lib/queries.ts
 // Variable: PROJECT_QUERY
-// Query: *[_type == "project" && slug.current == $slug][0]{    _id,    _type,    title,    "slug": slug.current,    isUnlisted,    client,    "legacyId": legacy.wagtailId,    heroMedia,    contentImage,    "mediums": mediums[]->title,    "technologies": technologies[]->title,    "testimonials": testimonials[]->{  _id,  firstName,  lastName,  jobTitle,  relationship,  link,  body,  asciiArt,  image},    "body": body[]{  ...,  _type == "block" => {    markDefs[]{      ...,      _type == "internalLink" => {        "target": reference->{_type, "slug": slug.current}      },      _type == "fileLink" => {        "url": file.asset->url      }    }  },  _type == "stlModel" => {    "fileUrl": file.asset->url,    "fileName": file.asset->originalFilename  },  _type == "video" => {    "playbackId": asset.asset->playbackId,    "status": asset.asset->status  }}  }
+// Query: *[_type == "project" && slug.current == $slug][0]{    _id,    _type,    title,    "slug": slug.current,    isUnlisted,    client,    "legacyId": legacy.wagtailId,    heroMedia,    contentImage,    "mediums": mediums[]->title,    "technologies": technologies[]->title,    "testimonials": testimonials[]->{  _id,  firstName,  lastName,  jobTitle,  relationship,  link,  body,  asciiArt,  image},    "body": body[]{  _type != "video" => {...},  _type == "block" => {    markDefs[]{      ...,      _type == "internalLink" => {        "target": reference->{_type, "slug": slug.current}      },      _type == "fileLink" => {        "url": file.asset->url      }    }  },  _type == "stlModel" => {    "fileUrl": file.asset->url,    "fileName": file.asset->originalFilename  },  _type == "video" => {    _type,    _key,    "url": file.asset->url,    "mimeType": file.asset->mimeType,    "filename": file.asset->originalFilename  }}  }
 export type PROJECT_QUERY_RESULT = {
   _id: string;
   _type: "project";
@@ -1601,11 +1401,11 @@ export type PROJECT_QUERY_RESULT = {
         fileName: string | null;
       }
     | {
-        _key: string;
         _type: "video";
-        asset?: MuxVideo;
-        playbackId: string | null;
-        status: string | null;
+        _key: string;
+        url: string | null;
+        mimeType: string | null;
+        filename: string | null;
       }
     | {
         _key: string;
@@ -1665,7 +1465,7 @@ export type RECOMMENDED_POSTS_QUERY_RESULT = Array<{
 
 // Source: ../sanity/lib/queries.ts
 // Variable: BLOG_POST_QUERY
-// Query: *[_type == "blogPost" && slug.current == $slug][0]{    _id,    _type,    title,    "slug": slug.current,    date,    isUnlisted,    "legacyId": legacy.wagtailId,    heroMedia,    contentImage,    author->{      firstName,      lastName,      jobTitle,      location,      email,      "bio": bio[]{  ...,  _type == "block" => {    markDefs[]{      ...,      _type == "internalLink" => {        "target": reference->{_type, "slug": slug.current}      },      _type == "fileLink" => {        "url": file.asset->url      }    }  },  _type == "stlModel" => {    "fileUrl": file.asset->url,    "fileName": file.asset->originalFilename  },  _type == "video" => {    "playbackId": asset.asset->playbackId,    "status": asset.asset->status  }},      image    },    "body": body[]{  ...,  _type == "block" => {    markDefs[]{      ...,      _type == "internalLink" => {        "target": reference->{_type, "slug": slug.current}      },      _type == "fileLink" => {        "url": file.asset->url      }    }  },  _type == "stlModel" => {    "fileUrl": file.asset->url,    "fileName": file.asset->originalFilename  },  _type == "video" => {    "playbackId": asset.asset->playbackId,    "status": asset.asset->status  }}  }
+// Query: *[_type == "blogPost" && slug.current == $slug][0]{    _id,    _type,    title,    "slug": slug.current,    date,    isUnlisted,    "legacyId": legacy.wagtailId,    heroMedia,    contentImage,    author->{      firstName,      lastName,      jobTitle,      location,      email,      "bio": bio[]{  _type != "video" => {...},  _type == "block" => {    markDefs[]{      ...,      _type == "internalLink" => {        "target": reference->{_type, "slug": slug.current}      },      _type == "fileLink" => {        "url": file.asset->url      }    }  },  _type == "stlModel" => {    "fileUrl": file.asset->url,    "fileName": file.asset->originalFilename  },  _type == "video" => {    _type,    _key,    "url": file.asset->url,    "mimeType": file.asset->mimeType,    "filename": file.asset->originalFilename  }},      image    },    "body": body[]{  _type != "video" => {...},  _type == "block" => {    markDefs[]{      ...,      _type == "internalLink" => {        "target": reference->{_type, "slug": slug.current}      },      _type == "fileLink" => {        "url": file.asset->url      }    }  },  _type == "stlModel" => {    "fileUrl": file.asset->url,    "fileName": file.asset->originalFilename  },  _type == "video" => {    _type,    _key,    "url": file.asset->url,    "mimeType": file.asset->mimeType,    "filename": file.asset->originalFilename  }}  }
 export type BLOG_POST_QUERY_RESULT = {
   _id: string;
   _type: "blogPost";
@@ -1782,11 +1582,11 @@ export type BLOG_POST_QUERY_RESULT = {
           fileName: string | null;
         }
       | {
-          _key: string;
           _type: "video";
-          asset?: MuxVideo;
-          playbackId: string | null;
-          status: string | null;
+          _key: string;
+          url: string | null;
+          mimeType: string | null;
+          filename: string | null;
         }
       | {
           _key: string;
@@ -1896,11 +1696,11 @@ export type BLOG_POST_QUERY_RESULT = {
         fileName: string | null;
       }
     | {
-        _key: string;
         _type: "video";
-        asset?: MuxVideo;
-        playbackId: string | null;
-        status: string | null;
+        _key: string;
+        url: string | null;
+        mimeType: string | null;
+        filename: string | null;
       }
     | {
         _key: string;
@@ -1928,7 +1728,7 @@ export type BLOG_POST_SEO_QUERY_RESULT = {
 
 // Source: ../sanity/lib/queries.ts
 // Variable: FLEX_PAGE_QUERY
-// Query: *[_type == "flexPage" && slug.current == $slug][0]{    _id,    _type,    title,    "body": body[]{  ...,  _type == "block" => {    markDefs[]{      ...,      _type == "internalLink" => {        "target": reference->{_type, "slug": slug.current}      },      _type == "fileLink" => {        "url": file.asset->url      }    }  },  _type == "stlModel" => {    "fileUrl": file.asset->url,    "fileName": file.asset->originalFilename  },  _type == "video" => {    "playbackId": asset.asset->playbackId,    "status": asset.asset->status  }}  }
+// Query: *[_type == "flexPage" && slug.current == $slug][0]{    _id,    _type,    title,    "body": body[]{  _type != "video" => {...},  _type == "block" => {    markDefs[]{      ...,      _type == "internalLink" => {        "target": reference->{_type, "slug": slug.current}      },      _type == "fileLink" => {        "url": file.asset->url      }    }  },  _type == "stlModel" => {    "fileUrl": file.asset->url,    "fileName": file.asset->originalFilename  },  _type == "video" => {    _type,    _key,    "url": file.asset->url,    "mimeType": file.asset->mimeType,    "filename": file.asset->originalFilename  }}  }
 export type FLEX_PAGE_QUERY_RESULT = {
   _id: string;
   _type: "flexPage";
@@ -2026,11 +1826,11 @@ export type FLEX_PAGE_QUERY_RESULT = {
         fileName: string | null;
       }
     | {
-        _key: string;
         _type: "video";
-        asset?: MuxVideo;
-        playbackId: string | null;
-        status: string | null;
+        _key: string;
+        url: string | null;
+        mimeType: string | null;
+        filename: string | null;
       }
     | {
         _key: string;
@@ -2115,17 +1915,17 @@ export type SLUG_EXISTS_QUERY_RESULT = boolean;
 // Query TypeMap
 declare global {
   interface SanityQueries {
-    '\n  *[_id == "homePage"][0]{\n    _id,\n    _type,\n    title,\n    "bio": bio[]{\n  ...,\n  _type == "block" => {\n    markDefs[]{\n      ...,\n      _type == "internalLink" => {\n        "target": reference->{_type, "slug": slug.current}\n      },\n      _type == "fileLink" => {\n        "url": file.asset->url\n      }\n    }\n  },\n  _type == "stlModel" => {\n    "fileUrl": file.asset->url,\n    "fileName": file.asset->originalFilename\n  },\n  _type == "video" => {\n    "playbackId": asset.asset->playbackId,\n    "status": asset.asset->status\n  }\n},\n    author->{\n      firstName,\n      lastName,\n      jobTitle,\n      location,\n      email,\n      github,\n      image\n    },\n    "testimonials": testimonials[]->{\n  _id,\n  firstName,\n  lastName,\n  jobTitle,\n  relationship,\n  link,\n  body,\n  asciiArt,\n  image\n},\n    "services": services[@->audience == $audience]->{\n      _id,\n      title,\n      "description": description[]{\n  ...,\n  _type == "block" => {\n    markDefs[]{\n      ...,\n      _type == "internalLink" => {\n        "target": reference->{_type, "slug": slug.current}\n      },\n      _type == "fileLink" => {\n        "url": file.asset->url\n      }\n    }\n  },\n  _type == "stlModel" => {\n    "fileUrl": file.asset->url,\n    "fileName": file.asset->originalFilename\n  },\n  _type == "video" => {\n    "playbackId": asset.asset->playbackId,\n    "status": asset.asset->status\n  }\n},\n      link,\n      linkText,\n      image\n    }\n  }\n': HOME_PAGE_QUERY_RESULT;
+    '\n  *[_id == "homePage"][0]{\n    _id,\n    _type,\n    title,\n    "bio": bio[]{\n  _type != "video" => {...},\n  _type == "block" => {\n    markDefs[]{\n      ...,\n      _type == "internalLink" => {\n        "target": reference->{_type, "slug": slug.current}\n      },\n      _type == "fileLink" => {\n        "url": file.asset->url\n      }\n    }\n  },\n  _type == "stlModel" => {\n    "fileUrl": file.asset->url,\n    "fileName": file.asset->originalFilename\n  },\n  _type == "video" => {\n    _type,\n    _key,\n    "url": file.asset->url,\n    "mimeType": file.asset->mimeType,\n    "filename": file.asset->originalFilename\n  }\n},\n    author->{\n      firstName,\n      lastName,\n      jobTitle,\n      location,\n      email,\n      github,\n      image\n    },\n    "testimonials": testimonials[]->{\n  _id,\n  firstName,\n  lastName,\n  jobTitle,\n  relationship,\n  link,\n  body,\n  asciiArt,\n  image\n},\n    "services": services[@->audience == $audience]->{\n      _id,\n      title,\n      "description": description[]{\n  _type != "video" => {...},\n  _type == "block" => {\n    markDefs[]{\n      ...,\n      _type == "internalLink" => {\n        "target": reference->{_type, "slug": slug.current}\n      },\n      _type == "fileLink" => {\n        "url": file.asset->url\n      }\n    }\n  },\n  _type == "stlModel" => {\n    "fileUrl": file.asset->url,\n    "fileName": file.asset->originalFilename\n  },\n  _type == "video" => {\n    _type,\n    _key,\n    "url": file.asset->url,\n    "mimeType": file.asset->mimeType,\n    "filename": file.asset->originalFilename\n  }\n},\n      link,\n      linkText,\n      image\n    }\n  }\n': HOME_PAGE_QUERY_RESULT;
     '\n  *[_id == "homePage"][0]{\n    title,\n    seo,\n    "authorImage": author->image\n  }\n': HOME_PAGE_SEO_QUERY_RESULT;
     '\n  *[\n    _type == "project"\n    && defined(slug.current)\n    && projectType == $projectType\n    && audience == $audience\n    && isUnlisted != true\n  ] | order(date desc, legacy.wagtailId asc)[0...3]{\n    \n  _id,\n  title,\n  "slug": slug.current,\n  intro,\n  client,\n  website,\n  projectType,\n  previewImage,\n  "mediums": mediums[]->title,\n  "technologies": technologies[]->title,\n  "hasBody": coalesce(count(body), 0) > 0\n\n  }\n': PORTFOLIO_PREVIEW_QUERY_RESULT;
     '\n  *[\n    _type == "project"\n    && defined(slug.current)\n    && audience == $audience\n    && isUnlisted != true\n  ] | order(date desc, legacy.wagtailId asc){\n    \n  _id,\n  title,\n  "slug": slug.current,\n  intro,\n  client,\n  website,\n  projectType,\n  previewImage,\n  "mediums": mediums[]->title,\n  "technologies": technologies[]->title,\n  "hasBody": coalesce(count(body), 0) > 0\n,\n    contentImage,\n    "heroImages": heroMedia[_type == "imageWithAlt"],\n    \n  "readingText": pt::text(body),\n  "codeTexts": body[_type == "code"].code\n\n  }\n': PROJECTS_LIST_QUERY_RESULT;
-    '\n  *[_type == "project" && slug.current == $slug][0]{\n    _id,\n    _type,\n    title,\n    "slug": slug.current,\n    isUnlisted,\n    client,\n    "legacyId": legacy.wagtailId,\n    heroMedia,\n    contentImage,\n    "mediums": mediums[]->title,\n    "technologies": technologies[]->title,\n    "testimonials": testimonials[]->{\n  _id,\n  firstName,\n  lastName,\n  jobTitle,\n  relationship,\n  link,\n  body,\n  asciiArt,\n  image\n},\n    "body": body[]{\n  ...,\n  _type == "block" => {\n    markDefs[]{\n      ...,\n      _type == "internalLink" => {\n        "target": reference->{_type, "slug": slug.current}\n      },\n      _type == "fileLink" => {\n        "url": file.asset->url\n      }\n    }\n  },\n  _type == "stlModel" => {\n    "fileUrl": file.asset->url,\n    "fileName": file.asset->originalFilename\n  },\n  _type == "video" => {\n    "playbackId": asset.asset->playbackId,\n    "status": asset.asset->status\n  }\n}\n  }\n': PROJECT_QUERY_RESULT;
+    '\n  *[_type == "project" && slug.current == $slug][0]{\n    _id,\n    _type,\n    title,\n    "slug": slug.current,\n    isUnlisted,\n    client,\n    "legacyId": legacy.wagtailId,\n    heroMedia,\n    contentImage,\n    "mediums": mediums[]->title,\n    "technologies": technologies[]->title,\n    "testimonials": testimonials[]->{\n  _id,\n  firstName,\n  lastName,\n  jobTitle,\n  relationship,\n  link,\n  body,\n  asciiArt,\n  image\n},\n    "body": body[]{\n  _type != "video" => {...},\n  _type == "block" => {\n    markDefs[]{\n      ...,\n      _type == "internalLink" => {\n        "target": reference->{_type, "slug": slug.current}\n      },\n      _type == "fileLink" => {\n        "url": file.asset->url\n      }\n    }\n  },\n  _type == "stlModel" => {\n    "fileUrl": file.asset->url,\n    "fileName": file.asset->originalFilename\n  },\n  _type == "video" => {\n    _type,\n    _key,\n    "url": file.asset->url,\n    "mimeType": file.asset->mimeType,\n    "filename": file.asset->originalFilename\n  }\n}\n  }\n': PROJECT_QUERY_RESULT;
     '\n  *[_type == "project" && slug.current == $slug][0]{\n    title,\n    intro,\n    date,\n    seo,\n    contentImage,\n    previewImage,\n    "technologies": technologies[]->title\n  }\n': PROJECT_SEO_QUERY_RESULT;
     '\n  *[_type == "blogPost" && defined(slug.current) && isUnlisted != true]\n    | order(date desc, legacy.wagtailId asc){\n    _id,\n    title,\n    "slug": slug.current,\n    date,\n    intro,\n    "heroImage": heroMedia[0...1][_type == "imageWithAlt"][0],\n    \n  "readingText": pt::text(body),\n  "codeTexts": body[_type == "code"].code\n\n  }\n': BLOG_LIST_QUERY_RESULT;
     '\n  *[\n    _type == "blogPost"\n    && defined(slug.current)\n    && slug.current != $slug\n    && isUnlisted != true\n  ] | order(date desc, legacy.wagtailId asc)[0...3]{\n    _id,\n    title,\n    "slug": slug.current,\n    intro,\n    "heroImage": heroMedia[0...1][_type == "imageWithAlt"][0],\n    \n  "readingText": pt::text(body),\n  "codeTexts": body[_type == "code"].code\n\n  }\n': RECOMMENDED_POSTS_QUERY_RESULT;
-    '\n  *[_type == "blogPost" && slug.current == $slug][0]{\n    _id,\n    _type,\n    title,\n    "slug": slug.current,\n    date,\n    isUnlisted,\n    "legacyId": legacy.wagtailId,\n    heroMedia,\n    contentImage,\n    author->{\n      firstName,\n      lastName,\n      jobTitle,\n      location,\n      email,\n      "bio": bio[]{\n  ...,\n  _type == "block" => {\n    markDefs[]{\n      ...,\n      _type == "internalLink" => {\n        "target": reference->{_type, "slug": slug.current}\n      },\n      _type == "fileLink" => {\n        "url": file.asset->url\n      }\n    }\n  },\n  _type == "stlModel" => {\n    "fileUrl": file.asset->url,\n    "fileName": file.asset->originalFilename\n  },\n  _type == "video" => {\n    "playbackId": asset.asset->playbackId,\n    "status": asset.asset->status\n  }\n},\n      image\n    },\n    "body": body[]{\n  ...,\n  _type == "block" => {\n    markDefs[]{\n      ...,\n      _type == "internalLink" => {\n        "target": reference->{_type, "slug": slug.current}\n      },\n      _type == "fileLink" => {\n        "url": file.asset->url\n      }\n    }\n  },\n  _type == "stlModel" => {\n    "fileUrl": file.asset->url,\n    "fileName": file.asset->originalFilename\n  },\n  _type == "video" => {\n    "playbackId": asset.asset->playbackId,\n    "status": asset.asset->status\n  }\n}\n  }\n': BLOG_POST_QUERY_RESULT;
+    '\n  *[_type == "blogPost" && slug.current == $slug][0]{\n    _id,\n    _type,\n    title,\n    "slug": slug.current,\n    date,\n    isUnlisted,\n    "legacyId": legacy.wagtailId,\n    heroMedia,\n    contentImage,\n    author->{\n      firstName,\n      lastName,\n      jobTitle,\n      location,\n      email,\n      "bio": bio[]{\n  _type != "video" => {...},\n  _type == "block" => {\n    markDefs[]{\n      ...,\n      _type == "internalLink" => {\n        "target": reference->{_type, "slug": slug.current}\n      },\n      _type == "fileLink" => {\n        "url": file.asset->url\n      }\n    }\n  },\n  _type == "stlModel" => {\n    "fileUrl": file.asset->url,\n    "fileName": file.asset->originalFilename\n  },\n  _type == "video" => {\n    _type,\n    _key,\n    "url": file.asset->url,\n    "mimeType": file.asset->mimeType,\n    "filename": file.asset->originalFilename\n  }\n},\n      image\n    },\n    "body": body[]{\n  _type != "video" => {...},\n  _type == "block" => {\n    markDefs[]{\n      ...,\n      _type == "internalLink" => {\n        "target": reference->{_type, "slug": slug.current}\n      },\n      _type == "fileLink" => {\n        "url": file.asset->url\n      }\n    }\n  },\n  _type == "stlModel" => {\n    "fileUrl": file.asset->url,\n    "fileName": file.asset->originalFilename\n  },\n  _type == "video" => {\n    _type,\n    _key,\n    "url": file.asset->url,\n    "mimeType": file.asset->mimeType,\n    "filename": file.asset->originalFilename\n  }\n}\n  }\n': BLOG_POST_QUERY_RESULT;
     '\n  *[_type == "blogPost" && slug.current == $slug][0]{\n    title,\n    intro,\n    date,\n    seo,\n    "heroImage": heroMedia[0...1][_type == "imageWithAlt"][0],\n    contentImage\n  }\n': BLOG_POST_SEO_QUERY_RESULT;
-    '\n  *[_type == "flexPage" && slug.current == $slug][0]{\n    _id,\n    _type,\n    title,\n    "body": body[]{\n  ...,\n  _type == "block" => {\n    markDefs[]{\n      ...,\n      _type == "internalLink" => {\n        "target": reference->{_type, "slug": slug.current}\n      },\n      _type == "fileLink" => {\n        "url": file.asset->url\n      }\n    }\n  },\n  _type == "stlModel" => {\n    "fileUrl": file.asset->url,\n    "fileName": file.asset->originalFilename\n  },\n  _type == "video" => {\n    "playbackId": asset.asset->playbackId,\n    "status": asset.asset->status\n  }\n}\n  }\n': FLEX_PAGE_QUERY_RESULT;
+    '\n  *[_type == "flexPage" && slug.current == $slug][0]{\n    _id,\n    _type,\n    title,\n    "body": body[]{\n  _type != "video" => {...},\n  _type == "block" => {\n    markDefs[]{\n      ...,\n      _type == "internalLink" => {\n        "target": reference->{_type, "slug": slug.current}\n      },\n      _type == "fileLink" => {\n        "url": file.asset->url\n      }\n    }\n  },\n  _type == "stlModel" => {\n    "fileUrl": file.asset->url,\n    "fileName": file.asset->originalFilename\n  },\n  _type == "video" => {\n    _type,\n    _key,\n    "url": file.asset->url,\n    "mimeType": file.asset->mimeType,\n    "filename": file.asset->originalFilename\n  }\n}\n  }\n': FLEX_PAGE_QUERY_RESULT;
     '\n  *[_type == "flexPage" && slug.current == $slug][0]{\n    title,\n    seo\n  }\n': FLEX_PAGE_SEO_QUERY_RESULT;
     '\n  *[_type == "project" && defined(slug.current) && isUnlisted != true]\n    | order(date desc, legacy.wagtailId asc){\n    _id,\n    title,\n    previewImage,\n    "mediums": mediums[]->title,\n    "technologies": technologies[]->title,\n    "testimonial": testimonials[0]->{\n  _id,\n  firstName,\n  lastName,\n  jobTitle,\n  relationship,\n  link,\n  body,\n  asciiArt,\n  image\n}\n  }\n': SCREEN_PROJECTS_QUERY_RESULT;
     '\n  *[\n    _type in ["homePage", "blogPost", "project"]\n    && (_type == "homePage" || (defined(slug.current) && isUnlisted != true))\n  ] | order(_type asc, date desc){\n    _type,\n    "slug": slug.current,\n    _updatedAt\n  }\n': SITEMAP_QUERY_RESULT;

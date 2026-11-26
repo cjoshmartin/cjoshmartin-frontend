@@ -27,11 +27,6 @@ const nextConfig: NextConfig = {
         hostname: "cdn.sanity.io",
         pathname: `/images/${sanityProjectId}/**`,
       },
-      {
-        // Mux video thumbnails and posters.
-        protocol: "https",
-        hostname: "image.mux.com",
-      },
     ],
     dangerouslyAllowSVG: true,
   },

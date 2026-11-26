@@ -13,10 +13,13 @@ import { defineQuery } from 'next-sanity'
 
 /**
  * Projection for each item of a blockContent (Portable Text) array, adding the data the custom
- * blocks and annotations need on the page: link targets, file URLs and Mux playback ids.
+ * blocks and annotations need on the page: link targets and file URLs.
+ *
+ * Video blocks are not spread: they only return the file the site plays (after conversion, the
+ * MP4). `original`, the upload kept as a reference, is never served, so it is never queried.
  */
 const portableTextItemProjection = /* groq */ `{
-  ...,
+  _type != "video" => {...},
   _type == "block" => {
     markDefs[]{
       ...,
@@ -33,8 +36,11 @@ const portableTextItemProjection = /* groq */ `{
     "fileName": file.asset->originalFilename
   },
   _type == "video" => {
-    "playbackId": asset.asset->playbackId,
-    "status": asset.asset->status
+    _type,
+    _key,
+    "url": file.asset->url,
+    "mimeType": file.asset->mimeType,
+    "filename": file.asset->originalFilename
   }
 }`
 
