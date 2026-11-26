@@ -32,6 +32,7 @@
     "@codemirror/legacy-modes": "^6.5.5",
     "@sanity/code-input": "^7.3.16",
     "@sanity/icons": "^5.4.0",
+    "@sanity/ui": "^4.4.12",
     "@sanity/vision": "^6.25.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
@@ -44,6 +45,7 @@
     "@types/node": "^24.19.4",
     "@types/react": "^19.3.3",
     "eslint": "^10.15.0",
+    "groq-js": "2.0.3",
     "prettier": "^3.10.1",
     "tsx": "^4.23.15",
     "typescript": "~6.0.3"

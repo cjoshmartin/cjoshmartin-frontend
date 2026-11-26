@@ -1,6 +1,7 @@
 import {VideoIcon} from '@sanity/icons/Video'
 import {defineField, defineType, type ValidationContext} from 'sanity'
 
+import {VideoConversionInput} from '../../components/VideoConversionInput'
 import {API_VERSION} from '../../lib/constants'
 import {VIDEO_CONVERSION_STATUSES} from '../constants'
 import {
@@ -42,6 +43,8 @@ export const video = defineType({
   title: 'Video',
   type: 'object',
   icon: VideoIcon,
+  // Restarts a stuck conversion while the document is open (see the component).
+  components: {input: VideoConversionInput},
   fields: [
     defineField({
       name: 'file',
@@ -104,14 +107,17 @@ export const video = defineType({
       ],
     }),
   ],
-  // A failed conversion leaves the original upload in `file`, which browsers may not play.
+  // A failed conversion leaves the original upload in `file`. The site never plays a file that is
+  // not the converted MP4, so publishing would show no video: an error, so the editor replaces the
+  // file or removes the block. A conversion that is still running or waiting to retry is not an
+  // error; the converter writes the result to the published document too.
   validation: (rule) =>
-    rule
-      .custom((value: VideoValue | undefined) => {
-        const state = videoConversionState(value?.file?.asset?._ref, value?.conversion)
-        return state.kind === 'failed' ? `MP4 conversion failed: ${state.message}` : true
-      })
-      .warning(),
+    rule.custom((value: VideoValue | undefined) => {
+      const state = videoConversionState(value?.file?.asset?._ref, value?.conversion)
+      return state.kind === 'failed'
+        ? `MP4 conversion failed: ${state.message}. Upload another file or remove the video.`
+        : true
+    }),
   preview: {
     select: {
       filename: 'file.asset.originalFilename',
