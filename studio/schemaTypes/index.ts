@@ -23,8 +23,8 @@ import {youtube} from './objects/youtube'
 export * from './constants'
 
 /**
- * Every schema type defined by this Studio. The `code` type comes from @sanity/code-input and the
- * `mux.*` types from sanity-plugin-mux-input; their plugins register them in sanity.config.ts.
+ * Every schema type defined by this Studio. The `code` type comes from @sanity/code-input; its
+ * plugin registers it in sanity.config.ts.
  */
 export const schemaTypes: SchemaTypeDefinition[] = [
   // Documents

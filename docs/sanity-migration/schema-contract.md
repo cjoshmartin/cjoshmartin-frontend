@@ -38,8 +38,6 @@ Read these first. Everything else matches the brief.
    - `service.image` has `hotspot: true` (the brief listed only "image, alt"). Hotspot data is optional.
    - The home page singleton also loses the **unpublish** action, not only create, delete and
      duplicate, so the published home page can't be taken off the site by accident.
-   - `mux.videoAsset` is removed from "create new document" menus; video documents are created by
-     the Mux input and the Videos tool.
    - `legacy` is hidden while empty, so it only shows (read-only, Migration group) on migrated documents.
    - Extra validation, listed under [Validation](#validation): slug format, tag titles unique
      ignoring case, redirect sources unique, code languages limited to the list, `intro` required.
@@ -50,9 +48,11 @@ Read these first. Everything else matches the brief.
 
 | Path | Exports | Dependencies |
 |---|---|---|
-| `studio/schemaTypes/constants.ts` | `AUDIENCE_OPTIONS`, `DEFAULT_AUDIENCE`, `PROJECT_TYPE_OPTIONS`, `DEFAULT_PROJECT_TYPE`, `IMAGE_LAYOUT_OPTIONS`, `DEFAULT_IMAGE_LAYOUT`, `CODE_LANGUAGES`, `DEFAULT_CODE_LANGUAGE`, `INTERNAL_LINK_TYPES`, `HOME_PAGE_ID`, and the types `Audience`, `ProjectType`, `ImageLayout`, `CodeLanguage` | none (plain TypeScript, safe to import from any package with a TS runtime) |
+| `studio/schemaTypes/constants.ts` | `AUDIENCE_OPTIONS`, `DEFAULT_AUDIENCE`, `PROJECT_TYPE_OPTIONS`, `DEFAULT_PROJECT_TYPE`, `IMAGE_LAYOUT_OPTIONS`, `DEFAULT_IMAGE_LAYOUT`, `CODE_LANGUAGES`, `DEFAULT_CODE_LANGUAGE`, `INTERNAL_LINK_TYPES`, `HOME_PAGE_ID`, `VIDEO_CONVERSION_STATUSES`, and the types `Audience`, `ProjectType`, `ImageLayout`, `CodeLanguage`, `VideoConversionStatus` | none (plain TypeScript, safe to import from any package with a TS runtime) |
 | `studio/schemaTypes/shared/validation.ts` | `SLUG_PATTERN`, `validateSlugFormat`, `getYouTubeVideoId`, `validateYouTubeUrl`, `validateSitePath`, `validatePathOrAbsoluteUrl`, `fileAssetExtension` | none |
-| `studio/schemaTypes/index.ts` | `schemaTypes: SchemaTypeDefinition[]` (every type below except `code` and `mux.*`, which their plugins add), each type definition by name (`blogPost`, `project`, ...), and everything from `constants.ts` | `sanity`, `@sanity/icons` (resolved from `studio/node_modules`, so run `npm ci` in `studio/` first) |
+| `studio/schemaTypes/shared/video-conversion.ts` | `videoNeedsConversion` (the contract's rule), `videoConversionState`, `videoConversionLabel` (the preview's status line), and the types `VideoValue`, `VideoConversionValue`, `FileValue`, `VideoConversionState` | none (a type-only import from `constants.ts`) |
+| `studio/functions/video-to-mp4/settings.ts` | The MP4 settings, see [MP4 settings](#mp4-settings): `SETTINGS_VERSION`, `buildFfmpegArgs`, `VIDEO_FILTER`, `expectedOutputSize`, `convertedFilename`, `CONVERTED_ASSET_SOURCE_NAME`, `OUTPUT_MIME_TYPE`, `OUTPUT_EXTENSION`, `MAX_DIMENSION`, `CRF`, `AUDIO_BITRATE`, `AUDIO_CHANNELS`, `X264_PRESETS`, `DEFAULT_PRESET`, `isX264Preset`, and the types `X264Preset`, `FfmpegArgsOptions`, `VideoSize` | none (no imports, only erasable TypeScript: runs under the Functions bundler, `tsx` and Node's type stripping) |
+| `studio/schemaTypes/index.ts` | `schemaTypes: SchemaTypeDefinition[]` (every type below except `code`, which its plugin adds), each type definition by name (`blogPost`, `project`, ...), and everything from `constants.ts` | `sanity`, `@sanity/icons` (resolved from `studio/node_modules`, so run `npm ci` in `studio/` first) |
 
 The Next.js app should not import from `studio/`. It uses `sanity.types.ts` and its own queries.
 
@@ -73,8 +73,9 @@ Assets keep Sanity's content-hash ids (`image-<sha1>-<w>x<h>-<ext>`, `file-<sha1
 | `medium` | `medium-<slug>` |
 | `technology` | `technology-<slug>` |
 | `redirect` | `redirect-<wagtailRedirectId>` |
-| `mux.videoAsset` | `mux-video-<wagtailMediaId>` |
-| Mux plugin settings | `secrets.mux` (type `mux.apiKey`, written by the plugin's setup screen) |
+
+There are no video documents: videos are file assets referenced from `video` blocks (see
+[Videos](#videos-video-contract-v2)).
 
 ## Stored codes
 
@@ -259,8 +260,38 @@ filename ending in `.stl`). `scale` is a required integer from 1 to 1000 (Wagtai
 
 ### `video`
 
-`{_type: "video", asset: {_type: "mux.video", asset: {_type: "reference", _weak: true, _ref: "mux-video-<wagtailMediaId>"}}}`.
-`asset` is the plugin's `mux.video` object and is required (it must reference a video).
+Video contract v2; the full rules are in [Videos](#videos-video-contract-v2).
+
+```json
+{
+  "_type": "video",
+  "_key": "v1",
+  "file": {"_type": "file", "asset": {"_type": "reference", "_ref": "file-<sha1>-mp4"}},
+  "original": {"_type": "file", "asset": {"_type": "reference", "_ref": "file-<sha1>-mov"}},
+  "conversion": {
+    "status": "ready",
+    "message": "",
+    "sourceAssetId": "file-<sha1>-mov",
+    "outputAssetId": "file-<sha1>-mp4",
+    "settingsVersion": "h264-crf23-max1920-v1",
+    "updatedAt": "2026-11-26T05:00:00.000Z"
+  }
+}
+```
+
+| Field | Type | Req. | Studio | Notes |
+|---|---|---|---|---|
+| `file` | file, `accept: "video/*"` | yes | editable | The file the site plays. After conversion it is the converted MP4. Must reference an asset whose `mimeType` starts with `video/`. |
+| `original` | file | | read-only, hidden while empty | The file as uploaded, kept but never served. Set by the converter. |
+| `conversion` | object | | read-only, collapsed | Set by the converter. |
+| `conversion.status` | string `pending` \| `processing` \| `ready` \| `failed` | | | Titles Pending, Processing, Ready, Failed. Other values are a validation error. |
+| `conversion.message` | string | | | Failure reason or other converter details. |
+| `conversion.sourceAssetId` | string | | | `_id` of the original asset that was (or is being) converted. |
+| `conversion.outputAssetId` | string | | | `_id` of the MP4 asset produced. |
+| `conversion.settingsVersion` | string | | | `SETTINGS_VERSION` used, `h264-crf23-max1920-v1`. |
+| `conversion.updatedAt` | datetime | | | When the converter last wrote `conversion`. |
+
+The asset ids are plain strings, not references, so they never block deleting an asset.
 
 ### `divider`
 
@@ -304,52 +335,89 @@ Example block:
 A Wagtail `<br>` is a `\n` inside span text. Heading anchors are not stored; the frontend derives
 them from heading text.
 
-## Mux video documents (`mux.videoAsset`)
+## Videos (video contract v2)
 
-Read from the installed `sanity-plugin-mux-input@5.4.0` (`dist/index.js` schema and the code that
-creates documents after an upload or an import from Mux).
+Mux is gone: `sanity-plugin-mux-input`, the `mux.video` / `mux.videoAsset` / `mux.apiKey` types and
+the Videos tool were removed from the Studio, and no schema deployed to `production` or `staging`
+has a Mux type. Every video is a Sanity file asset in MP4, converted with fixed settings.
 
-`mux.video` (object, used by `video.asset`):
+**Needs conversion.** A `video` block needs conversion when `file.asset._ref` is set and differs
+from `conversion.outputAssetId` (`videoNeedsConversion` in
+`studio/schemaTypes/shared/video-conversion.ts`). That covers a new upload, a replaced file and a
+migrated block that has not been converted yet.
 
-```json
-{"_type": "mux.video", "asset": {"_type": "reference", "_weak": true, "_ref": "mux-video-6"}}
+**What a converter does** (the video-to-mp4 Sanity Function for Studio uploads, the migration for
+the 29 Wagtail videos):
+
+1. Takes `file.asset._ref` as the source asset.
+2. Looks for an existing asset with `source.name == "video-to-mp4" && source.id == <source asset _id>`
+   and reuses it instead of converting again (idempotent, no duplicate conversions).
+3. Otherwise converts with `buildFfmpegArgs` (below) and uploads the MP4 as a file asset with
+   `originalFilename` `<original base name>.mp4` (`convertedFilename`), `mimeType` `video/mp4` and
+   `source: {name: "video-to-mp4", id: <source asset _id>}` (`CONVERTED_ASSET_SOURCE_NAME`).
+4. Sets `original` to the source file, `file` to the MP4, and `conversion` to
+   `{status: "ready", sourceAssetId, outputAssetId, settingsVersion: SETTINGS_VERSION, updatedAt}`.
+   While working it may write `status: "processing"`; on failure `status: "failed"` with
+   `sourceAssetId` and `message`, leaving `file` as it was.
+
+**Studio.** The block preview's title is the `file` asset's `originalFilename`; its subtitle is
+"No video file", "Converting to MP4..." (needs conversion and no failure for this file), "Ready"
+(`file` is the MP4) or "Conversion failed: <message>" (status `failed` and `sourceAssetId` is the
+current file; a failure recorded for an earlier file does not count). A failed conversion is also
+a validation warning on the block.
+
+### MP4 settings
+
+Single source of truth: [`studio/functions/video-to-mp4/settings.ts`](../../studio/functions/video-to-mp4/settings.ts).
+`SETTINGS_VERSION = "h264-crf23-max1920-v1"`. `buildFfmpegArgs({input, output, preset, hasAudio})`
+returns the ffmpeg arguments (without the executable):
+
+```
+-hide_banner -nostdin -y -autorotate -i <input>
+-map 0:V:0 [-map 0:a:0 -c:a aac -b:a 128k -ac 2 | -an]
+-vf scale=w='if(gte(iw,ih),max(2,2*trunc(min(iw,1920)/2)),max(2,2*trunc(min(ih,1920)*iw/ih/2)))':h='if(gte(iw,ih),max(2,2*trunc(min(iw,1920)*ih/iw/2)),max(2,2*trunc(min(ih,1920)/2)))':out_range=tv,format=yuv420p
+-c:v libx264 -profile:v high -pix_fmt yuv420p -crf 23 -preset <preset>
+-map_metadata -1 -map_chapters -1 -movflags +faststart -f mp4 <output>
 ```
 
-`mux.videoAsset` (document). Fields in the plugin schema, all optional:
+- H.264 High profile, yuv420p, CRF 23. Rotation metadata is applied to the pixels (`-autorotate`),
+  so the output has none and its width and height are the displayed size.
+- Longest side at most 1920 px, aspect kept, both sides rounded down to even numbers, never
+  upscaled (a side below 2 px becomes 2 px, the smallest libx264 can encode). Both sides are
+  computed explicitly because ffmpeg's `-2` and `force_original_aspect_ratio` round differently
+  across versions. `expectedOutputSize({width, height})` gives the same result in TypeScript.
+  Examples: 3840x2160 → 1920x1080, 1080x2400 → 864x1920, 3420x2080 → 1920x1166, 918x2066 → 852x1920,
+  641x361 → 640x360, rotated 1920x1440 iPhone video → 1440x1920.
+- `out_range=tv` converts full-range input (iPhone `yuvj420p`) to limited range; `-pix_fmt yuv420p`
+  alone keeps full range in ffmpeg 9.
+- Audio: the first audio stream as AAC 128 kb/s stereo when `hasAudio` (from ffprobe); otherwise
+  no audio track. Mono is upmixed.
+- Only the first real video stream (`0:V:0` skips cover art) and the first audio stream are kept:
+  no data, subtitle or chapter streams. No metadata is copied from the input (iPhone videos carry
+  GPS location, device and creation date); ffmpeg's own `encoder` and brand tags remain.
+- `preset` defaults to `medium`. Allowed: `superfast`, `veryfast`, `faster`, `fast`, `medium`,
+  `slow`, `slower`, `veryslow`, `placebo`. `ultrafast` is rejected because its output is
+  Constrained Baseline, not High.
+- `input` may be a path or an https URL. `output` is overwritten (`-y`) and must not start with `-`.
+- Any change to these arguments must change `SETTINGS_VERSION`; a unit test pins the full list.
 
-| Field | Type | What the plugin puts there |
-|---|---|---|
-| `status` | string | Mux asset status (`ready`, `preparing`, `errored`). |
-| `assetId` | string | Mux asset id. |
-| `playbackId` | string | The first playback id (`data.playback_ids[0].id`). Public policy for this site. |
-| `filename` | string | Original file name, shown in the Studio. |
-| `thumbTime` | number | Thumbnail time in seconds, set when an editor picks a thumbnail. |
-| `data` | `mux.assetData` | The full Mux asset object as returned by the Mux API (`GET /video/v1/assets/{id}`): `id`, `status`, `created_at`, `duration`, `aspect_ratio`, `max_stored_resolution`, `max_stored_frame_rate`, `max_resolution_tier`, `resolution_tier`, `video_quality`, `encoding_tier`, `mp4_support`, `master_access`, `passthrough`, `upload_id`, `playback_ids[] {id, policy}`, `tracks[] {id, type, max_width, max_height, max_frame_rate, duration, ...}`, `static_renditions`, `master`. Arrays are stored as Mux returns them (no `_key`); validation accepts that. |
-| `robotsJobs`, `robotsOutputs`, `robotsDirectiveRuns`, `robotsPendingCreates` | Mux Robots data | Written only by the plugin's Robots features. Leave unset. |
+### Frontend query (example)
 
-The plugin also writes `uploadId` (not in its schema) on documents it creates from Studio uploads,
-and finds existing documents with `coalesce(assetId, data.id)` and `coalesce(uploadId, data.upload_id)`.
-
-Shape for migrated videos (`passthrough` lets reruns find the asset in Mux):
-
-```json
-{
-  "_id": "mux-video-6",
-  "_type": "mux.videoAsset",
-  "assetId": "<mux asset id>",
-  "playbackId": "<public playback id>",
-  "status": "ready",
-  "filename": "<original Wagtail file name>",
-  "data": { "...": "full Mux asset JSON, including passthrough: \"wagtail-media-6\" and video_quality: \"basic\"" }
+```groq
+body[]{
+  ...,
+  _type == "video" => {
+    _key,
+    "url": file.asset->url,
+    "mimeType": file.asset->mimeType,
+    "filename": file.asset->originalFilename,
+    "status": conversion.status,
+    "converted": defined(file.asset._ref) && file.asset._ref == conversion.outputAssetId
+  }
 }
 ```
 
-Frontend query for a video block: `body[]{..., _type == "video" => {"playbackId": asset.asset->playbackId, "status": asset.asset->status, "aspectRatio": asset.asset->data.aspect_ratio}}`.
-
-The Studio plugin is configured with `video_quality: 'basic'` and `acceptedMimeTypes: ['video/*']`
-(public playback is the plugin default). Uploads from the Studio need the Mux token saved once per
-dataset through the plugin's setup screen (`secrets.mux`); that document is not part of this schema
-and the migration must not overwrite it.
+`original` is never queried for playback.
 
 ## Validation
 
@@ -369,14 +437,22 @@ Errors:
 - URLs with disallowed schemes (`person.github`, `testimonial.link`, `project.website`, `service.link`, `link.href`).
 - `youtube.url` that is not a YouTube video URL.
 - `stlModel` without an `.stl` file, or `scale` not an integer in 1..1000.
-- `video` without a video reference; `imageBlock` without an image; `fileLink` without a file;
+- `video` without a `file`, or whose `file` asset is missing or not a `video/*` MIME type;
+  `conversion.status` outside its list; `imageBlock` without an image; `fileLink` without a file;
   `code` with blank code.
 - Redirect `source`/`destination` format, duplicate `source`, `destination` equal to `source`.
 - Duplicate `medium` or `technology` title ignoring case.
 - Strong references to documents that don't exist or aren't published (Sanity's own check).
 
 Warnings (reported, never fail `npm run validate`): missing image alt text, testimonial without a
-photo, service link without link text, SEO title over 70 or description over 160 characters.
+photo, service link without link text, SEO title over 70 or description over 160 characters, a
+`video` whose MP4 conversion failed for its current file, and Sanity's own "File type ... is not
+accepted" for a non-video `file`.
+
+Until the migrated video blocks are converted to v2, `npm run validate` and `npm run validate:staging`
+fail on purpose: each old block (`{asset: {_type: "mux.video", ...}}`) has no `file` ("Upload or
+select a video", 29 in each dataset on 2026-11-26), and each remaining `mux.videoAsset` document
+(10) is a document type the schema no longer has.
 
 ## Presentation tool routes
 

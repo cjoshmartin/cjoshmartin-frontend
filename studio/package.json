@@ -20,7 +20,9 @@
     "validate": "sanity documents validate --workspace production --level error --yes",
     "validate:staging": "sanity documents validate --workspace staging --level error --yes",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "tsx --test test/*.test.ts",
+    "test:ffmpeg": "tsx --test test/video-to-mp4-ffmpeg.integration.ts"
   },
   "keywords": [
     "sanity"
@@ -34,7 +36,6 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "sanity": "^6.25.0",
-    "sanity-plugin-mux-input": "^5.4.0",
     "styled-components": "^6.7.0"
   },
   "devDependencies": {
@@ -44,6 +45,7 @@
     "@types/react": "^19.3.3",
     "eslint": "^10.15.0",
     "prettier": "^3.10.1",
+    "tsx": "^4.23.15",
     "typescript": "~6.0.3"
   },
   "prettier": {

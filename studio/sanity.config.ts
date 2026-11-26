@@ -8,7 +8,6 @@ import type {ComponentType} from 'react'
 import {defineConfig, defineSingleton, type WorkspaceOptions} from 'sanity'
 import {presentationTool} from 'sanity/presentation'
 import {structureTool} from 'sanity/structure'
-import {muxInput} from 'sanity-plugin-mux-input'
 
 import {
   API_VERSION,
@@ -42,9 +41,6 @@ const PREVIEW_ORIGINS = [
 
 /** Actions removed from the home page singleton so it can never disappear from the site. */
 const HOME_PAGE_REMOVED_ACTIONS = new Set(['delete', 'duplicate', 'unpublish'])
-
-/** Document type sanity-plugin-mux-input registers for each Mux asset. */
-const MUX_VIDEO_ASSET_TYPE = 'mux.videoAsset'
 
 interface WorkspaceSettings {
   name: string
@@ -85,7 +81,6 @@ function workspace({name, dataset, subtitle, icon}: WorkspaceSettings): Workspac
           },
         ],
       }),
-      muxInput({video_quality: 'basic', acceptedMimeTypes: ['video/*']}),
     ],
     schema: {types: schemaTypes},
     document: {
@@ -101,9 +96,6 @@ function workspace({name, dataset, subtitle, icon}: WorkspaceSettings): Workspac
         context.schemaType === 'homePage'
           ? prev.filter(({action}) => !action || !HOME_PAGE_REMOVED_ACTIONS.has(action))
           : prev,
-      // Mux video documents are created by the video input and the Videos tool, never by hand.
-      newDocumentOptions: (prev) =>
-        prev.filter((template) => template.templateId !== MUX_VIDEO_ASSET_TYPE),
     },
   }
 }

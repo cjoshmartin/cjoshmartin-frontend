@@ -29,23 +29,31 @@ Run from this folder after `npm install`.
 | `npm run schema:deploy` | Deploys the schema of both workspaces to the Content Lake. |
 | `npm run typegen` | Extracts the schema, then scans `../app`, `../components`, `../lib` and `../sanity` for `defineQuery` queries and writes `../sanity.types.ts`. |
 | `npm run validate` / `npm run validate:staging` | Validates every document in `production` / `staging` and fails on errors (warnings such as missing alt text are not failures). |
-| `npm run typecheck`, `npm run lint` | TypeScript and ESLint for the Studio code. `functions/` is its own package with its own checks. |
+| `npm run typecheck`, `npm run lint` | TypeScript and ESLint for the Studio code. `functions/testimonial-ascii-art/` is its own package with its own checks; `functions/video-to-mp4/settings.ts` is type-checked here through the tests that import it. |
+| `npm test` | Unit tests in `test/`: the MP4 settings (`functions/video-to-mp4/settings.ts`) and the video block's conversion status helpers. No network, no ffmpeg. |
+| `npm run test:ffmpeg` | Runs the MP4 settings through a real ffmpeg on small generated videos and checks the output with ffprobe. Needs `ffmpeg` (with libx264) and `ffprobe` on `PATH`, or `FFMPEG_PATH` / `FFPROBE_PATH`; fails if they are missing. |
 
 ## Layout
 
-- `sanity.config.ts`: the two workspaces, plugins (Structure, Presentation, Vision, code input,
-  Mux), the home page singleton and document actions.
+- `sanity.config.ts`: the two workspaces, plugins (Structure, Presentation, Vision, code input),
+  the home page singleton and document actions.
 - `sanity.cli.ts`: project, hosted Studio, schema extraction and TypeGen settings.
 - `schemaTypes/`: `documents/`, `objects/` and `shared/` field helpers. `schemaTypes/index.ts`
   exports `schemaTypes` and the option constants.
 - `structure/`: the desk structure. `presentation/`: routes for the Presentation tool.
 - `functions/` and `sanity.blueprint.ts`: the testimonial ASCII art Sanity Function.
+  `functions/video-to-mp4/settings.ts` holds the MP4 conversion settings (`SETTINGS_VERSION`,
+  `buildFfmpegArgs`) that every video converter uses.
+- `test/`: tests for the MP4 settings and the video block helpers (`npm test`, `npm run test:ffmpeg`).
 
 ## Notes
 
-- Mux uploads need the Mux access token entered once per dataset: open **Videos** in the Studio
-  (or any video field) and follow the setup prompt. The plugin stores it in the dataset's
-  `secrets.mux` document.
+- Videos are Sanity file assets. A video block's **Video file** accepts any `video/*` upload. The
+  video-to-mp4 Sanity Function (in `functions/video-to-mp4/`) converts the upload to MP4 (H.264,
+  longest side at most 1920 px) with the settings in `functions/video-to-mp4/settings.ts`; then
+  **Video file** holds the MP4 and the upload is kept, read-only, under **Original upload**. The
+  block's preview shows the conversion status ("Converting to MP4...", "Ready" or
+  "Conversion failed: ...").
 - The Presentation tool accepts the live site, `http://localhost:*` and this project's Vercel
   preview deployments (`https://cjoshmartin-frontend-*-josh-martins-projects-0186b4e9.vercel.app`).
   The same origins (localhost:3000 and 3333 included) are CORS origins with credentials.

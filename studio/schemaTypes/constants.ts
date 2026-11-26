@@ -65,3 +65,16 @@ export const INTERNAL_LINK_TYPES = ['blogPost', 'project', 'flexPage', 'homePage
 
 /** Fixed `_id` of the home page singleton. */
 export const HOME_PAGE_ID = 'homePage'
+
+/**
+ * `video.conversion.status` values, written only by the MP4 converters (the video-to-mp4 Sanity
+ * Function and the migration). See functions/video-to-mp4/settings.ts and the schema contract.
+ */
+export const VIDEO_CONVERSION_STATUSES = [
+  {title: 'Pending', value: 'pending'},
+  {title: 'Processing', value: 'processing'},
+  {title: 'Ready', value: 'ready'},
+  {title: 'Failed', value: 'failed'},
+] as const
+
+export type VideoConversionStatus = (typeof VIDEO_CONVERSION_STATUSES)[number]['value']
