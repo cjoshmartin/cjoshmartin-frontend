@@ -12,10 +12,13 @@
  *   play it from `file`.
  *
  * Like every converter, this step first looks for an asset whose source is
- * {name: "video-to-mp4", id: <original asset _id>} and reuses it instead of adding another
- * conversion. When that asset's bytes are not the local MP4 (the video-to-mp4 Function converted
- * the same original), it is downloaded and must pass the same checks as the local MP4
- * (src/video/ffmpeg.ts verifyMp4); otherwise the step fails. More than one such asset fails too.
+ * {name: "video-to-mp4", id: <original asset _id>} and whose videoToMp4SettingsVersion is the
+ * current SETTINGS_VERSION, and reuses it instead of adding another conversion. When that asset's
+ * bytes are not the local MP4 (the video-to-mp4 Function converted the same original), it is
+ * downloaded and must pass the same checks as the local MP4 (src/video/ffmpeg.ts verifyMp4);
+ * otherwise the step fails. More than one such asset fails too. Conversions of the same original
+ * made with other settings are left alone here; once the import has pointed every block at the
+ * current MP4, the prune-mp4s step deletes them.
  *
  * Assets are content-addressed, so reruns reuse what is there and only patch metadata. The step
  * protects asset metadata like the assets step: before writing, it refuses when an asset's title,
@@ -32,6 +35,7 @@ import path from 'node:path'
 import type {SanityClient} from '@sanity/client'
 
 import {
+  CONVERTED_ASSET_SETTINGS_FIELD,
   CONVERTED_ASSET_SOURCE_NAME,
   convertedFilename,
   OUTPUT_MIME_TYPE,
@@ -67,10 +71,13 @@ export function originalMimeType(filename: string): string {
 }
 
 export interface StoredFileAsset extends ExistingAsset {
+  _createdAt?: string
   mimeType?: string
   extension?: string
   size?: number
   url?: string
+  /** On a converted MP4: the settings it was made with (CONVERTED_ASSET_SETTINGS_FIELD). */
+  [CONVERTED_ASSET_SETTINGS_FIELD]?: string
 }
 
 export interface VideoAssets {
@@ -87,7 +94,8 @@ export interface VideoAssets {
   }
   /**
    * Settings version and time of the conversion; the transform writes them to `conversion`. For a
-   * reused existing conversion both come from the video blocks that already play it.
+   * reused existing conversion they are the version recorded on its asset and the asset's
+   * `_createdAt`.
    */
   conversion: {settingsVersion: string; convertedAt: string}
 }
@@ -141,12 +149,22 @@ export function plannedMp4(video: ConvertedVideo, original: {_id: string; origin
   }
 }
 
-/** The video-to-mp4 assets made from `originalId`; the contract's reuse rule looks these up. */
+/** Every video-to-mp4 asset made from `originalId`, with any settings. */
 export function conversionsOf(assets: readonly StoredFileAsset[], originalId: string): StoredFileAsset[] {
   return assets.filter((a) => a.source?.name === CONVERTED_ASSET_SOURCE_NAME && a.source.id === originalId)
 }
 
-const FILE_ASSET_FIELDS = '_id, _type, sha1hash, title, description, originalFilename, source, mimeType, extension, size, url'
+/**
+ * The video-to-mp4 assets made from `originalId` with the current settings; the contract's reuse
+ * rule looks these up (source and CONVERTED_ASSET_SETTINGS_FIELD).
+ */
+export function currentConversionsOf(assets: readonly StoredFileAsset[], originalId: string): StoredFileAsset[] {
+  return conversionsOf(assets, originalId).filter(
+    (a) => a.mimeType === OUTPUT_MIME_TYPE && a[CONVERTED_ASSET_SETTINGS_FIELD] === SETTINGS_VERSION,
+  )
+}
+
+const FILE_ASSET_FIELDS = `_id, _type, _createdAt, sha1hash, title, description, originalFilename, source, mimeType, extension, size, url, ${CONVERTED_ASSET_SETTINGS_FIELD}`
 
 async function fetchFileAssets(client: SanityClient): Promise<StoredFileAsset[]> {
   return client.fetch<StoredFileAsset[]>(`*[_type == "sanity.fileAsset"]{${FILE_ASSET_FIELDS}}`)
@@ -207,38 +225,6 @@ async function waitForQuery(client: SanityClient, ids: readonly string[]): Promi
   }
 }
 
-/**
- * The settings version and time another converter recorded for the MP4 `assetId`, read from the
- * `conversion` of the video blocks that play it. The asset itself does not say which settings made
- * it, so without such a block (or with blocks that disagree) the step cannot write a truthful
- * `conversion` and fails.
- */
-async function recordedConversion(client: SanityClient, assetId: string): Promise<VideoAssets['conversion']> {
-  const docs = await client.fetch<Record<string, unknown>[]>(`*[references($id)]`, {id: assetId})
-  const found: {settingsVersion: string; updatedAt: string}[] = []
-  const visit = (value: unknown): void => {
-    if (Array.isArray(value)) value.forEach(visit)
-    else if (value && typeof value === 'object') {
-      const item = value as {_type?: unknown; conversion?: {status?: unknown; outputAssetId?: unknown; settingsVersion?: unknown; updatedAt?: unknown}}
-      const c = item.conversion
-      if (item._type === 'video' && c?.status === 'ready' && c.outputAssetId === assetId && typeof c.settingsVersion === 'string' && typeof c.updatedAt === 'string') {
-        found.push({settingsVersion: c.settingsVersion, updatedAt: c.updatedAt})
-      }
-      Object.values(value).forEach(visit)
-    }
-  }
-  visit(docs)
-  const versions = [...new Set(found.map((f) => f.settingsVersion))]
-  if (versions.length !== 1) {
-    throw new Error(
-      `videos: cannot tell which settings made ${assetId}: ${versions.length ? `video blocks record ${versions.join(' and ')}` : 'no ready video block records its conversion'}. ` +
-        'Delete the asset or record its conversion, then rerun.',
-    )
-  }
-  const updatedAt = found.map((f) => f.updatedAt).sort().at(-1)!
-  return {settingsVersion: versions[0]!, convertedAt: updatedAt}
-}
-
 /** Downloads an asset's bytes from the CDN to `file` and checks their sha1. */
 async function download(url: string, file: string, sha1: string): Promise<void> {
   const response = await fetch(url, {signal: AbortSignal.timeout(10 * 60 * 1000)})
@@ -282,7 +268,7 @@ export async function uploadVideos(
     return videos.flatMap((video) => {
       const original = byKey.get(`file:${video.source.sha1}`)
       if (!original) return []
-      const conversions = conversionsOf(existing, original._id)
+      const conversions = currentConversionsOf(existing, original._id)
       const sha1 = conversions.length === 1 ? conversions[0]!.sha1hash : video.output.sha1
       return [plannedMp4(video, original, sha1)]
     })
@@ -310,10 +296,10 @@ export async function uploadVideos(
   const chosen: {video: ConvertedVideo; original: StoredFileAsset; reuse: StoredFileAsset | null}[] = []
   for (const [index, video] of videos.entries()) {
     const original = originalAssets[index]!
-    const conversions = conversionsOf(existing, original._id)
+    const conversions = currentConversionsOf(existing, original._id)
     if (conversions.length > 1) {
       throw new Error(
-        `videos: ${dataset} has ${conversions.length} video-to-mp4 assets for the original ${original._id} (media ${video.mediaId}): ` +
+        `videos: ${dataset} has ${conversions.length} video-to-mp4 assets made with ${SETTINGS_VERSION} for the original ${original._id} (media ${video.mediaId}): ` +
           `${conversions.map((c) => c._id).join(', ')}. Keep one (the one the video blocks use) and delete the others, then rerun.`,
       )
     }
@@ -336,15 +322,16 @@ export async function uploadVideos(
       if (!reuse.url) throw new Error(`${reuse._id} has no url`)
       const file = path.join(paths.videoMp4, `media-${video.mediaId}`, `existing-${dataset}-${reuse._id}.mp4`)
       await download(reuse.url, file, reuse.sha1hash)
-      const check = await verifyMp4(file, video.source.probe)
+      const check = await verifyMp4(file, video.source.probe, path.join(paths.gcs, video.source.path))
       if (!check.ok) {
         throw new Error(
           `videos: ${reuse._id}, the existing MP4 of ${original._id} (media ${video.mediaId}) in ${dataset}, fails the checks: ` +
             `${describeProblems(check.problems)}. Delete it (and point any video block at the original again), then rerun.`,
         )
       }
-      existingConversion = await recordedConversion(client, reuse._id)
-      log(`  media ${video.mediaId}: reusing ${reuse._id}, an existing conversion of ${original._id} (${existingConversion.settingsVersion}) that passes every check`)
+      if (!reuse._createdAt) throw new Error(`${reuse._id} has no _createdAt`)
+      existingConversion = {settingsVersion: SETTINGS_VERSION, convertedAt: reuse._createdAt}
+      log(`  media ${video.mediaId}: reusing ${reuse._id}, an existing conversion of ${original._id} (${SETTINGS_VERSION}) that passes every check`)
       current = reuse
       origin = 'existing'
     } else {
@@ -357,6 +344,13 @@ export async function uploadVideos(
         log(`  uploaded ${video.output.path} -> ${current._id}`)
       }
       if (current.sha1hash !== video.output.sha1) throw new Error(`Sanity stored ${video.output.path} with sha1 ${current.sha1hash}, expected ${video.output.sha1}`)
+      // The convert step made these bytes with the current settings; record that on the asset, so
+      // every converter (this step, the video-to-mp4 Function) can tell it from other versions.
+      if (current[CONVERTED_ASSET_SETTINGS_FIELD] !== SETTINGS_VERSION) {
+        await client.patch(current._id).set({[CONVERTED_ASSET_SETTINGS_FIELD]: SETTINGS_VERSION}).commit()
+        log(`  recorded ${CONVERTED_ASSET_SETTINGS_FIELD} ${SETTINGS_VERSION} on ${current._id}`)
+        patched++
+      }
     }
     if (await patchMetadata(client, current, planned)) patched++
     result.assets[original._id] = {...originals[index]!, assetId: original._id}
@@ -378,7 +372,9 @@ export async function uploadVideos(
   )
   // Conversions of these originals, from a query (the only way to search by source), once it
   // sees every asset this step uploaded.
-  const conversions = await waitForQuery(client, ids)
+  // The document endpoint's copy wins for the assets this step wrote: the query can lag behind the
+  // settings-version patch.
+  const conversions = (await waitForQuery(client, ids)).map((asset) => stored.get(asset._id) ?? asset)
   const problems: string[] = []
   for (const entry of Object.values(result.videos)) {
     const original = stored.get(entry.original.assetId)
@@ -397,8 +393,13 @@ export async function uploadVideos(
     }
     if (mp4.mimeType !== OUTPUT_MIME_TYPE) problems.push(`${where}: ${mp4._id} has mimeType ${mp4.mimeType}, expected ${OUTPUT_MIME_TYPE}`)
     if (mp4.extension !== 'mp4') problems.push(`${where}: ${mp4._id} has extension ${mp4.extension}, expected mp4`)
-    const made = conversionsOf(conversions, original._id)
-    if (made.length !== 1) problems.push(`${where}: ${original._id} has ${made.length} video-to-mp4 assets (${made.map((a) => a._id).join(', ')}), expected 1`)
+    if (mp4[CONVERTED_ASSET_SETTINGS_FIELD] !== SETTINGS_VERSION) {
+      problems.push(`${where}: ${mp4._id} records ${CONVERTED_ASSET_SETTINGS_FIELD} ${String(mp4[CONVERTED_ASSET_SETTINGS_FIELD])}, expected ${SETTINGS_VERSION}`)
+    }
+    const made = currentConversionsOf(conversions, original._id)
+    if (made.length !== 1 || made[0]!._id !== mp4._id) {
+      problems.push(`${where}: ${original._id} has ${made.length} video-to-mp4 assets made with ${SETTINGS_VERSION} (${made.map((a) => a._id).join(', ')}), expected only ${mp4._id}`)
+    }
     entry.original.mimeType = original.mimeType ?? ''
     entry.mp4.mimeType = mp4.mimeType ?? ''
     entry.mp4.size = mp4.size ?? 0

@@ -46,7 +46,7 @@ describe('convert and verify with ffmpeg', () => {
     assert.deepEqual(source.video.displayed, {width: 720, height: 1280})
     const output = path.join(dir, 'rotated-out.mp4')
     await convertToMp4({input: rotated, output, preset: 'superfast', hasAudio: true})
-    const result = await verifyMp4(output, source)
+    const result = await verifyMp4(output, source, rotated)
     assert.deepEqual(result.problems, [])
     assert.equal(result.output?.width, 720)
     assert.equal(result.output?.height, 1280)
@@ -58,7 +58,7 @@ describe('convert and verify with ffmpeg', () => {
     const source = await input(silent)
     const output = path.join(dir, 'silent-out.mp4')
     await convertToMp4({input: silent, output, preset: 'superfast', hasAudio: false})
-    const result = await verifyMp4(output, source)
+    const result = await verifyMp4(output, source, silent)
     assert.deepEqual(result.problems, [])
     assert.equal(`${result.output?.width}x${result.output?.height}`, '640x360')
     assert.equal(result.output?.audioCodec, null)
@@ -73,7 +73,7 @@ describe('convert and verify with ffmpeg', () => {
       '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-vf', 'scale=320:180', '-c:a', 'aac',
       '-metadata', 'comment=copied', bad,
     )
-    const result = await verifyMp4(bad, source)
+    const result = await verifyMp4(bad, source, silent)
     assert.equal(result.ok, false)
     const text = result.problems.map((p) => `${p.check}: ${p.message}`).join('\n')
     assert.match(text, /moov must come before mdat/)
@@ -86,8 +86,32 @@ describe('convert and verify with ffmpeg', () => {
     const source = await input(silent)
     const short = path.join(dir, 'short.mp4')
     await ffmpeg('-i', silent, '-t', '0.8', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-vf', 'scale=640:360', '-movflags', '+faststart', short)
-    const result = await verifyMp4(short, source)
-    assert.deepEqual([...new Set(result.problems.map((p) => p.check))].sort(), ['fileDuration', 'videoDuration'])
+    const result = await verifyMp4(short, source, silent)
+    // 0.8 s keeps 20 of the 25 frames, so the frame check fails as well.
+    assert.deepEqual([...new Set(result.problems.map((p) => p.check))].sort(), ['fileDuration', 'frameTimes', 'videoDuration'])
     assert.match(result.problems.map((p) => p.message).join('\n'), /lasts 0\.8/)
+  })
+
+  it('keeps every frame of a bursty variable-frame-rate clip at its time, and catches dropped or moved frames', async () => {
+    // Like media/step_count.mp4: 20 frames 20 ms apart, then 6 frames 0.5 s apart, 90 kHz time base.
+    const bursty = path.join(dir, 'bursty.mp4')
+    await ffmpeg(
+      '-f', 'lavfi', '-i', 'testsrc2=size=1004x2176:rate=50:duration=0.52',
+      '-vf', "setpts='if(lt(N,20),N*0.02,0.4+(N-19)*0.5)/TB'",
+      '-fps_mode', 'passthrough', '-enc_time_base', '1/90000', '-video_track_timescale', '90000',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-bf', '0', '-pix_fmt', 'yuv420p', bursty,
+    )
+    const source = await input(bursty)
+    const output = path.join(dir, 'bursty-out.mp4')
+    await convertToMp4({input: bursty, output, preset: 'superfast', hasAudio: false})
+    const result = await verifyMp4(output, source, bursty)
+    assert.equal(result.problems.some((p) => p.check === 'frameTimes'), false, JSON.stringify(result.problems))
+    assert.equal(result.output?.videoFrames, 26)
+
+    // The same clip at a constant 10 fps: same length, frames moved, some dropped.
+    const constant = path.join(dir, 'bursty-constant.mp4')
+    await ffmpeg('-i', bursty, '-vf', 'fps=10', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', constant)
+    const moved = await verifyMp4(constant, source, bursty)
+    assert.match(moved.problems.filter((p) => p.check === 'frameTimes').map((p) => p.message).join(''), /input frames missing or moved/)
   })
 })

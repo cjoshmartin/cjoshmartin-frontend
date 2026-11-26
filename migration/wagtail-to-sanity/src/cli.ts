@@ -21,6 +21,8 @@
  *              import it with --replace, prune documents a previous run created that the
  *              transform no longer produces (including the mux.videoAsset documents of
  *              earlier runs), record what is now in the dataset
+ *   prune-mp4s delete the MP4s of the Wagtail videos made with other settings than the current
+ *              SETTINGS_VERSION, once nothing references them (after a settings change)
  *   validate   counts, references, Portable Text integrity, hashes, videos (contract v2, no
  *              Mux left), text parity and `sanity documents validate`; writes
  *              reports/validation-<dataset>.json
@@ -52,7 +54,7 @@ import {parseArgs} from 'node:util'
 import {DATASETS, dataPaths, loadSecrets, type Dataset} from './config'
 import {log} from './util'
 
-const STEPS = ['extract', 'assets', 'convert', 'videos', 'ascii', 'transform', 'import', 'validate'] as const
+const STEPS = ['extract', 'assets', 'convert', 'videos', 'ascii', 'transform', 'import', 'prune-mp4s', 'validate'] as const
 /** Steps that never run by default; their position in this list is their order in a run. */
 const EXTRA_STEPS = ['baseline'] as const
 const ALL_STEPS = ['baseline', ...STEPS] as const
@@ -146,6 +148,11 @@ async function main(): Promise<void> {
         await importDataset(paths, target, loadSecrets(paths), {
           discardStudioEdits: values['discard-studio-edits'],
         })
+        break
+      }
+      case 'prune-mp4s': {
+        const {pruneStaleMp4s} = await import('./steps/prune-mp4s')
+        await pruneStaleMp4s(paths, target, loadSecrets(paths))
         break
       }
       case 'validate': {

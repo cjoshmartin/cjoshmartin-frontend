@@ -6,8 +6,9 @@
  * uses), then checks each output (src/video/ffmpeg.ts verifyMp4): H.264 High, yuv420p, longest
  * side at most 1920 px with even dimensions equal to the settings' own arithmetic, no rotation
  * left, moov before mdat, stereo AAC only when the input has audio, no other streams, no metadata
- * copied from the input, durations within 0.1 s of the input and every frame decoding without
- * an error. Any failing check fails the step, unless src/conversion-deviations.ts explains exactly
+ * copied from the input, every decoded frame of the original at its own time (no frame dropped,
+ * duplicated or moved), durations within 0.1 s of the input and every frame decoding without an
+ * error. ffmpeg must be 7.0 or newer (toolVersion refuses older ones). Any failing check fails the step, unless src/conversion-deviations.ts explains exactly
  * that failure of exactly those bytes (a defect of the contract settings, reported to their
  * owner); an entry there that matches nothing fails the step too.
  *
@@ -150,7 +151,7 @@ export async function convertVideos(paths: DataPaths, options: {preset?: X264Pre
      * checks, or null after recording the failure.
      */
     const check = async (file: string): Promise<{summary: OutputSummary; sha1: string; deviation?: ConversionDeviation; problems: VerificationProblem[]} | null> => {
-      const result = await verifyMp4(file, sourceProbe)
+      const result = await verifyMp4(file, sourceProbe, input)
       const outputSha1 = await hashFile(file, 'sha1')
       if (result.ok && result.output) return {summary: result.output, sha1: outputSha1, problems: []}
       const deviation = result.output

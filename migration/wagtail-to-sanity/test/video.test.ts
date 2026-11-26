@@ -4,11 +4,11 @@ import {tmpdir} from 'node:os'
 import path from 'node:path'
 import {after, describe, it} from 'node:test'
 
-import {SETTINGS_VERSION} from '../../../studio/functions/video-to-mp4/settings'
+import {CONVERTED_ASSET_SETTINGS_FIELD, SETTINGS_VERSION} from '../../../studio/functions/video-to-mp4/settings'
 import {CONVERSION_DEVIATIONS, matchingDeviation} from '../src/conversion-deviations'
 import {findAssetMetadataEdits, type ExistingAsset} from '../src/steps/assets'
 import {argsTemplate, type ConvertedVideo} from '../src/steps/convert'
-import {conversionsOf, originalMimeType, plannedMp4, plannedOriginal, type StoredFileAsset} from '../src/steps/videos'
+import {conversionsOf, currentConversionsOf, originalMimeType, plannedMp4, plannedOriginal, type StoredFileAsset} from '../src/steps/videos'
 import {
   conversionArgs,
   displayedSize,
@@ -136,6 +136,20 @@ describe('video assets', () => {
     assert.equal(plannedMp4(video, {_id: 'file-aaa-mov'}, 'bbb').originalFilename, 'file-aaa-mov.mp4')
   })
 
+  it('reuses only conversions of the original made with the current settings', () => {
+    const made = (id: string, settingsVersion?: string): StoredFileAsset => ({
+      _id: id,
+      _type: 'sanity.fileAsset',
+      sha1hash: id,
+      mimeType: 'video/mp4',
+      source: {name: 'video-to-mp4', id: 'file-aaa-mov'},
+      ...(settingsVersion === undefined ? {} : {[CONVERTED_ASSET_SETTINGS_FIELD]: settingsVersion}),
+    })
+    const assets = [made('file-1-mp4', SETTINGS_VERSION), made('file-2-mp4', 'h264-crf23-max1920-v1'), made('file-3-mp4')]
+    assert.deepEqual(conversionsOf(assets, 'file-aaa-mov').map((a) => a._id), ['file-1-mp4', 'file-2-mp4', 'file-3-mp4'])
+    assert.deepEqual(currentConversionsOf(assets, 'file-aaa-mov').map((a) => a._id), ['file-1-mp4'])
+  })
+
   it('finds earlier conversions of an original by source only', () => {
     const assets: StoredFileAsset[] = [
       {_id: 'file-1-mp4', _type: 'sanity.fileAsset', sha1hash: '1', source: {name: 'video-to-mp4', id: 'file-aaa-mov'}},
@@ -176,7 +190,7 @@ describe('matchingDeviation', () => {
   it('explains nothing else', () => {
     assert.equal(matchingDeviation({...conversion, outputSha1: 'other'}), undefined)
     assert.equal(matchingDeviation({...conversion, sourceSha1: 'other'}), undefined)
-    assert.equal(matchingDeviation({...conversion, settingsVersion: 'h264-crf23-max1920-v2'}), undefined)
+    assert.equal(matchingDeviation({...conversion, settingsVersion: 'h264-crf23-max1920-v1'}), undefined)
     assert.equal(matchingDeviation({...conversion, mediaId: listed.mediaId + 1}), undefined)
     assert.equal(matchingDeviation({...conversion, problems: [...problems, {check: 'profile', message: 'Main'}]}), undefined)
     assert.equal(matchingDeviation({...conversion, problems: problems.slice(1)}), undefined)

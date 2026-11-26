@@ -33,6 +33,7 @@ import path from 'node:path'
 import {JSDOM} from 'jsdom'
 
 import {
+  CONVERTED_ASSET_SETTINGS_FIELD,
   CONVERTED_ASSET_SOURCE_NAME,
   OUTPUT_MIME_TYPE,
   SETTINGS_VERSION,
@@ -769,6 +770,10 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
           mp4Source?.name === CONVERTED_ASSET_SOURCE_NAME && mp4Source.id === original._id,
           `${where}: ${mp4._id} has source ${JSON.stringify(mp4Source)}, expected {name: "${CONVERTED_ASSET_SOURCE_NAME}", id: "${original._id}"}`,
         )
+        check.expect(
+          mp4[CONVERTED_ASSET_SETTINGS_FIELD] === SETTINGS_VERSION,
+          `${where}: ${mp4._id} records ${CONVERTED_ASSET_SETTINGS_FIELD} ${JSON.stringify(mp4[CONVERTED_ASSET_SETTINGS_FIELD])}, expected ${SETTINGS_VERSION}`,
+        )
         check.expect(originalSource?.name === ASSET_SOURCE_NAME && originalSource.id === mediaAssetSourceId(mediaId), `${where}: original ${original._id} is not the Wagtail upload of media ${mediaId}`)
         check.expect(original.sha1hash === converted.source.sha1, `${where}: original ${original._id} has sha1 ${String(original.sha1hash)}, the bucket file ${converted.source.sha1}`)
         check.expect(
@@ -784,7 +789,10 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
           const src = a.source as {name?: string; id?: string} | undefined
           return src?.name === CONVERTED_ASSET_SOURCE_NAME && src.id === original._id
         })
-        check.expect(conversionsOfOriginal.length === 1, `${where}: ${conversionsOfOriginal.length} video-to-mp4 assets for ${original._id}, expected 1`)
+        check.expect(
+          conversionsOfOriginal.length === 1,
+          `${where}: ${conversionsOfOriginal.length} video-to-mp4 assets for ${original._id} (${conversionsOfOriginal.map((a) => `${a._id} ${String(a[CONVERTED_ASSET_SETTINGS_FIELD] ?? 'no settings version')}`).join(', ')}), expected 1; the prune-mp4s step deletes those made with other settings`,
+        )
       }
       check.expect(conversion.status === 'ready', `${where}: conversion.status is ${JSON.stringify(conversion.status)}, expected "ready"`)
       check.expect(conversion.sourceAssetId === originalRef, `${where}: conversion.sourceAssetId ${String(conversion.sourceAssetId)} is not the original ${String(originalRef)}`)

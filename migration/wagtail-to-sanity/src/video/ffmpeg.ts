@@ -3,16 +3,19 @@
  * against the contract (docs/sanity-migration/schema-contract.md, "MP4 settings").
  *
  * The conversion arguments come only from studio/functions/video-to-mp4/settings.ts, the single
- * source of truth that the video-to-mp4 Sanity Function uses too. The checks here are independent
- * of those arguments: they read the output with ffprobe, parse its top-level MP4 boxes and decode
- * every frame.
+ * source of truth that the video-to-mp4 Sanity Function uses too, and need ffmpeg 7.0 or newer
+ * (checkFfmpegVersion there; toolVersion checks it). The checks here are independent of those
+ * arguments: they read the output with ffprobe, parse its top-level MP4 boxes, decode every
+ * frame, and compare the time of every decoded frame with the original's.
  */
 import {spawn} from 'node:child_process'
 import {open} from 'node:fs/promises'
 
+import {compareFrameTimes, FRAME_TIME_TOLERANCE_SECONDS} from '../../../../studio/functions/video-to-mp4/frames'
 import {
   AUDIO_CHANNELS,
   buildFfmpegArgs,
+  checkFfmpegVersion,
   expectedOutputSize,
   MAX_DIMENSION,
   type VideoSize,
@@ -92,11 +95,15 @@ async function runOrThrow(command: string, args: readonly string[]): Promise<Com
   return result
 }
 
-/** First line of `ffmpeg -version`, e.g. "ffmpeg version 9.0.1 Copyright ...". */
+/**
+ * First line of `ffmpeg -version`, e.g. "ffmpeg version 9.0.1 Copyright ...". For ffmpeg it also
+ * checks that the version is one the MP4 settings work with (7.0 or newer), and throws otherwise.
+ */
 export async function toolVersion(tool: 'ffmpeg' | 'ffprobe'): Promise<string> {
   const {stdout} = await runOrThrow(tool, ['-hide_banner', '-version'])
   const line = stdout.split('\n')[0]?.trim()
   if (!line) throw new Error(`${tool} -version printed nothing`)
+  if (tool === 'ffmpeg') checkFfmpegVersion(stdout)
   return line
 }
 
@@ -252,9 +259,17 @@ export async function topLevelBoxes(file: string): Promise<string[]> {
   }
 }
 
-/** Decodes every stream of a file with ffmpeg; any decoder error fails. */
+/**
+ * Decodes every stream of a file with ffmpeg; any decoder error fails. The null output keeps each
+ * frame's own time (`-fps_mode:v passthrough -enc_time_base:v demux`): otherwise ffmpeg retimes a
+ * variable-frame-rate video for the null muxer and logs "non monotonically increasing dts", which
+ * is about that retiming, not about the file.
+ */
 export async function decodeErrors(file: string): Promise<string> {
-  const result = await runCommand('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', '-xerror', '-err_detect', 'explode', '-i', file, '-map', '0', '-f', 'null', '-'])
+  const result = await runCommand('ffmpeg', [
+    '-hide_banner', '-nostdin', '-v', 'error', '-xerror', '-err_detect', 'explode', '-i', file, '-map', '0',
+    '-fps_mode:v', 'passthrough', '-enc_time_base:v', 'demux', '-f', 'null', '-',
+  ])
   if (result.code !== 0) return `exit ${result.code ?? result.signal}: ${result.stderr.trim().slice(-2000)}`
   return result.stderr.trim()
 }
@@ -290,6 +305,7 @@ export interface VerificationProblem {
     | 'dimensions'
     | 'rotation'
     | 'frames'
+    | 'frameTimes'
     | 'videoDuration'
     | 'audioCodec'
     | 'audioChannels'
@@ -309,6 +325,26 @@ export function describeProblems(problems: readonly VerificationProblem[]): stri
   return problems.map((p) => `${p.check}: ${p.message}`).join('; ')
 }
 
+/**
+ * Time in seconds of every decoded frame of one video stream (ffprobe's best-effort timestamp,
+ * which is the presentation time when the stream has one), in presentation order.
+ */
+export async function videoFrameTimes(file: string, streamIndex: number): Promise<number[]> {
+  const result = await runOrThrow('ffprobe', [
+    '-hide_banner', '-v', 'error', '-select_streams', String(streamIndex),
+    '-show_entries', 'frame=best_effort_timestamp_time', '-of', 'csv=p=0', file,
+  ])
+  const times = result.stdout
+    .split('\n')
+    .map((line) => line.split(',')[0]!.trim())
+    .filter(Boolean)
+    .map(Number)
+  if (times.length === 0 || times.some((t) => !Number.isFinite(t))) {
+    throw new Error(`ffprobe printed no usable frame times for stream ${streamIndex} of ${file}`)
+  }
+  return times
+}
+
 /** Number of frames of the stream ffmpeg's `-map 0:V:0` selects, by decoding them. */
 export async function countVideoFrames(file: string, input: InputSummary): Promise<number> {
   const result = await runOrThrow('ffprobe', [
@@ -321,14 +357,16 @@ export async function countVideoFrames(file: string, input: InputSummary): Promi
 }
 
 /**
- * Checks a converted MP4 against the contract and its input:
+ * Checks a converted MP4 against the contract and its input (`inputFile`, described by `input`):
  * H.264 High, yuv420p, longest side at most MAX_DIMENSION, even dimensions that equal
  * expectedOutputSize of the input's displayed size, no rotation left, moov before mdat
  * (faststart), stereo AAC only when the input had audio and no other streams, no metadata copied
- * from the input, durations within DURATION_TOLERANCE_SECONDS, and every frame decodes without an
- * error (with as many frames read as the header declares).
+ * from the input, every decoded input frame present at its own time and no other frame
+ * (FRAME_TIME_TOLERANCE_SECONDS, times measured from each file's first frame), durations within
+ * DURATION_TOLERANCE_SECONDS, and every frame decodes without an error (with as many frames read
+ * as the header declares).
  */
-export async function verifyMp4(file: string, input: InputSummary): Promise<VerificationResult> {
+export async function verifyMp4(file: string, input: InputSummary, inputFile: string): Promise<VerificationResult> {
   const problems: VerificationProblem[] = []
   const expect = (condition: boolean, check: VerificationProblem['check'], message: string) => {
     if (!condition) problems.push({check, message})
@@ -378,6 +416,17 @@ export async function verifyMp4(file: string, input: InputSummary): Promise<Veri
     const read = Number(video.nb_read_frames)
     expect(Number.isInteger(read) && read > 0, 'frames', `no frames could be decoded (nb_read_frames ${video.nb_read_frames})`)
     expect(declared === read, 'frames', `the header declares ${video.nb_frames} frames, ${video.nb_read_frames} decoded`)
+    const [inputTimes, outputTimes] = await Promise.all([
+      videoFrameTimes(inputFile, input.video.index),
+      videoFrameTimes(file, video.index),
+    ])
+    const frames = compareFrameTimes(inputTimes, outputTimes)
+    expect(
+      frames.missing === 0 && frames.added === 0,
+      'frameTimes',
+      `${frames.outputFrames} frames for ${frames.inputFrames} input frames: ${frames.missing} input frames missing or moved, ` +
+        `${frames.added} frames not at an input frame's time (more than ${FRAME_TIME_TOLERANCE_SECONDS * 1000} ms off)`,
+    )
     const videoDuration = seconds(video.duration)
     expect(
       videoDuration !== undefined && Math.abs(videoDuration - input.video.durationSeconds) <= DURATION_TOLERANCE_SECONDS,
