@@ -24,7 +24,9 @@
  *                    no Mux document, block or token is left; an original that had personal
  *                    metadata is its stripped copy, with the same audio and video packets
  *   privacy          every asset of the dataset, downloaded, has no personal metadata (exiftool -ee,
- *                    the track list, STL headers; src/privacy/rules.ts), no asset document holds
+ *                    the Functions' image and video strippers, the track list, unused mdat bytes,
+ *                    STL headers; src/privacy/rules.ts and scan.ts), no source.url names a bucket
+ *                    object other than the asset's own bytes, no asset document holds
  *                    metadata.location or personal metadata.exif keys, no unstripped upload is left,
  *                    and every stripped copy carries its `privacy` field
  *   asciiArt         testimonial art equals the live site's and was made from the current photo
@@ -51,6 +53,7 @@ import {requirePrivacyMap} from '../privacy/copies'
 import {downloadAsset} from '../privacy/download'
 import {pixelHashes} from '../privacy/image'
 import {assetIdWithSha1, PRIVACY_FIELD, strippedMarker} from '../privacy/marker'
+import {PRIVACY_RULES_VERSION} from '../privacy/rules'
 import {scanLocalFile} from '../privacy/scan'
 import {compareMediaPackets} from '../privacy/video'
 import {mapLimit} from '../sanity'
@@ -310,6 +313,8 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
       expectedKeys.add(`${type}:${sha1}`)
       const asset = assetBySha.get(`${type}:${sha1}`)
       const source = asset?.source as {name?: string; id?: string; url?: string} | undefined
+      // The bucket URL serves the unstripped file, so only an asset with the bucket file's own bytes names it.
+      const expectedUrl = sha1 === file.sha1 ? gcsPublicUrl(file.path) : undefined
       if (!asset) {
         check.fail(`${file.path}: no ${type} asset with sha1 ${sha1}${sha1 !== file.sha1 ? ` (the copy of the bucket file without personal metadata)` : ''}`)
       } else if (file.folder === 'media') {
@@ -318,13 +323,15 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
         const mapped = mediaId === undefined ? undefined : videoMap.videos[String(mediaId)]?.original.assetId
         if (mediaId === undefined) check.fail(`${file.path}: no Wagtail media record uses this file`)
         else if (mapped !== asset._id) check.fail(`${file.path}: video map says ${mapped}, dataset has ${asset._id}`)
-        else if (source?.name !== ASSET_SOURCE_NAME || source.id !== mediaAssetSourceId(mediaId) || source.url !== gcsPublicUrl(file.path)) {
-          check.fail(`${asset._id}: source is ${JSON.stringify(source)}, expected {name: "${ASSET_SOURCE_NAME}", id: "${mediaAssetSourceId(mediaId)}", url: <bucket URL>}`)
+        else if (source?.name !== ASSET_SOURCE_NAME || source.id !== mediaAssetSourceId(mediaId) || source.url !== expectedUrl) {
+          check.fail(`${asset._id}: source is ${JSON.stringify(source)}, expected {name: "${ASSET_SOURCE_NAME}", id: "${mediaAssetSourceId(mediaId)}"${expectedUrl ? ', url: <bucket URL>' : ' (no url: a stripped copy never links to its unstripped original)'}}`)
         }
       } else if (assetMap.files[file.path] !== asset._id) {
         check.fail(`${file.path}: asset map says ${assetMap.files[file.path]}, dataset has ${asset._id}`)
       } else if (source?.name !== ASSET_SOURCE_NAME) {
         check.fail(`${asset._id}: source.name is not "${ASSET_SOURCE_NAME}"`)
+      } else if (sha1 !== file.sha1 && source.url !== undefined) {
+        check.fail(`${asset._id}: a stripped copy whose source.url names a bucket object (its unstripped original is public there)`)
       }
     }
     const migrated = assets.filter((a) => (a.source as {name?: string} | undefined)?.name === ASSET_SOURCE_NAME)
@@ -921,9 +928,24 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
     const copiesBySha1 = new Map(Object.values(privacy.copies).map((c) => [c.sha1, c]))
     let scanned = 0
     let marked = 0
-    const results = await mapLimit(assets, 6, async (asset) => ({asset, scan: await scanLocalFile(downloaded.get(asset._id)!)}))
+    const bucketByUrl = new Map(inventory.files.map((f) => [gcsPublicUrl(f.path), f]))
+    let linked = 0
+    const results = await mapLimit(assets, 6, async (asset) => ({
+      asset,
+      scan: await scanLocalFile(downloaded.get(asset._id)!, {
+        convertedMp4: (asset.source as {name?: string} | undefined)?.name === CONVERTED_ASSET_SOURCE_NAME,
+      }),
+    }))
     for (const {asset, scan} of results) {
       scanned++
+      // An asset document is public; a link in it must serve exactly the asset's (scanned) bytes.
+      const url = (asset.source as {url?: unknown} | undefined)?.url
+      if (url !== undefined) {
+        linked++
+        const file = typeof url === 'string' ? bucketByUrl.get(url) : undefined
+        if (!file) check.fail(`${asset._id}: source.url is not a bucket object of the migration`)
+        else if (file.sha1 !== asset.sha1hash) check.fail(`${asset._id}: source.url names ${file.path}, whose bytes (sha1 ${file.sha1}) are not the asset's`)
+      }
       if (scan.unreadable) check.fail(`${asset._id}: cannot be checked: ${scan.unreadable}`)
       if (scan.findings.length) check.fail(`${asset._id} (${String(asset.originalFilename ?? '')}): personal metadata (${describeFindings(scan.findings)}): ${scan.findings.map((f) => f.tag).join(', ')}`)
       const metadata = (asset.metadata ?? {}) as Record<string, unknown>
@@ -938,7 +960,7 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
         else check.fail(`${asset._id}: stripped copy without the expected ${PRIVACY_FIELD} field`)
       }
     }
-    check.summary = `${scanned} assets downloaded and scanned (exiftool -ee, tracks, STL headers): ${results.filter((r) => r.scan.findings.length).length} with personal metadata; ${marked}/${assets.filter((a) => copiesBySha1.has(String(a.sha1hash))).length} stripped copies marked; ${assets.filter((a) => originalsOfCopies.has(String(a.sha1hash))).length} unstripped uploads left`
+    check.summary = `${scanned} assets downloaded and scanned (exiftool -ee, the Functions' image and video strippers, tracks, unused mdat bytes, STL headers; rules ${PRIVACY_RULES_VERSION}): ${results.filter((r) => r.scan.findings.length).length} with personal metadata; ${marked}/${assets.filter((a) => copiesBySha1.has(String(a.sha1hash))).length} stripped copies marked; ${assets.filter((a) => originalsOfCopies.has(String(a.sha1hash))).length} unstripped uploads left; ${linked} source URLs, each serving the asset's own bytes`
     checks.push(check)
   }
 

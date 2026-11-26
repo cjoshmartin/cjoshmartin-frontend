@@ -1,13 +1,14 @@
 /**
  * exiftool for the privacy step: reading every tag of a file (embedded documents and timed
- * metadata included) and removing tags from images without touching their pixels.
+ * metadata included). Stripping is done by the Functions' strippers (src/privacy/image.ts and
+ * src/privacy/video.ts); exiftool is the independent check.
  *
  * Tag values stay in memory. Reports and state files only ever hold tag names, so no coordinate
  * or other personal value is written anywhere.
  */
 import {runCommand} from '../video/ffmpeg'
 
-/** Oldest exiftool these rules were checked with (the scan output format and the PNG/WebP writers). */
+/** Oldest exiftool these rules were checked with (the scan output format). */
 export const MIN_EXIFTOOL_VERSION = 13.0
 
 export async function exiftoolVersion(): Promise<string> {
@@ -59,35 +60,4 @@ export async function scanFile(file: string): Promise<ExiftoolScan> {
     fileType: typeof fileType === 'string' ? fileType : null,
     error: typeof error === 'string' ? error : null,
   }
-}
-
-/**
- * Warnings exiftool may print while writing that only describe a repair of the metadata structure
- * it rewrites anyway. Every tag value is compared after the write (src/privacy/image.ts), so such a
- * repair cannot change anything unnoticed. Any other warning fails the write.
- */
-const BENIGN_WRITE_WARNINGS: readonly RegExp[] = [
-  // Android screenshots store IFD0 entries out of tag order; exiftool writes them sorted.
-  /^Warning: \[minor\] Entries in IFD\d+ were out of sequence\. Fixed\. - /,
-]
-
-/**
- * Writes `input` to `output` with the given tags deleted (`-TAG=` arguments), changing nothing else
- * exiftool does not have to (it never recompresses image data). Fails when exiftool reports an
- * error or a warning that is not in BENIGN_WRITE_WARNINGS, or when `output` already exists
- * (exiftool refuses to overwrite). Returns the benign warnings it printed.
- */
-export async function writeWithoutTags(input: string, output: string, deletions: readonly string[]): Promise<string[]> {
-  if (deletions.length === 0) throw new Error('writeWithoutTags: nothing to delete')
-  for (const deletion of deletions) {
-    if (!/^-[A-Za-z0-9-]+:[A-Za-z0-9-]+=$/.test(deletion)) throw new Error(`writeWithoutTags: unexpected argument ${deletion}`)
-  }
-  const result = await runCommand('exiftool', ['-q', '-o', output, ...deletions, '--', input])
-  const messages = result.stderr.split('\n').map((line) => line.trim()).filter(Boolean)
-  const unexpected = messages.filter((line) => !BENIGN_WRITE_WARNINGS.some((pattern) => pattern.test(line)))
-  if (result.code !== 0 || unexpected.length) {
-    throw new Error(`exiftool could not write ${output} (exit ${result.code ?? result.signal}): ${(result.stderr || result.stdout).slice(-2000)}`)
-  }
-  // The input path is in each message; keep only the warning itself.
-  return messages.map((line) => line.replace(/ - .*$/, ''))
 }

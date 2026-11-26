@@ -33,7 +33,7 @@ export function strippedMarker(copy: StrippedCopyFacts): AssetPrivacy {
     version: copy.kind === 'image' ? IMAGE_STRIP_VERSION : VIDEO_STRIP_VERSION,
     message:
       `Stripped by the Wagtail migration's privacy step (rules ${PRIVACY_RULES_VERSION}, ` +
-      `${copy.kind === 'image' ? 'exiftool tag removal' : 'ISO BMFF box removal'}, no re-encoding).`,
+      `${copy.kind === 'image' ? "the image-privacy Function's stripper" : 'in-place ISO BMFF box removal, as in the video-to-mp4 Function'}, no re-encoding).`,
     removed: [...copy.removed],
     strippedFrom: copy.strippedFrom,
     updatedAt: copy.strippedAt,

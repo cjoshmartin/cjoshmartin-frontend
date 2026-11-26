@@ -133,15 +133,19 @@ describe('video assets', () => {
     assert.equal(mp4.sha1, 'bbb')
   })
 
-  it('uploads the stripped copy of an original with personal metadata, with the same metadata', () => {
+  it('uploads the stripped copy of an original with personal metadata, with the same metadata but no bucket URL', () => {
     const copy = {originalSha1: 'aaa', file: 'stripped/aaa/IMG_3151.MOV', sha1: 'ccc', kind: 'video'} as StrippedCopy
     const map = {copies: {aaa: copy}} as unknown as PrivacyMap
     const planned = plannedOriginal(video, map)
     assert.equal(planned.sha1, 'ccc')
     assert.deepEqual(planned.strippedCopy, {originalSha1: 'aaa', file: 'stripped/aaa/IMG_3151.MOV'})
-    const {sha1: _a, strippedCopy: _b, ...rest} = planned
-    const {sha1: _c, ...bucket} = plannedOriginalOfBucketFile(video)
+    const {sha1: _a, strippedCopy: _b, source, ...rest} = planned
+    const {sha1: _c, source: bucketSource, ...bucket} = plannedOriginalOfBucketFile(video)
     assert.deepEqual(rest, bucket)
+    // The bucket URL serves the unstripped original; the copy's public asset document never names it.
+    const {url, ...withoutUrl} = bucketSource
+    assert.match(String(url), /^https:\/\/storage\.googleapis\.com\//)
+    assert.deepEqual(source, withoutUrl)
     // Without a copy the bucket file itself is planned.
     assert.deepEqual(plannedOriginal(video, {copies: {}} as unknown as PrivacyMap), plannedOriginalOfBucketFile(video))
   })

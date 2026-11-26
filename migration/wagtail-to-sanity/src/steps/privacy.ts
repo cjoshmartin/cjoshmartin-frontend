@@ -2,27 +2,32 @@
  * Step: privacy (after extract, before assets).
  *
  * Owner decision (2026-11-26): no asset the public datasets serve may carry location or other
- * personal metadata, and nothing is re-encoded. The rules are in src/privacy/rules.ts. This step:
+ * personal metadata, and nothing is re-encoded. The rules are in src/privacy/rules.ts (version 2:
+ * the same policy as the image-privacy and video-to-mp4 Functions apply to new uploads). This step:
  *
- * 1. Scans every bucket content file with exiftool (-ee: embedded documents and timed metadata too),
- *    plus the track list of videos and the header of STL models, and makes a verified copy without
- *    the personal metadata of each file that has some: images with exiftool tag removal (the pixels,
- *    embedded images, orientation and ICC profile stay byte for byte), videos by removing the
- *    metadata boxes and data tracks in place (every audio and video packet stays byte for byte; see
- *    src/privacy/isobmff.ts). Copies live in privacy/stripped/ and are listed in
- *    privacy/privacy-map.json, which the assets and videos steps require: they upload the copy,
- *    never a file with personal metadata.
+ * 1. Scans every bucket content file (src/privacy/scan.ts: exiftool -ee, the Functions' own
+ *    strippers' analysis, the track list and container check of videos, the header of STL models)
+ *    and makes a verified copy without the personal metadata of each file that has some, with the
+ *    Functions' strippers: images keep their coded image, orientation and ICC profile byte for byte
+ *    (studio/functions/privacy/image-strip.ts), videos are edited in place and keep every audio and
+ *    video packet byte for byte (studio/functions/privacy/isobmff-video.ts). Copies live in
+ *    privacy/stripped/ and are listed in privacy/privacy-map.json, which the assets and videos steps
+ *    require: they upload the copy, never a file with personal metadata.
  * 2. Inventories every asset of the dataset (images and files): its bytes (the local copy with the
  *    same sha1, or a download), the scan, `metadata.location`/`metadata.exif` and the documents
  *    that use it. Writes privacy/inventory-<dataset>.json (local only; tag names, never values).
  * 3. For every asset with personal metadata: uploads the stripped copy with the same title,
- *    description, file name and source and a `privacy` field (src/privacy/marker.ts) that the
+ *    description, file name and source (without `source.url`, which names the unstripped bucket
+ *    object) and a `privacy` field (src/privacy/marker.ts) that the
  *    image-privacy and video-to-mp4 Functions read as "already stripped"; moves every use of the old
  *    asset in every document (raw perspective: published, drafts, release versions) to the copy in
  *    one transaction (references keep their crop, hotspot, alt text and caption; a video block's
  *    `original` and `conversion.sourceAssetId` move together and its MP4 stays; the MP4 asset's
  *    `source.id` follows); then deletes the old asset once nothing uses it. An MP4 made by
  *    video-to-mp4 with personal metadata stops the step (it would have to be converted again).
+ *    A copy made by an earlier version of this step is replaced by the current copy of the same
+ *    bucket original (never by a copy of the copy), so every dataset and every rerun ends with the
+ *    same asset ids, and its `privacy.strippedFrom` names the Wagtail upload.
  * 4. Brings the state the later steps read up to date (the asset, video and ASCII-art maps and the
  *    NDJSON, by running the assets, videos, ascii and transform logic, which find everything in
  *    place and upload nothing), and moves the import record's entries of the documents it patched
@@ -39,9 +44,9 @@ import path from 'node:path'
 import type {SanityClient} from '@sanity/client'
 
 import {CONVERTED_ASSET_SOURCE_NAME} from '../../../../studio/functions/video-to-mp4/settings'
-import {type Dataset, type DataPaths, type Secrets} from '../config'
+import {ASSET_SOURCE_NAME, type Dataset, type DataPaths, type Secrets} from '../config'
 import {updateRecordAfterPatch, type StoredDocument} from '../import-guard'
-import {copyPath, ensureStrippedCopy, readPrivacyMap, toolVersions, writePrivacyMap, type PrivacyMap, type StrippedCopy} from '../privacy/copies'
+import {copyPath, ensureStrippedCopy, readPrivacyMap, toolVersions, withoutUrl, writePrivacyMap, type PrivacyMap, type StrippedCopy} from '../privacy/copies'
 import {downloadAsset} from '../privacy/download'
 import {assetIdWithSha1, PRIVACY_FIELD, strippedMarker} from '../privacy/marker'
 import {findAssetIdOccurrences, replacementSet, applyReplacementSet, type Occurrence} from '../privacy/repoint'
@@ -177,7 +182,7 @@ export function referencesByAsset(docs: readonly Doc[]): Map<string, string[]> {
 export function personalMetadataExifKeys(exif: unknown): string[] {
   if (!exif || typeof exif !== 'object') return []
   return Object.keys(exif)
-    .filter((key) => !key.startsWith('_') && classifyTag(`EXIF:ExifIFD:Main:${key}`) !== null)
+    .filter((key) => !key.startsWith('_') && classifyTag(`EXIF:ExifIFD:Main:${key}`, (exif as Record<string, unknown>)[key]) !== null)
     .sort()
 }
 
@@ -244,7 +249,7 @@ async function inventoryDataset(
     if (local && (await hashFile(local.file, 'sha1')) !== asset.sha1hash) local = undefined
     if (!local) local = {file: await downloadAsset(asset, downloads, token), from: 'download'}
     localFiles.set(asset._id, local.file)
-    const scan = await scanLocalFile(local.file)
+    const scan = await scanLocalFile(local.file, {convertedMp4: asset.source?.name === CONVERTED_ASSET_SOURCE_NAME})
     scans.set(asset._id, scan)
     const metadata = asset.metadata ?? {}
     return {
@@ -309,6 +314,8 @@ export function descriptiveFields(asset: AssetDocument): Record<string, unknown>
   if (unknown.length) throw new Error(`${asset._id} has fields the privacy step does not know how to carry over: ${unknown.join(', ')}`)
   const fields: Record<string, unknown> = {}
   for (const key of DESCRIPTIVE_ASSET_FIELDS) if (asset[key] !== undefined && asset[key] !== null) fields[key] = asset[key]
+  // A copy never links to where its unstripped original is (the public bucket object).
+  if (asset.source) fields.source = withoutUrl(asset.source)
   return fields
 }
 
@@ -316,12 +323,17 @@ interface Replacement {
   old: AssetDocument
   copy: StrippedCopy
   newId: string
+  /**
+   * The asset id of the upload the copy was made from (the marker's `strippedFrom`): the Wagtail
+   * upload's id for a copy of a bucket file, otherwise the old asset itself.
+   */
+  strippedFrom: string
 }
 
 async function uploadCopy(client: SanityClient, paths: DataPaths, replacement: Replacement, existing: AssetDocument | undefined): Promise<AssetDocument> {
   const {old, copy} = replacement
   const fields = descriptiveFields(old)
-  const marker = strippedMarker({kind: copy.kind, removed: copy.removed, strippedFrom: old._id, strippedAt: copy.strippedAt})
+  const marker = strippedMarker({kind: copy.kind, removed: copy.removed, strippedFrom: replacement.strippedFrom, strippedAt: copy.strippedAt})
   let current = existing
   if (!current) {
     const body = await readFile(copyPath(paths, copy))
@@ -330,7 +342,7 @@ async function uploadCopy(client: SanityClient, paths: DataPaths, replacement: R
       ...(old.mimeType ? {contentType: old.mimeType} : {}),
       ...(typeof old.title === 'string' ? {title: old.title} : {}),
       ...(typeof old.description === 'string' ? {description: old.description} : {}),
-      ...(old.source ? {source: {name: String(old.source.name), id: String(old.source.id), ...(old.source.url ? {url: old.source.url} : {})}} : {}),
+      ...(old.source ? {source: {name: String(old.source.name), id: String(old.source.id)}} : {}),
       ...(old._type === 'sanity.imageAsset' ? {extract: extractOptionsFor(old)} : {}),
     })
     current = uploaded as unknown as AssetDocument
@@ -347,6 +359,23 @@ async function uploadCopy(client: SanityClient, paths: DataPaths, replacement: R
     current = patched as unknown as AssetDocument
   }
   return current
+}
+
+/**
+ * The bucket file an asset's bytes come from: the file with the asset's sha1, or, for a copy an
+ * earlier version of this step made (source "wagtail", `privacy` stripped), the file whose sha1 is
+ * in `privacy.strippedFrom`. Null for assets that did not come from the bucket.
+ */
+export function bucketOrigin(
+  asset: Pick<AssetDocument, '_id' | 'sha1hash' | 'source' | typeof PRIVACY_FIELD>,
+  bucketBySha1: ReadonlyMap<string, {sha1: string; path: string}>,
+): {sha1: string; path: string} | null {
+  const own = bucketBySha1.get(asset.sha1hash)
+  if (own) return own
+  const privacy = asset[PRIVACY_FIELD] as {status?: unknown; strippedFrom?: unknown} | undefined
+  if (asset.source?.name !== ASSET_SOURCE_NAME || privacy?.status !== 'stripped' || typeof privacy.strippedFrom !== 'string') return null
+  const match = /^(?:image|file)-([0-9a-f]{40})-/.exec(privacy.strippedFrom)
+  return match ? (bucketBySha1.get(match[1]!) ?? null) : null
 }
 
 export interface PrivacyPlan {
@@ -378,6 +407,7 @@ export async function planPrivacy(paths: DataPaths, dataset: Dataset, secrets: S
   // --- 3. Plan: copies, the documents to patch, nothing unknown -------------------------------
   const problems: string[] = []
   const replacements: Replacement[] = []
+  const bucketBySha1 = new Map(readJson<Inventory>(path.join(paths.state, 'inventory.json')).files.map((f) => [f.sha1, f]))
   for (const asset of assets) {
     const scan = scans.get(asset._id)!
     const entry = inventory.assets.find((e) => e.assetId === asset._id)!
@@ -401,15 +431,35 @@ export async function planPrivacy(paths: DataPaths, dataset: Dataset, secrets: S
     try {
       descriptiveFields(asset)
       if (asset._type === 'sanity.imageAsset') extractOptionsFor(asset)
-      const copy = await ensureStrippedCopy(paths, map, {
-        file: localFiles.get(asset._id)!,
-        sha1: asset.sha1hash,
-        filename: asset.originalFilename ?? `${asset.sha1hash}.${asset.extension ?? 'bin'}`,
-        kind: scan.kind,
-        findings: scan.findings,
-      })
+      const origin = bucketOrigin(asset, bucketBySha1)
+      let copy: StrippedCopy
+      let strippedFrom: string
+      if (origin) {
+        // A bucket file, or a copy an earlier version of this step made of one: the current copy of
+        // that bucket file (made and verified against it in part 1), never a copy of a copy.
+        const current = map.copies[origin.sha1]
+        if (!current) {
+          problems.push(`${asset._id} comes from the bucket file ${origin.path}, which has no stripped copy although ${asset._id} has personal metadata (${describeFindings(scan.findings)})`)
+          continue
+        }
+        copy = current
+        strippedFrom = assetIdWithSha1(asset._id, asset.sha1hash, origin.sha1)
+      } else {
+        copy = await ensureStrippedCopy(paths, map, {
+          file: localFiles.get(asset._id)!,
+          sha1: asset.sha1hash,
+          filename: asset.originalFilename ?? `${asset.sha1hash}.${asset.extension ?? 'bin'}`,
+          kind: scan.kind,
+          findings: scan.findings,
+        })
+        strippedFrom = asset._id
+      }
+      if (copy.sha1 === asset.sha1hash) {
+        problems.push(`${asset._id} is the current stripped copy of its original but the scan finds personal metadata in it (${describeFindings(scan.findings)})`)
+        continue
+      }
       const newId = assetIdWithSha1(asset._id, asset.sha1hash, copy.sha1)
-      replacements.push({old: asset, copy, newId})
+      replacements.push({old: asset, copy, newId, strippedFrom})
     } catch (error) {
       problems.push(error instanceof Error ? error.message : String(error))
     }

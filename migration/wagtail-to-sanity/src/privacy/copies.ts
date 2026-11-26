@@ -7,10 +7,12 @@
  * metadata is never uploaded, its stripped copy is. Asset ids are content hashes, so the same copy
  * gives the same asset id in every dataset.
  *
- * Every copy is verified whenever it is used: images by their decoded pixels (two decoders), their
- * embedded images, ICC profile, orientation and every other tag (src/privacy/image.ts); videos by
- * every packet of every kept stream and their stream descriptions (src/privacy/video.ts). Both
- * scan the copy again and must find nothing personal.
+ * The copies are made with the Functions' own strippers (studio/functions/privacy), so a migrated
+ * asset is stripped exactly like a new upload. Every copy is verified whenever it is used: images by
+ * their decoded pixels (two decoders), ICC profile, orientation and every tag left
+ * (src/privacy/image.ts); videos by every packet of every kept stream, their stream descriptions
+ * and every byte outside the changed ranges (src/privacy/video.ts). Both scan the copy again and
+ * must find nothing personal.
  */
 import {existsSync, mkdirSync, rmSync, statSync} from 'node:fs'
 import path from 'node:path'
@@ -19,10 +21,10 @@ import type {DataPaths} from '../config'
 import {hashFile, readJson, writeJson} from '../util'
 import {runCommand, toolVersion} from '../video/ffmpeg'
 import {exiftoolVersion} from './exiftool'
-import {stripImage, verifyStrippedImage, type ImageVerification} from './image'
+import {stripImage, verifyStrippedImage, type ImageStripMethod, type ImageVerification} from './image'
 import {PRIVACY_RULES_VERSION, type Finding} from './rules'
 import type {FileKind} from './scan'
-import {stripVideo, verifyStrippedVideo, type VideoVerification} from './video'
+import {stripVideo, verifyStrippedVideo, type VideoStripMethod, type VideoVerification} from './video'
 
 export interface StrippedCopy {
   originalSha1: string
@@ -36,7 +38,7 @@ export interface StrippedCopy {
   findings: Finding[]
   /** Short names of what was removed, for the asset's `privacy.removed`. */
   removed: string[]
-  method: {tool: 'exiftool'; deletions: string[]; warnings: string[]} | {tool: 'isobmff'; removals: {what: string; bytes: number}[]; changedRanges: [number, number][]}
+  method: ImageStripMethod | VideoStripMethod
   verification: ImageVerification | VideoVerification
   strippedAt: string
   verifiedAt: string
@@ -117,12 +119,28 @@ export interface StrippedSource {
 
 /**
  * A planned upload of the bucket file with sha1 `sha1`, switched to its stripped copy when the file
- * has personal metadata: the upload then has the copy's sha1 and bytes.
+ * has personal metadata: the upload then has the copy's sha1 and bytes, and its `source` has no
+ * `url`. The bucket URL is where the unstripped original is, and asset documents are public, so a
+ * copy never links to it.
  */
-export function withStrippedCopy<T extends {sha1: string}>(planned: T, map: PrivacyMap): T & {strippedCopy?: StrippedSource} {
+export function withStrippedCopy<T extends {sha1: string; source?: {name: string; id: string; url?: string}}>(
+  planned: T,
+  map: PrivacyMap,
+): T & {strippedCopy?: StrippedSource} {
   const copy = map.copies[planned.sha1]
   if (!copy) return planned
-  return {...planned, sha1: copy.sha1, strippedCopy: {originalSha1: copy.originalSha1, file: copy.file}}
+  return {
+    ...planned,
+    ...(planned.source ? {source: withoutUrl(planned.source)} : {}),
+    sha1: copy.sha1,
+    strippedCopy: {originalSha1: copy.originalSha1, file: copy.file},
+  }
+}
+
+/** A `source` without its `url` (the location of the unstripped original). */
+export function withoutUrl<S extends {url?: string}>(source: S): Omit<S, 'url'> {
+  const {url: _url, ...rest} = source
+  return rest
 }
 
 /** The copy a planned upload uses, from the map (throws when the map no longer lists it). */
@@ -137,19 +155,10 @@ export function copyPath(paths: DataPaths, copy: StrippedCopy): string {
   return path.join(paths.privacy, copy.file)
 }
 
-/** What was removed, as short names: exiftool deletion groups and tags, or removed boxes. */
+/** What was removed, as short names: the image stripper's items, or the removed boxes and data. */
 export function removedNames(method: StrippedCopy['method']): string[] {
-  if (method.tool === 'exiftool') {
-    return method.deletions.map((d) => {
-      const [group, tag] = d.slice(1, -1).split(':') as [string, string]
-      if (group === 'GPS') return 'EXIF GPS'
-      if (group === 'MakerNotes') return 'maker notes'
-      return tag === 'all' ? `${group} (all)` : `${group} ${tag}`
-    })
-  }
-  return method.removals
-    .filter((r) => !r.what.includes('padding'))
-    .map((r) => r.what.replace(/^moov\/trak\[\d+\] \(([^)]*)\)$/, 'track ($1)'))
+  if (method.tool === 'image-strip') return [...method.removed]
+  return method.removals.map((r) => r.what)
 }
 
 /**
@@ -172,9 +181,9 @@ export async function ensureStrippedCopy(
   const now = new Date().toISOString()
   const recorded = map.copies[original.sha1]
   if (recorded && existsSync(copyPath(paths, recorded)) && (await hashFile(copyPath(paths, recorded), 'sha1')) === recorded.sha1) {
-    const verification = recorded.kind === 'image'
-      ? await verifyStrippedImage(original.file, copyPath(paths, recorded), recorded.method.tool === 'exiftool' ? recorded.method.deletions : [])
-      : await verifyStrippedVideo(original.file, copyPath(paths, recorded), recorded.method.tool === 'isobmff' ? recorded.method.changedRanges : [])
+    const verification = recorded.method.tool === 'image-strip'
+      ? await verifyStrippedImage(original.file, copyPath(paths, recorded))
+      : await verifyStrippedVideo(original.file, copyPath(paths, recorded), recorded.method.changedRanges)
     const copy: StrippedCopy = {...recorded, verification, verifiedAt: now}
     map.copies[original.sha1] = copy
     return copy
@@ -187,19 +196,17 @@ export async function ensureStrippedCopy(
   let method: StrippedCopy['method']
   let verification: StrippedCopy['verification']
   if (original.kind === 'image') {
-    const {deletions, warnings} = await stripImage(original.file, output, original.findings)
-    method = {tool: 'exiftool', deletions, warnings}
-    verification = await verifyStrippedImage(original.file, output, deletions)
+    method = await stripImage(original.file, output)
+    verification = await verifyStrippedImage(original.file, output)
   } else {
-    const result = await stripVideo(original.file, output)
-    method = {tool: 'isobmff', removals: result.removals, changedRanges: result.changedRanges}
-    verification = await verifyStrippedVideo(original.file, output, result.changedRanges)
+    method = await stripVideo(original.file, output)
+    verification = await verifyStrippedVideo(original.file, output, method.changedRanges)
   }
   const sha1 = await hashFile(output, 'sha1')
   if (recorded && recorded.sha1 !== sha1) {
     throw new Error(
       `Stripping ${original.filename} again gave sha1 ${sha1}, the map recorded ${recorded.sha1}. The copies must be ` +
-        'deterministic (both datasets and every rerun use the same asset id); check the exiftool version.',
+        'deterministic (both datasets and every rerun use the same asset id); check the stripper versions.',
     )
   }
   const copy: StrippedCopy = {

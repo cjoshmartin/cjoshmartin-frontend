@@ -1,6 +1,7 @@
 /**
- * Strips personal metadata from a video original (src/privacy/isobmff.ts) and proves that the
- * picture and the sound are untouched:
+ * Strips personal metadata from a video original in place, with the same stripper the video-to-mp4
+ * Function uses (studio/functions/privacy/isobmff-video.ts), and proves that the picture and the
+ * sound are untouched:
  *
  * - the stripped file has the same size, and every byte outside the ranges the stripper reports
  *   as changed is identical;
@@ -13,16 +14,22 @@
  *   Only stream tags may be removed (those kept must be equal);
  * - the container has the same duration, start time and bit rate, only the kept streams, and only
  *   format tags were removed;
- * - a new scan finds no personal tag and no data track.
+ * - a new scan (src/privacy/scan.ts) finds no personal tag, no data track, no metadata box with
+ *   content, no creation time, no non-zero byte of `mdat` that no track uses and no location or
+ *   device signature outside the samples.
  */
 import {createHash} from 'node:crypto'
 import {readFile, writeFile} from 'node:fs/promises'
 
+import {
+  applyIsobmffPlan,
+  bufferReader,
+  planIsobmffStrip,
+  type IsobmffVideoPlan,
+} from '../../../../studio/functions/privacy/isobmff-video'
 import {runCommand} from '../video/ffmpeg'
-import {scanFile} from './exiftool'
-import {listTracks, stripIsobmff, type IsobmffStripResult} from './isobmff'
 import {stableStringify} from '../util'
-import {findDataTracks, findPersonalTags} from './rules'
+import {scanLocalFile} from './scan'
 
 interface ProbeStreamJson {
   index: number
@@ -134,10 +141,9 @@ export async function verifyStrippedVideo(original: string, stripped: string, ch
   }
   for (const key of Object.keys(pb.format.tags ?? {})) if (!(key in (pa.format.tags ?? {}))) problems.push(`format tag ${key} was added`)
 
-  const scan = await scanFile(stripped)
-  if (scan.error) problems.push(`exiftool reports an error on the stripped file: ${scan.error}`)
-  const remaining = [...findPersonalTags(scan.tags), ...findDataTracks(listTracks(b))]
-  if (remaining.length) problems.push(`personal metadata remains: ${remaining.map((f) => f.tag).join(', ')}`)
+  const scan = await scanLocalFile(stripped)
+  if (scan.unreadable) problems.push(`the stripped file cannot be checked: ${scan.unreadable}`)
+  if (scan.findings.length) problems.push(`personal metadata remains: ${scan.findings.map((f) => f.tag).join(', ')}`)
 
   if (problems.length) throw new Error(`${stripped} is not a lossless strip of ${original}:\n- ${problems.join('\n- ')}`)
   return {
@@ -149,16 +155,30 @@ export async function verifyStrippedVideo(original: string, stripped: string, ch
   }
 }
 
-/** Writes the stripped copy of `input` to `output`; returns what the stripper did. */
-export async function stripVideo(input: string, output: string): Promise<Omit<IsobmffStripResult, 'output'>> {
-  const result = stripIsobmff(await readFile(input))
-  await writeFile(output, result.output, {flag: 'wx'})
+export interface VideoStripMethod {
+  tool: 'isobmff'
+  /** What was removed (box paths and track descriptions, never values). */
+  removals: {what: string; bytes: number}[]
+  /** Every byte range the stripper wrote to; the rest of the file is unchanged. */
+  changedRanges: [number, number][]
+  /** `mdat` bytes no kept track uses, and how many of them were not zero. */
+  unreferenced: IsobmffVideoPlan['unreferenced']
+}
+
+/**
+ * Writes the stripped copy of `input` to `output`; returns what the stripper did. Throws when the
+ * video has nothing personal to remove: such a video is not copied.
+ */
+export async function stripVideo(input: string, output: string): Promise<VideoStripMethod> {
+  const bytes = await readFile(input)
+  const plan = await planIsobmffStrip(bufferReader(bytes))
+  if (!plan.personal) throw new Error(`${input} has no personal metadata the video stripper removes`)
+  await writeFile(output, applyIsobmffPlan(bytes, plan), {flag: 'wx'})
   return {
-    removals: result.removals,
-    keptTracks: result.keptTracks,
-    removedTracks: result.removedTracks,
-    zeroedSampleBytes: result.zeroedSampleBytes,
-    changedRanges: result.changedRanges,
+    tool: 'isobmff',
+    removals: plan.removals.filter((r) => r.personal).map(({what, bytes}) => ({what, bytes})),
+    changedRanges: plan.changedRanges,
+    unreferenced: plan.unreferenced,
   }
 }
 

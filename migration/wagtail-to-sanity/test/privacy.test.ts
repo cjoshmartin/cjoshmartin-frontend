@@ -2,13 +2,11 @@ import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 
 import {buildImportRecord, contentHash, updateRecordAfterPatch, type StoredDocument} from '../src/import-guard'
-import {describeBoxes, listTracks, parseBoxes, stripIsobmff, UnsupportedFileError} from '../src/privacy/isobmff'
 import {assetIdWithSha1, strippedMarker} from '../src/privacy/marker'
 import {applyReplacementSet, findAssetIdOccurrences, replacementSet} from '../src/privacy/repoint'
 import {classifyTag, findDataTracks, findPersonalTags, findStlHeaderFindings, parseTagKey, readStlHeader} from '../src/privacy/rules'
-import {imageDeletionArgs} from '../src/privacy/image'
-import {removedNames} from '../src/privacy/copies'
-import {descriptiveFields, extractOptionsFor, personalMetadataExifKeys, referencesByAsset, type AssetDocument} from '../src/steps/privacy'
+import {removedNames, withStrippedCopy, type PrivacyMap} from '../src/privacy/copies'
+import {bucketOrigin, descriptiveFields, extractOptionsFor, personalMetadataExifKeys, referencesByAsset, type AssetDocument} from '../src/steps/privacy'
 
 describe('personal metadata rules', () => {
   it('reads keys with and without a separate family 1 group', () => {
@@ -45,34 +43,58 @@ describe('personal metadata rules', () => {
     for (const [key, category] of cases) assert.equal(classifyTag(key), category, key)
   })
 
-  it('keeps orientation, colour, device type, software, times and application names', () => {
-    for (const key of [
-      'EXIF:IFD0:Main:Orientation',
-      'ICC_Profile:Main:ProfileDescription',
-      'ICC_Profile:Main:ProfileCopyright',
-      'ICC_Profile:ICC-header:Main:ProfileCreator',
-      'ICC_Profile:ICC-header:Main:DeviceModel',
-      'EXIF:IFD0:Main:Make',
-      'EXIF:IFD0:Main:Model',
-      'EXIF:IFD0:Main:Software',
-      'EXIF:ExifIFD:Main:DateTimeOriginal',
-      'EXIF:ExifIFD:Main:UserComment',
-      'XMP:XMP-xmp:Main:CreatorTool',
-      'XMP:XMP-xmpMM:Main:DocumentID',
-      'PDF:Main:Creator',
-      'QuickTime:Track1:Main:HandlerDescription',
-      'QuickTime:Track1:Main:VideoOrientation',
-      'File:System:Main:FileName',
-      'ExifTool:Main:ExifToolVersion',
-    ]) {
-      assert.equal(classifyTag(key), null, key)
+  it('finds the device, capture times, comments and editing ids (rules version 2)', () => {
+    const cases: [string, unknown, ReturnType<typeof classifyTag>][] = [
+      ['EXIF:IFD0:Main:Make', 'Apple', 'device'],
+      ['EXIF:IFD0:Main:Model', 'iPhone', 'device'],
+      ['EXIF:IFD0:Main:Software', '17.4', 'device'],
+      ['EXIF:IFD0:Main:HostComputer', 'iPhone', 'device'],
+      ['EXIF:ExifIFD:Main:LensModel', 'x', 'device'],
+      ['XMP:XMP-xmp:Main:CreatorTool', 'x', 'device'],
+      ['QuickTime:Keys:Main:Model', 'MacBookPro18,1', 'device'],
+      ['QuickTime:Keys:Main:AndroidVersion', '14', 'device'],
+      ['EXIF:ExifIFD:Main:DateTimeOriginal', '2024:05:17 15:15:48', 'capture-time'],
+      ['EXIF:ExifIFD:Main:OffsetTimeOriginal', '+08:00', 'capture-time'],
+      ['QuickTime:Keys:Main:CreationDate', '2025:05:05 14:19:49+08:00', 'capture-time'],
+      ['QuickTime:QuickTime:Main:CreateDate', '2025:05:05 06:19:49', 'capture-time'],
+      ['PNG:PNG:Main:ModifyDate', '2024:05:17 15:15:48', 'capture-time'],
+      ['EXIF:ExifIFD:Main:UserComment', 'Screenshot', 'comment'],
+      ['File:File:Main:Comment', 'x', 'comment'],
+      ['XMP:XMP-xmpMM:Main:DocumentID', 'x', 'identifier'],
+    ]
+    for (const [key, value, category] of cases) assert.equal(classifyTag(key, value), category, key)
+  })
+
+  it('keeps orientation, colour, technical data, zero QuickTime times and what describes a PDF or an ICC profile', () => {
+    for (const [key, value] of [
+      ['EXIF:IFD0:Main:Orientation', 6],
+      ['EXIF:ExifIFD:Main:ColorSpace', 'Uncalibrated'],
+      ['ICC_Profile:Main:ProfileDescription', 'Display P3'],
+      ['ICC_Profile:Main:ProfileCopyright', 'Copyright Apple Inc., 2017'],
+      ['ICC_Profile:ICC-header:Main:ProfileCreator', 'Apple Computer Inc.'],
+      ['ICC_Profile:ICC-header:Main:DeviceModel', 'appl'],
+      ['ICC_Profile:ICC-header:Main:ProfileDateTime', '2017:07:07 13:22:32'],
+      ['QuickTime:QuickTime:Main:CreateDate', '0000:00:00 00:00:00'],
+      ['QuickTime:Track1:Main:TrackCreateDate', '0000:00:00 00:00:00'],
+      ['QuickTime:ItemList:Main:Encoder', 'Lavf61.1.100'],
+      ['QuickTime:Track1:Main:CompressorName', 'HEVC'],
+      ['PDF:Main:Creator', 'Mozilla/5.0'],
+      ['PDF:Main:Producer', 'Skia/PDF m137'],
+      ['PDF:Main:CreateDate', '2025:01:01 00:00:00'],
+      ['QuickTime:Track1:Main:HandlerDescription', 'Core Media Video'],
+      ['QuickTime:Track1:Main:VideoOrientation', 'Rotate 90 CW'],
+      ['File:System:Main:FileName', 'x.jpg'],
+      ['ExifTool:Main:ExifToolVersion', 13.55],
+    ] as const) {
+      assert.equal(classifyTag(key, value), null, key)
     }
   })
 
   it('lists the personal tags of a scan in key order', () => {
-    const findings = findPersonalTags({SourceFile: 'x', 'EXIF:IFD0:Main:Make': 'Apple', 'MakerNotes:Apple:Main:RunTimeFlags': 1, 'EXIF:GPS:Main:GPSLatitude': 1})
+    const findings = findPersonalTags({SourceFile: 'x', 'EXIF:IFD0:Main:Make': 'Apple', 'MakerNotes:Apple:Main:RunTimeFlags': 1, 'EXIF:GPS:Main:GPSLatitude': 1, 'EXIF:IFD0:Main:Orientation': 6})
     assert.deepEqual(findings, [
       {tag: 'EXIF:GPS:Main:GPSLatitude', category: 'location'},
+      {tag: 'EXIF:IFD0:Main:Make', category: 'device'},
       {tag: 'MakerNotes:Apple:Main:RunTimeFlags', category: 'maker-notes'},
     ])
   })
@@ -112,132 +134,67 @@ describe('personal metadata rules', () => {
   })
 
   it('reads Sanity metadata.exif keys with the same rules', () => {
-    assert.deepEqual(personalMetadataExifKeys({_type: 'sanity.imageExifMetadata', LensModel: 'x', BodySerialNumber: '1', DateTimeOriginal: 'y'}), ['BodySerialNumber'])
+    assert.deepEqual(
+      personalMetadataExifKeys({_type: 'sanity.imageExifMetadata', LensModel: 'x', BodySerialNumber: '1', DateTimeOriginal: '2024:05:17 15:15:48', ColorSpace: 1}),
+      ['BodySerialNumber', 'DateTimeOriginal', 'LensModel'],
+    )
     assert.deepEqual(personalMetadataExifKeys(undefined), [])
   })
 })
 
-describe('imageDeletionArgs', () => {
-  it('deletes whole groups for GPS, maker notes and regions and single tags otherwise', () => {
-    const args = imageDeletionArgs([
-      {tag: 'EXIF:GPS:Main:GPSLatitude', category: 'location'},
-      {tag: 'EXIF:GPS:Main:GPSLongitude', category: 'location'},
-      {tag: 'Composite:Main:GPSPosition', category: 'location'},
-      {tag: 'MakerNotes:Apple:Main:RunTimeFlags', category: 'maker-notes'},
-      {tag: 'XMP:XMP-mwg-rs:Main:RegionAreaH', category: 'person'},
-      {tag: 'EXIF:ExifIFD:Main:ImageUniqueID', category: 'identifier'},
-    ])
-    assert.deepEqual(args, ['-ExifIFD:ImageUniqueID=', '-GPS:all=', '-MakerNotes:all=', '-XMP-mwg-rs:all='])
-    assert.deepEqual(removedNames({tool: 'exiftool', deletions: args, warnings: []}), ['ExifIFD ImageUniqueID', 'EXIF GPS', 'maker notes', 'XMP-mwg-rs (all)'])
+describe('stripped copies in the plan', () => {
+  const map: PrivacyMap = {
+    rulesVersion: 'personal-metadata-v2',
+    tools: {exiftool: '', ffprobe: '', magick: ''},
+    updatedAt: '',
+    bucket: {},
+    copies: {
+      ['a'.repeat(40)]: {
+        originalSha1: 'a'.repeat(40),
+        originalFilename: 'IMG_0001.MOV',
+        kind: 'video',
+        file: 'stripped/aaa/IMG_0001.MOV',
+        sha1: 'b'.repeat(40),
+        size: 1,
+        findings: [],
+        removed: ['moov/meta'],
+        method: {tool: 'isobmff', removals: [{what: 'moov/meta', bytes: 10}], changedRanges: [[0, 10]], unreferenced: {bytes: 0, nonZeroBytes: 0}},
+        verification: {streams: [], removedStreams: [], removedFormatTags: [], removedStreamTags: [], sideData: []},
+        strippedAt: '',
+        verifiedAt: '',
+      },
+    },
+  }
+
+  it('uploads the copy, whose source never links to the unstripped bucket object', () => {
+    const planned = {sha1: 'a'.repeat(40), source: {name: 'wagtail', id: 'media-1', url: 'https://storage.googleapis.com/images-for-cms/media/IMG_0001.MOV'}}
+    assert.deepEqual(withStrippedCopy(planned, map), {
+      sha1: 'b'.repeat(40),
+      source: {name: 'wagtail', id: 'media-1'},
+      strippedCopy: {originalSha1: 'a'.repeat(40), file: 'stripped/aaa/IMG_0001.MOV'},
+    })
+    const clean = {sha1: 'c'.repeat(40), source: {name: 'wagtail', id: 'media-2', url: 'https://storage.googleapis.com/images-for-cms/media/x.mp4'}}
+    assert.deepEqual(withStrippedCopy(clean, map), clean, 'a file without personal metadata keeps its bucket URL (same bytes)')
   })
 
-  it('refuses tags inside embedded documents, which exiftool cannot delete in place', () => {
-    assert.throws(() => imageDeletionArgs([{tag: 'EXIF:GPS:Doc2:GPSLatitude', category: 'location'}]), /embedded document/)
+  it('names what the strippers removed', () => {
+    assert.deepEqual(removedNames({tool: 'image-strip', version: 'image-strip-v1', removed: ['EXIF: Make, GPS', 'XMP']}), ['EXIF: Make, GPS', 'XMP'])
+    assert.deepEqual(removedNames(map.copies['a'.repeat(40)]!.method), ['moov/meta'])
   })
-})
 
-/** An ISO BMFF box. */
-function box(type: string, ...payload: Buffer[]): Buffer {
-  const body = Buffer.concat(payload)
-  const header = Buffer.alloc(8)
-  header.writeUInt32BE(8 + body.length, 0)
-  header.write(type, 4, 'latin1')
-  return Buffer.concat([header, body])
-}
-function fullBox(type: string, ...payload: Buffer[]): Buffer {
-  return box(type, Buffer.alloc(4), ...payload)
-}
-function u32(...values: number[]): Buffer {
-  const b = Buffer.alloc(4 * values.length)
-  values.forEach((v, i) => b.writeUInt32BE(v, i * 4))
-  return b
-}
-
-/** A track with one chunk at `offset` holding samples of the given sizes. */
-function trak(id: number, handler: string, entry: string, offset: number, sampleSizes: number[], extra: Buffer[] = []): Buffer {
-  const tkhd = fullBox('tkhd', u32(0, 0, id, 0, 0), Buffer.alloc(60))
-  const hdlr = fullBox('hdlr', u32(0), Buffer.from(handler, 'latin1'), Buffer.alloc(12))
-  const stsd = fullBox('stsd', u32(1), box(entry, Buffer.alloc(8)))
-  const stsc = fullBox('stsc', u32(1, 1, sampleSizes.length, 1))
-  const stsz = fullBox('stsz', u32(0, sampleSizes.length, ...sampleSizes))
-  const stco = fullBox('stco', u32(1, offset))
-  const stbl = box('stbl', stsd, fullBox('stts', u32(0)), stsc, stsz, stco)
-  return box('trak', tkhd, ...extra, box('mdia', fullBox('mdhd', Buffer.alloc(20)), hdlr, box('minf', stbl)))
-}
-
-/**
- * ftyp, then mdat with a 4-byte video sample, a 6-byte metadata sample and a 3-byte audio sample,
- * then moov with the three tracks and a udta with a location atom.
- */
-function sampleMovie(options: {tref?: Buffer; topLevel?: Buffer} = {}): {file: Buffer; video: [number, number]; meta: [number, number]; audio: [number, number]} {
-  const ftyp = box('ftyp', Buffer.from('qt  \0\0\0\0qt  ', 'latin1'))
-  const samples = Buffer.from([1, 2, 3, 4, 9, 9, 9, 9, 9, 9, 5, 6, 7])
-  const mdatStart = ftyp.length + 8
-  const video: [number, number] = [mdatStart, mdatStart + 4]
-  const meta: [number, number] = [mdatStart + 4, mdatStart + 10]
-  const audio: [number, number] = [mdatStart + 10, mdatStart + 13]
-  const mdat = box('mdat', samples)
-  const moov = box(
-    'moov',
-    fullBox('mvhd', Buffer.alloc(96)),
-    trak(1, 'vide', 'hvc1', video[0], [4], options.tref ? [options.tref] : []),
-    trak(2, 'meta', 'mebx', meta[0], [6]),
-    trak(3, 'soun', 'mp4a', audio[0], [3], [box('udta', box('name', Buffer.from('Mono')))]),
-    box('udta', box('\xa9xyz', Buffer.from('+00.0000+000.0000/'))),
-    box('meta', Buffer.alloc(16)),
-  )
-  return {file: Buffer.concat([ftyp, mdat, moov, ...(options.topLevel ? [options.topLevel] : [])]), video, meta, audio}
-}
-
-describe('stripIsobmff', () => {
-  it('removes metadata boxes and data tracks in place and zeroes their samples', () => {
-    const {file, video, meta, audio} = sampleMovie()
-    assert.deepEqual(listTracks(file).map((t) => `${t.id}:${t.handler}/${t.sampleEntry}`), ['1:vide/hvc1', '2:meta/mebx', '3:soun/mp4a'])
-    const result = stripIsobmff(file)
-    assert.equal(result.output.length, file.length)
-    assert.deepEqual(result.keptTracks, [{id: 1, handler: 'vide'}, {id: 3, handler: 'soun'}])
-    assert.deepEqual(result.removedTracks, [{id: 2, handler: 'meta', sampleEntry: 'mebx'}])
-    assert.equal(result.zeroedSampleBytes, 6)
-    assert.deepEqual([...result.output.subarray(...video)], [1, 2, 3, 4])
-    assert.deepEqual([...result.output.subarray(...meta)], [0, 0, 0, 0, 0, 0])
-    assert.deepEqual([...result.output.subarray(...audio)], [5, 6, 7])
-    assert.deepEqual(listTracks(result.output).map((t) => t.handler), ['vide', 'soun'])
-    const tree = describeBoxes(result.output).join('\n')
-    assert.doesNotMatch(tree, /udta|meta|xyz/)
-    assert.ok(!result.output.includes(Buffer.from('+00.0000')), 'the location text is gone')
-    // Nothing outside the reported ranges changed.
-    let at = 0
-    for (const [start, end] of [...result.changedRanges, [file.length, file.length]]) {
-      assert.ok(file.subarray(at, start).equals(result.output.subarray(at, start)))
-      at = end
+  it('finds the bucket original of an asset and of a copy an earlier rule version made', () => {
+    const bucket = new Map([['a'.repeat(40), {sha1: 'a'.repeat(40), path: 'media/IMG_0001.MOV'}]])
+    const original = {_id: `file-${'a'.repeat(40)}-mov`, sha1hash: 'a'.repeat(40)}
+    assert.deepEqual(bucketOrigin(original, bucket), {sha1: 'a'.repeat(40), path: 'media/IMG_0001.MOV'})
+    const v1Copy = {
+      _id: `file-${'d'.repeat(40)}-mov`,
+      sha1hash: 'd'.repeat(40),
+      source: {name: 'wagtail', id: 'media-1'},
+      privacy: {status: 'stripped', strippedFrom: `file-${'a'.repeat(40)}-mov`},
     }
-    // Stripping the result again changes nothing more.
-    assert.ok(stripIsobmff(result.output).output.equals(result.output))
-  })
-
-  it('refuses boxes it does not know rather than keeping them', () => {
-    const {file} = sampleMovie({topLevel: box('junk', Buffer.from('owner: someone'))})
-    assert.throws(() => stripIsobmff(file), (error: unknown) => error instanceof UnsupportedFileError && /unknown top-level box "junk"/.test(error.message))
-  })
-
-  it('removes a kept track\'s reference that only points at removed tracks', () => {
-    const {file} = sampleMovie({tref: box('tref', box('tmcd', u32(2)))})
-    const result = stripIsobmff(file)
-    assert.ok(result.removals.some((r) => r.what === 'moov/trak[1] (vide)/tref (to removed tracks 2)'))
-    assert.doesNotMatch(describeBoxes(result.output).join('\n'), /tref|tmcd/)
-  })
-
-  it('refuses a reference box that points at kept and removed tracks', () => {
-    const {file} = sampleMovie({tref: box('tref', box('cdsc', u32(2, 3)))})
-    assert.throws(() => stripIsobmff(file), /references the removed track\(s\) 2 and kept ones/)
-  })
-
-  it('parses 64-bit box sizes', () => {
-    const large = Buffer.alloc(24)
-    large.writeUInt32BE(1, 0)
-    large.write('free', 4, 'latin1')
-    large.writeBigUInt64BE(24n, 8)
-    assert.deepEqual(parseBoxes(large, 0, large.length), [{type: 'free', start: 0, headerSize: 16, end: 24}])
+    assert.deepEqual(bucketOrigin(v1Copy, bucket), {sha1: 'a'.repeat(40), path: 'media/IMG_0001.MOV'})
+    assert.equal(bucketOrigin({...v1Copy, source: {name: 'image-privacy', id: 'x'}}, bucket), null, 'a Function copy is not the migration\'s')
+    assert.equal(bucketOrigin({_id: `file-${'e'.repeat(40)}-mov`, sha1hash: 'e'.repeat(40)}, bucket), null)
   })
 })
 
@@ -339,6 +296,11 @@ describe('the privacy field and copied asset fields', () => {
 
   it('carries over the descriptive fields and refuses fields it does not know', () => {
     assert.deepEqual(descriptiveFields(asset({title: 'T', source: {name: 'wagtail', id: 'image:1'}, url: 'u', privacy: {status: 'replaced'}})), {title: 'T', source: {name: 'wagtail', id: 'image:1'}})
+    assert.deepEqual(
+      descriptiveFields(asset({source: {name: 'wagtail', id: 'image:1', url: 'https://storage.googleapis.com/images-for-cms/original_images/x.jpg'}})),
+      {source: {name: 'wagtail', id: 'image:1'}},
+      'the copy does not link to the unstripped bucket object',
+    )
     assert.throws(() => descriptiveFields(asset({custom: 1})), /custom/)
   })
 

@@ -2,38 +2,67 @@
  * What counts as personal metadata in an asset (owner decision, 2026-11-26: strip location and
  * personal metadata from every asset the public datasets serve, without re-encoding).
  *
- * The rules read the tag list of `exiftool -j -a -u -ee -G0:1:3` (src/privacy/exiftool.ts), whose
- * keys are "<family 0>:<family 1>:<family 3>:<tag name>", e.g. "EXIF:GPS:Main:GPSLatitude",
+ * Version 2 (2026-11-26, privacy review): the migrated assets follow the same policy as new uploads.
+ * The image-privacy Function keeps only the orientation, the ICC profile and the technical data a
+ * decoder needs, and the video originals keep only their video and audio streams and what playback
+ * needs. Version 1 kept camera make, model, lens and software, capture times with their UTC offsets
+ * (the time zone is a coarse location), free-text comments and XMP editing ids; version 2 removes
+ * them too, with the same strippers the Functions use (studio/functions/privacy: image-strip.ts
+ * for images, isobmff-video.ts for videos). See src/privacy/scan.ts.
+ *
+ * These rules are the independent second check: they read the tag list of
+ * `exiftool -j -a -u -ee -G0:1:3` (src/privacy/exiftool.ts), whose keys are
+ * "<family 0>:<family 1>:<family 3>:<tag name>", e.g. "EXIF:GPS:Main:GPSLatitude",
  * "MakerNotes:Apple:Main:ContentIdentifier", "QuickTime:Keys:Main:GPSCoordinates" or
  * "QuickTime:Track3:Doc12:GPSLatitude" (timed metadata, one document per sample). A tag is
  * personal when it is one of:
  *
- *   location     anything GPS, location, geotag, ISO 6709 or latitude/longitude, and the IPTC/XMP
- *                place fields (City, State, Country, Sub-location, ...)
- *   maker-notes  every maker note (family 0 MakerNotes): vendor data with device and photo
- *                identifiers, face and scene detection
- *   identifier   serial numbers and other device or capture identifiers (ImageUniqueID, Apple
- *                ContentIdentifier/PhotoIdentifier, camera and device ids, owner names)
- *   person       names of people (artist, author, creator, by-line, credit, copyright, rights,
- *                contact details) and face or person regions (XMP mwg-rs, MP regions)
+ *   location      anything GPS, location, geotag, ISO 6709 or latitude/longitude, and the IPTC/XMP
+ *                 place fields (City, State, Country, Sub-location, ...)
+ *   maker-notes   every maker note (family 0 MakerNotes): vendor data with device and photo
+ *                 identifiers, face and scene detection
+ *   identifier    serial numbers and other device or capture identifiers (ImageUniqueID, Apple
+ *                 ContentIdentifier/PhotoIdentifier, camera and device ids, owner names) and the
+ *                 document and instance ids editing software writes (XMP xmpMM)
+ *   person        names of people (artist, author, creator, by-line, credit, copyright, rights,
+ *                 contact details) and face or person regions (XMP mwg-rs, MP regions)
+ *   device        the camera, phone or computer and its software: make, model, lens, software,
+ *                 host computer, XMP creator tool and toolkit, Android model and version
+ *   capture-time  when the picture or video was taken or edited, with its UTC offset (a zero
+ *                 QuickTime time, which the strippers write, is not a time)
+ *   comment       free text: user comments, descriptions, titles, keywords, ratings
  *
  * Videos also count a track that is neither video nor audio (`data-track`): timed metadata
  * (`mebx`) carries location, motion and camera details, and any other data track can.
+ * src/privacy/scan.ts adds `metadata` findings: what the Functions' strippers would remove
+ * (anything but technical data) and, for videos, metadata the exiftool scan does not see (unused
+ * bytes in `mdat`, location signatures outside the samples).
  *
- * Not personal (kept): the orientation and the ICC profile (the owner decision keeps them), colour,
- * HDR and rendering data, image size and resolution, the camera make, model, lens and software
- * name (a device type, not a person or a device), capture settings, timestamps, free-text titles
- * and comments, and the document and instance ids that editing software (XMP xmpMM) writes: they
- * identify an editing session, not a person, a device or a place. A PDF's `Creator` is the
- * authoring application, not a person.
+ * Not personal (kept): the orientation and the ICC profile (the owner decision keeps them; the
+ * ICC profile's own description, dates and device fields describe the colour profile), colour,
+ * HDR and rendering data, image size and resolution, codec and handler descriptions, a converted
+ * MP4's encoder name (the converter's), and the application, producer and dates of a PDF (an
+ * attached document, not a photo or a video; it carries what its author put in it).
  */
 
-export const PRIVACY_RULES_VERSION = 'personal-metadata-v1'
+export const PRIVACY_RULES_VERSION = 'personal-metadata-v2'
 
-export type FindingCategory = 'location' | 'maker-notes' | 'identifier' | 'person' | 'data-track'
+export type FindingCategory =
+  | 'location'
+  | 'maker-notes'
+  | 'identifier'
+  | 'person'
+  | 'device'
+  | 'capture-time'
+  | 'comment'
+  | 'data-track'
+  | 'metadata'
 
 export interface Finding {
-  /** The exiftool key ("<family 0>:<family 1>:<family 3>:<tag>"), or "Track<n>:<handler>/<entry>". */
+  /**
+   * The exiftool key ("<family 0>:<family 1>:<family 3>:<tag>"), "Track<n>:<handler>/<entry>", or
+   * "ImageStrip:<item>" / "Container:<problem>" for `metadata` findings (src/privacy/scan.ts).
+   */
   tag: string
   category: FindingCategory
 }
@@ -81,6 +110,27 @@ const PLACE_NAMES = new Set([
   'CountryPrimaryLocationName',
 ])
 const IDENTIFIER_NAME = /Serial|ImageUniqueID|ContentIdentifier|PhotoIdentifier|CameraIdentifier|CameraID|DeviceID|BodyID|OwnerName/i
+/** XMP xmpMM and Photoshop ids that link a file to its editing sessions and source files. */
+const EDITING_ID_NAME = /^(DocumentID|InstanceID|OriginalDocumentID|PreservedFileName|DocumentAncestors|DerivedFrom.*|History.*|Ingredients.*|Manifest.*|Pantry.*)$/
+/** The camera, phone or computer and its software. */
+const DEVICE_NAME = /^(Make|Model|Software|HostComputer|ProcessingSoftware|CreatorTool|XMPToolkit|Lens|LensID|LensInfo|LensMake|LensModel|LensSpecification|LensType|CameraModelName|UniqueCameraModel|LocalizedCameraModel|Android.*)$/
+/** Capture and editing times, and their UTC offsets. */
+const CAPTURE_TIME_NAME = /^(DateTime|DateTimeOriginal|DateTimeDigitized|DateTimeCreated|CreateDate|ModifyDate|MetadataDate|CreationDate|ContentCreateDate|TrackCreateDate|TrackModifyDate|MediaCreateDate|MediaModifyDate|DateCreated|TimeCreated|DigitalCreationDate|DigitalCreationTime|DigitalCreationDateTime|SubSecTime.*|SubSecDateTime.*|SubSecCreateDate|SubSecModifyDate|OffsetTime.*|TimeZone|TimeZoneOffset)$/
+/** Free text. */
+const COMMENT_NAME = /^(UserComment|ImageDescription|XPComment|XPSubject|XPTitle|XPKeywords|Comment|Description|Caption-Abstract|Headline|Keywords|Subject|Title|Label|Rating|RatingPercent|Instructions|Notes)$/
+/**
+ * Groups whose device, time and text tags describe something other than the capture: the ICC
+ * profile (kept by the owner decision; its device fields and date are the profile's) and PDF
+ * documents (their application, producer, dates and title are the document's).
+ */
+const DESCRIBES_OTHER = new Set(['ICC_Profile', 'PDF'])
+
+/** Whether a date value is unset: QuickTime writes zero times as "0000:00:00 00:00:00". */
+function isZeroTime(value: unknown): boolean {
+  if (value === undefined || value === null) return true
+  const text = String(value).trim()
+  return text === '' || /^0000:00:00(?: 00:00:00)?/.test(text)
+}
 const PERSON_NAMES = new Set([
   'Artist',
   'Author',
@@ -104,24 +154,35 @@ const PERSON_NAMES = new Set([
 /** Case-sensitive on purpose: "Face" and "Region" start a word in exiftool's CamelCase names. */
 const PERSON_NAME_PART = /Face|Region|PersonInImage|CreatorContact|CreatorAddress|CreatorCity|CreatorCountry|CreatorPostalCode|CreatorRegion|CreatorWork|Email|Phone|Address/
 
-/** The category of one exiftool tag, or null when it is not personal. */
-export function classifyTag(key: string): FindingCategory | null {
+/**
+ * The category of one exiftool tag, or null when it is not personal. `value` decides only for
+ * capture times: a zero time is no time.
+ */
+export function classifyTag(key: string, value?: unknown): FindingCategory | null {
   const tag = parseTagKey(key)
-  if (!tag || FILE_GROUPS.has(tag.family0)) return null
+  if (!tag) return null
+  // A JPEG COM segment is reported in the File group.
+  if (tag.family0 === 'File' && tag.name === 'Comment') return 'comment'
+  if (FILE_GROUPS.has(tag.family0)) return null
   if (tag.family0 === 'MakerNotes' || tag.name.startsWith('MakerNote')) return 'maker-notes'
   if (tag.family1 === 'GPS' || LOCATION_NAME.test(tag.name) || PLACE_NAMES.has(tag.name)) return 'location'
   if (IDENTIFIER_NAME.test(tag.name)) return 'identifier'
   // A PDF's Creator (and Producer) name the application that made it.
   if (tag.family0 === 'PDF' && tag.name === 'Creator') return null
   if (PERSON_NAMES.has(tag.name) || PERSON_NAME_PART.test(tag.name)) return 'person'
+  if (DESCRIBES_OTHER.has(tag.family0)) return null
+  if (tag.family1.startsWith('XMP') && EDITING_ID_NAME.test(tag.name)) return 'identifier'
+  if (DEVICE_NAME.test(tag.name)) return 'device'
+  if (CAPTURE_TIME_NAME.test(tag.name)) return isZeroTime(value) ? null : 'capture-time'
+  if (COMMENT_NAME.test(tag.name)) return 'comment'
   return null
 }
 
 /** Every personal tag in an exiftool tag list, sorted by key. */
 export function findPersonalTags(tags: Readonly<Record<string, unknown>>): Finding[] {
   const findings: Finding[] = []
-  for (const key of Object.keys(tags)) {
-    const category = classifyTag(key)
+  for (const [key, value] of Object.entries(tags)) {
+    const category = classifyTag(key, value)
     if (category) findings.push({tag: key, category})
   }
   return findings.sort((a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0))

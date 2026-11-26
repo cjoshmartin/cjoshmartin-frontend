@@ -16,10 +16,13 @@
 export const IMAGE_STRIP_VERSION = 'image-strip-v1'
 
 /**
- * Version of the video stripper (video-strip.ts: ffmpeg stream copy settings and checks). Stored on
+ * Version of the video stripper (isobmff-video.ts: in-place removal for QuickTime/MP4, with the
+ * ffmpeg stream copy of video-strip.ts for other containers; their settings and checks). Stored on
  * every stripped original (`privacy.version`) and in `video.conversion.stripVersion`.
+ * v1: ffmpeg stream copy only. v2: in-place removal (keeps the container byte for byte apart from
+ * the metadata), unused mdat bytes zeroed, the stream copy only as a fallback.
  */
-export const VIDEO_STRIP_VERSION = 'video-strip-v1'
+export const VIDEO_STRIP_VERSION = 'video-strip-v2'
 
 /**
  * Field on asset documents (`sanity.imageAsset`, `sanity.fileAsset`) that records what the
