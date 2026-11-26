@@ -12,14 +12,19 @@
  * (patching assets that already exist, for example the testimonial photos WP2 uploaded).
  *
  * Writes state/assets-<dataset>.json: bucket path, Wagtail image/document id and media id (for
- * thumbnails) -> Sanity asset id.
+ * thumbnails) -> Sanity asset id, and per asset the metadata the step left on it. That file is also
+ * the record that protects later edits: before writing anything, the step refuses when an asset's
+ * metadata differs from what it would set and from what the last run left (someone changed it since,
+ * for example with a media plugin or the API), unless the run is told to discard those changes.
+ * Without a record, metadata an earlier run wrote (source "wagtail") counts as changed too, because
+ * edits cannot be told apart; other existing assets are adopted as before.
  */
-import {createReadStream} from 'node:fs'
+import {createReadStream, existsSync} from 'node:fs'
 import path from 'node:path'
 
 import {ASSET_SOURCE_NAME, gcsPublicUrl, type Dataset, type DataPaths, type Secrets} from '../config'
 import {mapLimit, sanityClient} from '../sanity'
-import {groupBy, log, readJson, writeJson} from '../util'
+import {groupBy, log, readJson, stableStringify, writeJson} from '../util'
 import {loadExport, type WagtailDocument, type WagtailImage, type WagtailMedia} from '../wagtail'
 import type {Inventory, InventoryFile} from './extract'
 
@@ -130,7 +135,7 @@ export function planAssets(
   return planned.sort((a, b) => a.primaryPath.localeCompare(b.primaryPath))
 }
 
-interface ExistingAsset {
+export interface ExistingAsset {
   _id: string
   _type: string
   sha1hash: string
@@ -140,7 +145,84 @@ interface ExistingAsset {
   source?: {name?: string; id?: string; url?: string}
 }
 
-export async function uploadAssets(paths: DataPaths, dataset: Dataset, secrets: Secrets): Promise<AssetMap> {
+/** The asset fields this step sets. Only these are compared, written and recorded. */
+const METADATA_FIELDS = ['title', 'description', 'originalFilename', 'source'] as const
+
+type AssetMetadataSource = Pick<ExistingAsset, (typeof METADATA_FIELDS)[number]>
+
+/** The metadata this step sets, in a comparable form (missing fields are null). */
+function metadataOf(asset: AssetMetadataSource): Record<(typeof METADATA_FIELDS)[number], unknown> {
+  return {
+    title: asset.title ?? null,
+    description: asset.description ?? null,
+    originalFilename: asset.originalFilename ?? null,
+    source: asset.source ? {name: asset.source.name ?? null, id: asset.source.id ?? null, url: asset.source.url ?? null} : null,
+  }
+}
+
+/** The metadata fields whose values differ between two assets. */
+export function differingMetadata(a: AssetMetadataSource, b: AssetMetadataSource): string[] {
+  const left = metadataOf(a)
+  const right = metadataOf(b)
+  return METADATA_FIELDS.filter((field) => stableStringify(left[field]) !== stableStringify(right[field]))
+}
+
+export interface AssetMetadataEdit {
+  assetId: string
+  /** Fields that differ from what this run would set. */
+  fields: string[]
+  reason: 'changed since the last run' | 'not set by this migration' | 'set by a run that left no record'
+}
+
+/**
+ * The assets whose metadata this run would overwrite although this migration did not leave it so.
+ * An asset whose metadata already equals the plan needs no write. One whose metadata still equals
+ * what the last run left (`previous`) is the migration's own and may follow a changed plan.
+ * Anything else changed outside this migration. Without a record, only metadata that names this
+ * migration as its source counts, because the first run adopts assets uploaded by others (the
+ * testimonial photos WP2 uploaded).
+ */
+export function findAssetMetadataEdits(
+  planned: readonly PlannedAsset[],
+  existingByKey: ReadonlyMap<string, ExistingAsset>,
+  previous: AssetMap | null,
+): AssetMetadataEdit[] {
+  const edits: AssetMetadataEdit[] = []
+  for (const asset of planned) {
+    const current = existingByKey.get(`${asset.type}:${asset.sha1}`)
+    if (!current) continue
+    const fields = differingMetadata(current, asset)
+    if (!fields.length) continue
+    if (previous) {
+      const recorded = previous.assets[current._id]
+      if (!recorded) edits.push({assetId: current._id, fields, reason: 'not set by this migration'})
+      else if (differingMetadata(current, recorded).length) edits.push({assetId: current._id, fields, reason: 'changed since the last run'})
+    } else if (current.source?.name === ASSET_SOURCE_NAME) {
+      edits.push({assetId: current._id, fields, reason: 'set by a run that left no record'})
+    }
+  }
+  return edits.sort((a, b) => (a.assetId < b.assetId ? -1 : a.assetId > b.assetId ? 1 : 0))
+}
+
+export function assetMapPath(paths: DataPaths, dataset: Dataset): string {
+  return path.join(paths.state, `assets-${dataset}.json`)
+}
+
+/** The map the last successful run of this step wrote for `dataset`, or null. */
+export function readAssetMap(paths: DataPaths, dataset: Dataset): AssetMap | null {
+  const file = assetMapPath(paths, dataset)
+  if (!existsSync(file)) return null
+  const map = readJson<AssetMap>(file)
+  if (map.dataset !== dataset) throw new Error(`${file} is the asset map of dataset ${map.dataset}, not ${dataset}`)
+  return map
+}
+
+export async function uploadAssets(
+  paths: DataPaths,
+  dataset: Dataset,
+  secrets: Secrets,
+  options: {discardStudioEdits: boolean},
+): Promise<AssetMap> {
   const inventory = readJson<Inventory>(path.join(paths.state, 'inventory.json'))
   const data = loadExport(paths.exportJson)
   const client = sanityClient(dataset, secrets)
@@ -153,6 +235,21 @@ export async function uploadAssets(paths: DataPaths, dataset: Dataset, secrets: 
   const existingByKey = new Map(
     existing.map((a) => [`${a._type === 'sanity.imageAsset' ? 'image' : 'file'}:${a.sha1hash}`, a]),
   )
+
+  // Nothing is uploaded or patched before this check.
+  const previous = readAssetMap(paths, dataset)
+  const edits = findAssetMetadataEdits(planned, existingByKey, previous)
+  if (edits.length) {
+    const list = edits.map((e) => `- ${e.assetId} (${e.fields.join(', ')}): ${e.reason}`).join('\n')
+    if (!options.discardStudioEdits) {
+      throw new Error(
+        `assets: refusing to change asset metadata in ${dataset}; this migration did not leave these values ` +
+          `(record: ${previous ? assetMapPath(paths, dataset) : 'none'}):\n${list}\n` +
+          'Pass --discard-studio-edits to overwrite them on purpose.',
+      )
+    }
+    log(`assets: WARNING --discard-studio-edits overwrites the metadata of these assets in ${dataset}:\n${list}`)
+  }
 
   let uploaded = 0
   let patched = 0
@@ -229,7 +326,7 @@ export async function uploadAssets(paths: DataPaths, dataset: Dataset, secrets: 
     if (!assetId.startsWith('file-')) throw new Error(`Document ${id} became ${assetId}, expected a file asset`)
   }
 
-  writeJson(path.join(paths.state, `assets-${dataset}.json`), map)
+  writeJson(assetMapPath(paths, dataset), map)
   log(`assets: ${results.length} assets ready (${uploaded} uploaded, ${results.length - uploaded} already in ${dataset}, ${patched} metadata updates)`)
   return map
 }

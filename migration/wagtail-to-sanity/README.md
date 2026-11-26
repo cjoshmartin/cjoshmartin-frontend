@@ -49,6 +49,13 @@ would otherwise overwrite those edits, and its pruning would delete the publishe
 is recorded once with `--steps baseline`, which only succeeds when every migration document still
 equals `transformed/<dataset>/data.ndjson`, so run it before the transform changes that file.
 
+When a run includes `import`, that check also runs before the first step, so a full rerun that the
+import would refuse stops before the `assets` step writes anything or the `mux` step creates Mux
+assets. The `assets` step protects asset metadata the same way, with `state/assets-<dataset>.json`
+as its record: it refuses before uploading or patching anything when an asset's `title`,
+`description`, `originalFilename` or `source` differs both from what it would set and from what its
+last run left. `--discard-studio-edits` overrides that too.
+
 To add videos later (Mux's free plan refused media 11–29), don't rerun the import. Upgrade the Mux
 environment, then run the `mux` step and the narrow `videos` step, which only creates the missing
 `mux-video-<id>` documents with `createIfNotExists`, adds them to the record, and checks that every
@@ -70,7 +77,7 @@ the parity and convergence checks list their edits as differences, which is expe
 | Step | What it does |
 |---|---|
 | `extract` | Unzips the export and checks it against the manifest (bytes and sha256). Mirrors `original_images/`, `documents/`, `media/` and `media_thumbnails/` with `gsutil -m rsync -r -d`. Hashes every file and reconciles files against the image, document and media records. Every discrepancy must be listed with its evidence in [`src/discrepancies.ts`](src/discrepancies.ts), otherwise the step fails. It also fails when migrated content references a record whose file is missing. |
-| `assets` | Uploads every image, document and media thumbnail with `title`, `originalFilename` and `source {name: "wagtail", id, url}`. Assets are content-addressed, so files that are already in the dataset are only patched to the same metadata. |
+| `assets` | Uploads every image, document and media thumbnail with `title`, `originalFilename` and `source {name: "wagtail", id, url}`. Assets are content-addressed, so files that are already in the dataset are only patched to the same metadata. Refuses before writing when asset metadata changed since its last run (see above). |
 | `mux` | Lists Mux assets and reuses the one whose passthrough is `wagtail-media-<id>`, otherwise creates it from the public bucket URL (basic quality, public playback). Waits for `ready` and writes `state/mux-map.json`. The stored asset JSON is the asset's steady state: temporary master access (the weekly backup requests it, Mux reverts it after 24 hours) and its signed `master.url` are never recorded. |
 | `ascii` | Renders testimonial ASCII art with the WP2 generator from the target dataset's image CDN. All 9 testimonials must match the live site byte for byte. |
 | `transform` | Converts Wagtail rich text to Portable Text with `@portabletext/block-tools`, JSDOM and the compiled Studio schema, against a strict allowlist. StreamField bodies become one Portable Text array. Tags are ordered as the old site showed them (by name, ignoring case). A redirect to a page that is not published becomes a draft. The only content changes are the fixes listed with their evidence in [`src/content-fixes.ts`](src/content-fixes.ts). Writes `data.ndjson` sorted by `_id`, plus `reports/wp3/transform-<dataset>.json` (issues, tag merges, link-text flattening, mapping). |
@@ -86,5 +93,6 @@ their Mux ids as `_key`. Rerunning the whole pipeline converges to the same data
 ## Tests
 
 `npm test` covers the rich-text conversion (allowlist, keys, embeds, links), the document
-helpers (tag order, content fixes, Mux steady state) and the Studio-edit check of the import. `npm run typecheck` type-checks the package, including the Studio and generator modules
+helpers (tag order, content fixes, Mux steady state), the Studio-edit check of the import and the
+asset metadata check of the `assets` step. `npm run typecheck` type-checks the package, including the Studio and generator modules
 it imports.

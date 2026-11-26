@@ -5,7 +5,9 @@
  *
  * Steps, in order (all of them unless --steps is given):
  *   extract    unzip + verify the export, mirror the bucket, hash and reconcile files
- *   assets     upload every content file to the dataset (content-addressed, so reruns reuse)
+ *   assets     upload every content file to the dataset (content-addressed, so reruns reuse);
+ *              refuses before writing if asset metadata changed since its last run
+ *              (state/assets-<dataset>.json)
  *   mux        create or reuse a Mux asset per Wagtail media item and wait until it is ready
  *   ascii      generate testimonial ASCII art from the uploaded photos (WP2 generator)
  *   transform  build every Sanity document and write NDJSON to transformed/<dataset>/
@@ -25,6 +27,10 @@
  * Every step is deterministic and rerunnable; rerunning the whole pipeline converges to the
  * same dataset content.
  *
+ * When the run includes `import`, its Studio-edit check also runs before the first step, so a run
+ * that the import would refuse stops before any step writes to the dataset or to Mux. The import
+ * checks again, because the dataset can change while the run is in progress.
+ *
  * Options:
  *   --dataset <staging|production>   required
  *   --confirm-production             required together with --dataset production
@@ -37,8 +43,9 @@
  *                                    pending videos without it. With production it also needs
  *                                    --confirm-production.
  *   --discard-studio-edits           let the import overwrite or delete migration documents
- *                                    that changed in the dataset since the last import (the
- *                                    import refuses otherwise and lists them)
+ *                                    that changed in the dataset since the last import, and the
+ *                                    assets step overwrite asset metadata that changed since its
+ *                                    last run (both refuse otherwise and list them)
  *   --data-dir <path>                migration data folder (default ~/cjoshmartin-migration)
  */
 import {parseArgs} from 'node:util'
@@ -86,6 +93,13 @@ async function main(): Promise<void> {
   const target = dataset as Dataset
 
   log(`migrate: dataset ${target}, steps ${steps.join(', ')}`)
+  if (steps.includes('import')) {
+    const [{checkForStudioEdits}, {sanityClient}] = await Promise.all([import('./steps/import'), import('./sanity')])
+    log('migrate: checking for Studio edits before any step writes')
+    await checkForStudioEdits(paths, target, sanityClient(target, loadSecrets(paths)), {
+      discardStudioEdits: values['discard-studio-edits'],
+    })
+  }
   for (const step of ALL_STEPS) {
     if (!steps.includes(step)) continue
     const started = Date.now()
@@ -102,7 +116,9 @@ async function main(): Promise<void> {
       }
       case 'assets': {
         const {uploadAssets} = await import('./steps/assets')
-        await uploadAssets(paths, target, loadSecrets(paths))
+        await uploadAssets(paths, target, loadSecrets(paths), {
+          discardStudioEdits: values['discard-studio-edits'],
+        })
         break
       }
       case 'mux': {
