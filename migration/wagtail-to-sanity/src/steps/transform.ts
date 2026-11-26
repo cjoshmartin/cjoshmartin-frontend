@@ -1,5 +1,5 @@
 /**
- * Step 5: transform.
+ * Step 6: transform.
  *
  * Builds every Sanity document (src/transform/documents.ts) and writes them, sorted by _id, to
  * transformed/<dataset>/data.ndjson. The output only depends on the export and the state files,
@@ -21,7 +21,7 @@ import {log, readJson, writeJson, writeText} from '../util'
 import {loadExport, loadTagSlugs} from '../wagtail'
 import type {AsciiMap} from './ascii'
 import type {AssetMap} from './assets'
-import type {MuxMap} from './mux'
+import {readVideoAssetMap, videoAssetMapPath} from './videos'
 
 export function ndjsonPath(paths: DataPaths, dataset: Dataset): string {
   return path.join(paths.transformed, dataset, 'data.ndjson')
@@ -44,26 +44,15 @@ export function countByType(documents: SanityDocument[]): Record<string, {publis
   return Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)))
 }
 
-export async function transform(
-  paths: DataPaths,
-  dataset: Dataset,
-  options: {allowPendingVideos: boolean},
-): Promise<SanityDocument[]> {
-  const mux = readJson<MuxMap>(path.join(paths.state, 'mux-map.json'))
-  // The Mux map is shared by both datasets, so a map with pending videos may come from another
-  // run. Writing documents without those videos must be asked for on this run as well.
-  if (mux.pending.length && !options.allowPendingVideos) {
-    throw new Error(
-      `transform: ${mux.pending.length} videos are pending on Mux (media ${mux.pending.map((p) => p.mediaId).join(', ')}). ` +
-        'Run the mux step once Mux accepts them, or pass --allow-pending-videos to write everything else without them.',
-    )
-  }
+export async function transform(paths: DataPaths, dataset: Dataset): Promise<SanityDocument[]> {
+  const videos = readVideoAssetMap(paths, dataset)
+  if (!videos) throw new Error(`transform: ${videoAssetMapPath(paths, dataset)} does not exist; run the convert and videos steps first`)
   const data = loadExport(paths.exportJson)
   const result = buildDocuments({
     data,
     tagSlugs: loadTagSlugs(paths.dumpdataJson),
     assets: readJson<AssetMap>(path.join(paths.state, `assets-${dataset}.json`)),
-    mux,
+    videos,
     ascii: readJson<AsciiMap>(path.join(paths.state, `ascii-${dataset}.json`)),
     schema: await loadStudioSchema(),
   })

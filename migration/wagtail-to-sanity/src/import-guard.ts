@@ -17,7 +17,12 @@ import {createHash} from 'node:crypto'
 
 import {stableStringify} from './util'
 
-/** _id patterns this migration owns (published and drafts). */
+/**
+ * _id patterns this migration owns (published and drafts). `mux-video-<id>` are the
+ * mux.videoAsset documents earlier runs created; videos are file assets now, so the transform no
+ * longer produces them and the import deletes the ones a dataset still has, like any other id the
+ * transform dropped.
+ */
 export const MIGRATION_ID_PATTERN =
   /^(?:drafts\.)?(?:homePage|person-\d+|testimonial-\d+|service-\d+|blogPost-\d+|project-\d+|flexPage-\d+|medium-[a-z0-9]+(?:-[a-z0-9]+)*|technology-[a-z0-9]+(?:-[a-z0-9]+)*|redirect-\d+|mux-video-\d+)$/
 
@@ -44,8 +49,6 @@ export interface ImportRecord {
   /** sha256 of the NDJSON the documents came from (the last import's or the baseline's). */
   ndjsonSha256: string
   documents: Record<string, RecordedDocument>
-  /** Documents added later without a full import (the `videos` step), newest last. */
-  additions?: {recordedAt: string; step: 'videos'; ids: string[]}[]
 }
 
 export interface StudioEdits {
@@ -115,31 +118,6 @@ export function describeStudioEdits(edits: StudioEdits): string {
   if (edits.deleted.length) lines.push(`deleted, published or discarded since the last import: ${edits.deleted.join(', ')}`)
   if (edits.inReleases.length) lines.push(`in a release: ${edits.inReleases.join(', ')}`)
   return lines.map((line) => `- ${line}`).join('\n')
-}
-
-/**
- * Adds documents a later step created to the record. Only these documents are (re)recorded, so
- * changes to any other document stay visible to the next import's check.
- */
-export function addToImportRecord(
-  record: ImportRecord,
-  step: 'videos',
-  created: readonly {doc: StoredDocument; expected: StoredDocument}[],
-  recordedAt: string = new Date().toISOString(),
-): ImportRecord {
-  if (!created.length) return record
-  const documents = {...record.documents}
-  for (const {doc, expected} of created) {
-    if (typeof doc._rev !== 'string' || !doc._rev) throw new Error(`${doc._id} has no _rev`)
-    const hash = contentHash(expected)
-    if (contentHash(doc) !== hash) throw new Error(`${doc._id} differs from the document that was created`)
-    documents[doc._id] = {rev: doc._rev, contentHash: hash}
-  }
-  return {
-    ...record,
-    documents: Object.fromEntries(Object.entries(documents).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
-    additions: [...(record.additions ?? []), {recordedAt, step, ids: created.map(({doc}) => doc._id).sort()}],
-  }
 }
 
 /**

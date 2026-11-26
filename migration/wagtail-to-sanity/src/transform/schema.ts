@@ -1,8 +1,8 @@
 /**
- * Compiles the Studio's schema (studio/schemaTypes plus the `code` type from @sanity/code-input
- * and the `mux.*` types from sanity-plugin-mux-input, exactly as sanity.config.ts registers
- * them) so the rich-text conversion uses the real `blockContent` definition: its styles, lists,
- * decorators, annotations and block types. Nothing about the schema is duplicated here.
+ * Compiles the Studio's schema (studio/schemaTypes plus the `code` type from @sanity/code-input,
+ * exactly as sanity.config.ts registers them) so the rich-text conversion uses the real
+ * `blockContent` definition: its styles, lists, decorators, annotations and block types. Nothing
+ * about the schema is duplicated here.
  *
  * The Studio packages resolve from studio/node_modules, so `npm ci` must have run in studio/.
  */
@@ -42,7 +42,7 @@ export function loadStudioSchema(): Promise<StudioSchema> {
 
 async function compile(): Promise<StudioSchema> {
   const studioModules = path.join(STUDIO_DIR, 'node_modules')
-  for (const pkg of ['sanity', '@sanity/code-input', 'sanity-plugin-mux-input']) {
+  for (const pkg of ['sanity', '@sanity/code-input']) {
     if (!existsSync(path.join(studioModules, pkg, 'package.json'))) {
       throw new Error(`${pkg} is not installed in ${studioModules}; run "npm ci" in ${STUDIO_DIR}`)
     }
@@ -59,13 +59,8 @@ async function compile(): Promise<StudioSchema> {
   const {codeSchema} = (await import(path.join(studioModules, '@sanity/code-input', 'dist', 'index.js'))) as {
     codeSchema: unknown
   }
-  const {muxInput} = (await import(path.join(studioModules, 'sanity-plugin-mux-input', 'dist', 'index.js'))) as {
-    muxInput: (config: Record<string, unknown>) => {schema: {types: unknown[]}}
-  }
-  const muxTypes = muxInput({video_quality: 'basic', acceptedMimeTypes: ['video/*']}).schema.types
-  if (!Array.isArray(muxTypes)) throw new Error('sanity-plugin-mux-input did not return a list of schema types')
 
-  const types = [...schemaTypes, codeSchema, ...muxTypes]
+  const types = [...schemaTypes, codeSchema]
   const errors = groupProblems(
     validateSchema(types as never, {parentTypes: builtinTypes} as never).getTypes(),
   ).filter((group) => group.problems.some((problem) => problem.severity === 'error'))

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 
 import {
-  addToImportRecord,
   buildImportRecord,
   contentHash,
   describeStudioEdits,
@@ -110,14 +109,19 @@ describe('releaseVersionTarget', () => {
   })
 })
 
-describe('addToImportRecord', () => {
-  it('adds only the created documents and keeps edits to others visible', () => {
-    const video = {_id: 'mux-video-11', _type: 'mux.videoAsset', assetId: 'a11', playbackId: 'p11', status: 'ready'}
-    const updated = addToImportRecord(record(), 'videos', [{doc: {...video, _rev: 'v1'}, expected: video}], '2026-11-27T00:00:00Z')
-    assert.equal(updated.documents['mux-video-11']!.rev, 'v1')
-    assert.deepEqual(updated.additions, [{recordedAt: '2026-11-27T00:00:00Z', step: 'videos', ids: ['mux-video-11']}])
-    const current = [...stored(imported).map((doc) => (doc._id === 'project-43' ? {...doc, _rev: 'e1', title: 'Edited'} : doc)), {...video, _rev: 'v1'}]
-    assert.deepEqual(findStudioEdits(updated, current, []).changed, ['project-43'])
-    assert.throws(() => addToImportRecord(record(), 'videos', [{doc: {...video, _rev: 'v1', status: 'errored'}, expected: video}]), /differs/)
+describe('mux.videoAsset documents of earlier runs', () => {
+  it('count as unchanged migration documents, so the import that prunes them is not refused', () => {
+    const video = {_id: 'mux-video-1', _type: 'mux.videoAsset', assetId: 'a1', playbackId: 'p1', status: 'ready'}
+    const withVideo = buildImportRecord({
+      dataset: 'production',
+      source: 'import',
+      ndjsonSha256: 'abc',
+      expected: [...imported, video],
+      stored: stored([...imported, video]),
+      recordedAt: '2026-11-25T23:10:22.976Z',
+    })
+    assert.equal(hasStudioEdits(findStudioEdits(withVideo, stored([...imported, video]), [])), false)
+    // The record tracks it: a dataset without it shows it as deleted.
+    assert.deepEqual(findStudioEdits(withVideo, stored(imported), []).deleted, ['mux-video-1'])
   })
 })

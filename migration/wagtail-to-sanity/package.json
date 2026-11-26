@@ -2,7 +2,7 @@
   "name": "cjoshmartin-wagtail-to-sanity",
   "version": "1.0.0",
   "private": true,
-  "description": "One-time migration of the cjoshmartin.com Wagtail export (pages, snippets, images, documents, videos) into Sanity.",
+  "description": "One-time migration of the cjoshmartin.com Wagtail export (pages, snippets, images, documents, videos converted to MP4) into Sanity.",
   "license": "UNLICENSED",
   "type": "module",
   "engines": {
@@ -12,6 +12,7 @@
     "migrate": "tsx src/cli.ts",
     "compare": "tsx src/compare.ts",
     "test": "tsx --test test/*.test.ts",
+    "test:ffmpeg": "tsx --test test/*.integration.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

@@ -5,7 +5,8 @@
  *   wagtail-export.zip          the "Export for Sanity" zip from the Wagtail admin
  *   extracted/                  the unzipped export (export.json, dumpdata.json, manifest.json)
  *   gcs/                        local copy of the bucket's content folders
- *   state/                      maps that make reruns converge (assets, Mux, ASCII art)
+ *   video-mp4/media-<id>/       the Wagtail videos converted to MP4 (convert step)
+ *   state/                      maps that make reruns converge (assets, MP4s, videos, ASCII art)
  *   transformed/<dataset>/      NDJSON written by the transform step
  *   reports/                    detailed data reports (never committed)
  */
@@ -43,8 +44,13 @@ export type GcsContentFolder = (typeof GCS_CONTENT_FOLDERS)[number]
 /** `source.name` on every Sanity asset uploaded by this migration. */
 export const ASSET_SOURCE_NAME = 'wagtail'
 
-/** Mux passthrough prefix; `wagtail-media-<id>` lets reruns find assets they already created. */
-export const MUX_PASSTHROUGH_PREFIX = 'wagtail-media-'
+/**
+ * `source.id` of the asset holding a Wagtail video as it was uploaded (the `original` of its
+ * video block). The converted MP4 has source {name: "video-to-mp4", id: <that asset's _id>}.
+ */
+export function mediaAssetSourceId(mediaId: number): string {
+  return `media-${mediaId}`
+}
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 
@@ -68,6 +74,7 @@ export interface DataPaths {
   dumpdataJson: string
   manifestJson: string
   gcs: string
+  videoMp4: string
   state: string
   transformed: string
   reports: string
@@ -85,6 +92,7 @@ export function dataPaths(root: string = path.join(homedir(), 'cjoshmartin-migra
     dumpdataJson: path.join(extracted, 'dumpdata.json'),
     manifestJson: path.join(extracted, 'manifest.json'),
     gcs: path.join(root, 'gcs'),
+    videoMp4: path.join(root, 'video-mp4'),
     state: path.join(root, 'state'),
     transformed: path.join(root, 'transformed'),
     reports: path.join(root, 'reports'),
@@ -95,8 +103,6 @@ export function dataPaths(root: string = path.join(homedir(), 'cjoshmartin-migra
 
 export interface Secrets {
   sanityWriteToken: string
-  muxTokenId: string
-  muxTokenSecret: string
 }
 
 /**
@@ -105,7 +111,7 @@ export interface Secrets {
  * never logged.
  */
 export function loadSecrets(paths: DataPaths): Secrets {
-  const needed = ['SANITY_WRITE_TOKEN', 'MUX_TOKEN_ID', 'MUX_TOKEN_SECRET'] as const
+  const needed = ['SANITY_WRITE_TOKEN'] as const
   if (needed.some((name) => !process.env[name]) && existsSync(paths.secretsFile)) {
     process.loadEnvFile(paths.secretsFile)
   }
@@ -122,8 +128,6 @@ export function loadSecrets(paths: DataPaths): Secrets {
   }
   return {
     sanityWriteToken: process.env.SANITY_WRITE_TOKEN as string,
-    muxTokenId: process.env.MUX_TOKEN_ID as string,
-    muxTokenSecret: process.env.MUX_TOKEN_SECRET as string,
   }
 }
 

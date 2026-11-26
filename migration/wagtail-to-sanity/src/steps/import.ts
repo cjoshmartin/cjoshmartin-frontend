@@ -1,5 +1,5 @@
 /**
- * Step 6: import.
+ * Step 7: import.
  *
  * 1. Checks that no migration document changed in the dataset since this migration last wrote it
  *    (src/import-guard.ts, record in state/imported-<dataset>.json). Studio edits, drafts opened
@@ -11,9 +11,10 @@
  * 3. Imports it with `sanity datasets import --replace`: documents with the same _id are
  *    replaced, so reruns converge.
  * 4. Prunes documents that an earlier run created but the transform no longer produces (for
- *    example a page that has since been published, whose drafts.<id> must go). Only ids that
- *    follow this migration's deterministic patterns are considered; assets, secrets.mux and
- *    anything an editor created (Studio ids are random) are never touched.
+ *    example a page that has since been published, whose drafts.<id> must go, or the
+ *    mux.videoAsset documents of earlier runs). Only ids that follow this migration's
+ *    deterministic patterns are considered; assets, `secrets.*` documents and anything an editor
+ *    created (Studio ids are random) are never touched.
  * 5. Records the `_rev` and content hash of every migration document for the next run's check.
  *
  * The CLI uses the machine's `sanity login` (the project owner).
@@ -123,7 +124,7 @@ export async function checkForStudioEdits(
     throw new Error(
       `import: refusing to import into ${dataset}; migration documents changed since this migration last wrote them ` +
         `(${record.source}, ${record.recordedAt}):\n${describeStudioEdits(edits)}\n` +
-        'An import would overwrite or delete these changes. Keep them and only add missing videos with --steps mux,videos, ' +
+        'An import would overwrite or delete these changes. Keep them (and change those documents in the Studio instead), ' +
         'or pass --discard-studio-edits to overwrite them on purpose.',
     )
   }

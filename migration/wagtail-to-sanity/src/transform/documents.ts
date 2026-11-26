@@ -9,8 +9,10 @@
  * - Snippets (author, testimonials, services) become published documents.
  * - Tags become medium/technology documents, merging names that differ only by case or
  *   whitespace (every merge is reported).
- * - Redirects become redirect documents (a draft when the target page is not published);
- *   Mux videos become mux.videoAsset documents.
+ * - Redirects become redirect documents (a draft when the target page is not published).
+ * - Videos become `video` blocks (video contract v2) that play the converted MP4 asset (`file`)
+ *   and keep the uploaded original (`original`), with `conversion` already `ready`. There are no
+ *   video documents.
  *
  * Empty values are left unset (never null). `_key`s come from Wagtail block ids.
  */
@@ -28,7 +30,7 @@ import {
 import type {StudioSchema} from './schema'
 import type {AssetMap} from '../steps/assets'
 import type {AsciiMap} from '../steps/ascii'
-import type {MuxMap, MuxMapEntry} from '../steps/mux'
+import type {VideoAssetMap} from '../steps/videos'
 import {LINK_HREF_FIXES, linkHrefFix, type LinkHrefFix} from '../content-fixes'
 import {migratedRevisions} from '../references'
 import {
@@ -83,7 +85,7 @@ export interface TransformInput {
   data: WagtailExport
   tagSlugs: Map<string, string>
   assets: AssetMap
-  mux: MuxMap
+  videos: VideoAssetMap
   ascii: AsciiMap
   schema: StudioSchema
 }
@@ -142,7 +144,7 @@ export function pageSitePath(page: WagtailPage, slug: string): string {
 }
 
 export function buildDocuments(input: TransformInput): TransformResult {
-  const {data, assets, mux, ascii, schema} = input
+  const {data, assets, videos, ascii, schema} = input
   const {constants, validation} = schema
   const issues: Issue[] = []
   const documents: SanityDocument[] = []
@@ -157,6 +159,9 @@ export function buildDocuments(input: TransformInput): TransformResult {
 
   if (constants.HOME_PAGE_ID !== HOME_PAGE_DOCUMENT_ID) {
     throw new TransformError(`The Studio's HOME_PAGE_ID is ${constants.HOME_PAGE_ID}, expected ${HOME_PAGE_DOCUMENT_ID}`)
+  }
+  if (!constants.VIDEO_CONVERSION_STATUSES.some((s) => s.value === READY)) {
+    throw new TransformError(`The Studio's video conversion statuses do not include "${READY}"`)
   }
 
   // --- Resolvers ------------------------------------------------------------------------
@@ -281,14 +286,9 @@ export function buildDocuments(input: TransformInput): TransformResult {
           if (typeof mediaId !== 'number' || !data.media.some((m) => m.id === mediaId)) {
             throw new TransformError(`${where}: media ${JSON.stringify(mediaId)} is not in the export`)
           }
-          if (!mux.videos[String(mediaId)] && !mux.pending.some((p) => p.mediaId === mediaId)) {
-            throw new TransformError(`${where}: media ${mediaId} has no Mux asset (run the mux step)`)
-          }
-          out.push({
-            _type: 'video',
-            _key: keys.claim(block.id),
-            asset: {_type: 'mux.video', asset: {_type: 'reference', _weak: true, _ref: `mux-video-${mediaId}`}},
-          })
+          const video = videos.videos[String(mediaId)]
+          if (!video) throw new TransformError(`${where}: media ${mediaId} has no uploaded MP4 (run the convert and videos steps)`)
+          out.push(videoBlock(keys.claim(block.id), video))
           break
         }
         default:
@@ -663,21 +663,14 @@ export function buildDocuments(input: TransformInput): TransformResult {
   }
 
   // --- Videos ---------------------------------------------------------------------------
+  // Each media item is two file assets (the original and its MP4), used by the video blocks above.
   for (const media of [...data.media].sort((a, b) => a.id - b.id)) {
-    const video = mux.videos[String(media.id)]
+    const video = videos.videos[String(media.id)]
     if (!video) {
-      const pending = mux.pending.find((p) => p.mediaId === media.id)
-      if (!pending) {
-        errors.push(`media ${media.id}: no Mux asset and not pending (run the mux step)`)
-        continue
-      }
-      // Validation fails while any video is pending; the transform still writes everything else.
-      issues.push({record: `media ${media.id}`, level: 'warning', code: 'video-pending', message: `no Mux asset yet: ${pending.reason}`})
-      mapping.push({wagtail: `wagtailmedia.Media ${media.id}`, sanity: []})
+      errors.push(`media ${media.id}: no uploaded original and MP4 (run the convert and videos steps)`)
       continue
     }
-    documents.push(muxVideoDocument(media.id, video))
-    mapping.push({wagtail: `wagtailmedia.Media ${media.id}`, sanity: [`mux-video-${media.id}`]})
+    mapping.push({wagtail: `wagtailmedia.Media ${media.id}`, sanity: [video.original.assetId, video.mp4.assetId]})
   }
 
   // --- Whole-set checks ----------------------------------------------------------------
@@ -714,41 +707,29 @@ export function buildDocuments(input: TransformInput): TransformResult {
   return {documents, issues, tagMerges, linkTextFlattening, mapping}
 }
 
-/**
- * The mux.videoAsset document for a Wagtail media item that is on Mux, in the shape
- * sanity-plugin-mux-input stores. Used by the transform and by the `videos` step.
- */
-export function muxVideoDocument(mediaId: number, video: MuxMapEntry): SanityDocument {
-  return {
-    _id: `mux-video-${mediaId}`,
-    _type: 'mux.videoAsset',
-    assetId: video.assetId,
-    playbackId: video.playbackId,
-    status: video.status,
-    filename: video.filename,
-    data: withArrayKeys(video.asset),
-  }
-}
+const READY = 'ready'
 
 /**
- * The Mux asset JSON with a deterministic `_key` on every object in every array (tracks,
- * playback_ids, ...): the item's own `id` when it has a unique one, else its index. Sanity's
- * importer would otherwise add random keys, and reruns would not converge.
+ * A `video` block (video contract v2) for a Wagtail video whose MP4 is uploaded: `file` plays the
+ * MP4, `original` keeps the upload, and `conversion` says it is ready, so
+ * `file.asset._ref == conversion.outputAssetId` and the video-to-mp4 Function has nothing to do.
+ * `conversion` is an inline object, so it has no `_type`. `updatedAt` is the time of the
+ * conversion, which keeps the block the same across reruns.
  */
-export function withArrayKeys<T>(value: T): T {
-  if (Array.isArray(value)) {
-    const ids = value.map((item) => (item && typeof item === 'object' && typeof (item as {id?: unknown}).id === 'string' ? (item as {id: string}).id : null))
-    const idsUnique = ids.every((id) => id !== null) && new Set(ids).size === ids.length
-    return value.map((item, index) => {
-      const keyed = withArrayKeys(item)
-      if (!keyed || typeof keyed !== 'object') return keyed
-      return {_key: idsUnique ? ids[index] : `i${index}`, ...(keyed as Record<string, unknown>)}
-    }) as T
+export function videoBlock(key: string, video: VideoAssetMap['videos'][string]): PTItem {
+  return {
+    _type: 'video',
+    _key: key,
+    file: {_type: 'file', asset: ref(video.mp4.assetId)},
+    original: {_type: 'file', asset: ref(video.original.assetId)},
+    conversion: {
+      status: READY,
+      sourceAssetId: video.original.assetId,
+      outputAssetId: video.mp4.assetId,
+      settingsVersion: video.conversion.settingsVersion,
+      updatedAt: video.conversion.convertedAt,
+    },
   }
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, withArrayKeys(v)])) as T
-  }
-  return value
 }
 
 /**

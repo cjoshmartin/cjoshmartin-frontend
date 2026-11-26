@@ -1,5 +1,5 @@
 /**
- * Step 4: testimonial ASCII art.
+ * Step 5: testimonial ASCII art.
  *
  * Generates `asciiArt` for every testimonial photo with the WP2 generator
  * (studio/functions/testimonial-ascii-art/generate.ts), reading the pixels from the image CDN of

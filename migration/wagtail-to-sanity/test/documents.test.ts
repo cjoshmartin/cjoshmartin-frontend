@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 
 import {LINK_HREF_FIXES, linkHrefFix} from '../src/content-fixes'
+import {SETTINGS_VERSION} from '../../../studio/functions/video-to-mp4/settings'
+import {videoConversionState, videoNeedsConversion} from '../../../studio/schemaTypes/shared/video-conversion'
 import {MIGRATION_ID_PATTERN} from '../src/steps/import'
-import {steadyStateAsset} from '../src/steps/mux'
-import {flattenLinkText, pageSitePath, withArrayKeys} from '../src/transform/documents'
+import {flattenLinkText, pageSitePath, videoBlock} from '../src/transform/documents'
 import {wagtailTagOrder, type WagtailPage} from '../src/wagtail'
 
 describe('flattenLinkText', () => {
@@ -28,14 +29,34 @@ describe('flattenLinkText', () => {
   })
 })
 
-describe('withArrayKeys', () => {
-  it('uses unique ids as keys and indexes otherwise, deterministically', () => {
-    const asset = {tracks: [{id: 'a', type: 'video'}, {id: 'b', type: 'audio'}], files: [{name: 'x'}, {name: 'y'}], meta: {n: 1}}
-    const keyed = withArrayKeys(asset)
-    assert.deepEqual((keyed.tracks as unknown as {_key: string}[]).map((t) => t._key), ['a', 'b'])
-    assert.deepEqual((keyed.files as unknown as {_key: string}[]).map((f) => f._key), ['i0', 'i1'])
-    assert.deepEqual(withArrayKeys(asset), keyed)
-    assert.equal('_key' in asset.tracks[0]!, false, 'input is not modified')
+describe('videoBlock', () => {
+  const assets = {
+    mediaId: 7,
+    original: {assetId: 'file-aaa-mov', sha1: 'aaa', originalFilename: 'IMG_3151.MOV', mimeType: 'video/quicktime'},
+    mp4: {assetId: 'file-bbb-mp4', sha1: 'bbb', originalFilename: 'IMG_3151.mp4', mimeType: 'video/mp4', size: 10, origin: 'convert' as const},
+    conversion: {settingsVersion: SETTINGS_VERSION, convertedAt: '2026-11-26T14:00:00.000Z'},
+  }
+
+  it('writes a contract v2 block that plays the MP4, keeps the original and is ready', () => {
+    assert.deepEqual(videoBlock('0f1e2d3c-key', assets), {
+      _type: 'video',
+      _key: '0f1e2d3c-key',
+      file: {_type: 'file', asset: {_type: 'reference', _ref: 'file-bbb-mp4'}},
+      original: {_type: 'file', asset: {_type: 'reference', _ref: 'file-aaa-mov'}},
+      conversion: {
+        status: 'ready',
+        sourceAssetId: 'file-aaa-mov',
+        outputAssetId: 'file-bbb-mp4',
+        settingsVersion: SETTINGS_VERSION,
+        updatedAt: '2026-11-26T14:00:00.000Z',
+      },
+    })
+  })
+
+  it('does not need conversion by the Studio rule, so the video-to-mp4 Function leaves it alone', () => {
+    const block = videoBlock('k', assets) as Parameters<typeof videoNeedsConversion>[0]
+    assert.equal(videoNeedsConversion(block), false)
+    assert.deepEqual(videoConversionState(block?.file?.asset?._ref, block?.conversion), {kind: 'ready'})
   })
 })
 
@@ -86,16 +107,5 @@ describe('LINK_HREF_FIXES', () => {
     assert.equal(linkHrefFix(fix.pageId + 1, fix.blockId, fix.from), undefined)
     assert.equal(linkHrefFix(fix.pageId, 'another-block', fix.from), undefined)
     for (const f of LINK_HREF_FIXES) assert.match(f.to, /^https:\/\//)
-  })
-})
-
-describe('steadyStateAsset', () => {
-  it('drops temporary master access, so no signed download URL is stored and reruns converge', () => {
-    const base = {id: 'a1', status: 'ready' as const, passthrough: 'wagtail-media-1', duration: 4.2}
-    const during = steadyStateAsset({...base, master_access: 'temporary', master: {status: 'ready', url: 'https://mezzanine.mux.com/x/mezzanine.mp4?signature=s'}})
-    const after = steadyStateAsset({...base, master_access: 'none'})
-    assert.deepEqual(during, {...base, master_access: 'none'})
-    assert.deepEqual(during, after)
-    assert.equal(JSON.stringify(during).includes('mezzanine'), false)
   })
 })

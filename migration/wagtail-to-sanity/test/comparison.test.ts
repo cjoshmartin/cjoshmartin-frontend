@@ -6,9 +6,7 @@ import {after, describe, it} from 'node:test'
 
 import {comparable, countByType, differingFields, digest, extraMetadataKeys, portableTextHashes, type Doc} from '../src/comparison'
 import {dataPaths} from '../src/config'
-import type {MuxMap} from '../src/steps/mux'
 import {transform} from '../src/steps/transform'
-import {writeJson} from '../src/util'
 
 describe('comparable', () => {
   const asset = (dataset: string, uploadId: string): Doc => ({
@@ -93,16 +91,8 @@ describe('transform', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'wagtail-to-sanity-'))
   after(() => rmSync(root, {recursive: true, force: true}))
 
-  it('refuses a Mux map with pending videos unless --allow-pending-videos is given', async () => {
+  it('refuses to write documents before the videos step has uploaded the MP4s of the dataset', async () => {
     const paths = dataPaths(root)
-    const map: MuxMap = {
-      updatedAt: '2026-11-25T20:21:21.972Z',
-      videos: {},
-      pending: [{mediaId: 11, passthrough: 'wagtail-media-11', sourceUrl: 'https://storage.googleapis.com/images-for-cms/media/a.mov', reason: 'Free plan is limited to 10 assets'}],
-    }
-    writeJson(path.join(paths.state, 'mux-map.json'), map)
-    await assert.rejects(transform(paths, 'production', {allowPendingVideos: false}), /1 videos are pending on Mux \(media 11\)/)
-    // With the flag the guard lets the transform go on; here it then fails on the missing export.
-    await assert.rejects(transform(paths, 'production', {allowPendingVideos: true}), /export\.json|ENOENT/)
+    await assert.rejects(transform(paths, 'production'), /videos-production\.json does not exist; run the convert and videos steps first/)
   })
 })

@@ -1,9 +1,10 @@
 /**
- * Step 7: validate (plan §11.1-11.5). Reads the dataset back and checks it against the Wagtail
- * export, the bucket mirror and Mux, independently of the transform where possible:
+ * Step 8: validate (plan §11.1-11.5). Reads the dataset back and checks it against the Wagtail
+ * export, the bucket mirror and the converted MP4s, independently of the transform where possible:
  *
  *   counts           per type, published and drafts, against numbers derived from export.json
- *   assets           every bucket content file is an asset with that sha1; asset counts match
+ *   assets           every bucket content file (videos included, as their originals) is an asset
+ *                    with that sha1 and its Wagtail source; asset counts match
  *   hashes           every Wagtail image/document record's asset sha1 equals its file_hash
  *                    (or the explained bucket sha1 for the known overwritten objects)
  *   references       every _ref resolves (strong refs to published documents or assets)
@@ -14,7 +15,11 @@
  *                    block, embed, link and code structure (any non-whitespace difference fails)
  *   fieldParity      titles, slugs, dates, intros, flags, codes, authors, tags, ordered
  *                    references, images and SEO of every page and snippet
- *   mux              every media item has a mux.videoAsset whose Mux asset is ready right now
+ *   videos           every video block follows video contract v2: `file` is the video/mp4 asset
+ *                    with source video-to-mp4 made from `original` (the Wagtail upload), conversion
+ *                    is ready with the current settings version, nothing needs conversion, each
+ *                    MP4 is the checked output of the convert step and is served by the CDN; and
+ *                    no Mux document, block or token is left
  *   asciiArt         testimonial art equals the live site's and was made from the current photo
  *   convergence      the dataset holds exactly the transformed documents, unchanged
  *   studioValidation `sanity documents validate --workspace <dataset> --level error`
@@ -27,7 +32,13 @@ import path from 'node:path'
 
 import {JSDOM} from 'jsdom'
 
-import {type Dataset, type DataPaths, type Secrets} from '../config'
+import {
+  CONVERTED_ASSET_SOURCE_NAME,
+  OUTPUT_MIME_TYPE,
+  SETTINGS_VERSION,
+} from '../../../../studio/functions/video-to-mp4/settings'
+import {videoNeedsConversion} from '../../../../studio/schemaTypes/shared/video-conversion'
+import {ASSET_SOURCE_NAME, gcsPublicUrl, mediaAssetSourceId, type Dataset, type DataPaths, type Secrets} from '../config'
 import {linkHrefFix} from '../content-fixes'
 import {KNOWN_DISCREPANCIES} from '../discrepancies'
 import {migratedRevisions} from '../references'
@@ -55,10 +66,11 @@ import {
 } from '../wagtail'
 import {liveAsciiArt} from './ascii'
 import type {AssetMap} from './assets'
+import {readMp4Map} from './convert'
 import type {Inventory} from './extract'
 import {sanityCli} from './import'
-import {MuxClient, type MuxMap} from './mux'
 import {ndjsonPath, readNdjson} from './transform'
+import {originalMimeType, readVideoAssetMap, videoAssetMapPath} from './videos'
 
 type Doc = {_id: string; _type: string; [field: string]: unknown}
 
@@ -156,7 +168,6 @@ function expectedCounts(data: WagtailExport): Record<string, {published: number;
   // A redirect to a page that is not live is a draft until that page is published.
   const draftRedirects = data.redirects.filter((r) => r.redirect_page_id != null && data.pages.find((p) => p.id === r.redirect_page_id)?.live === false).length
   add('redirect', data.redirects.length - draftRedirects, draftRedirects)
-  add('mux.videoAsset', data.media.length, 0)
   for (const [kind, type] of [['medium', 'medium'], ['technologies', 'technology']] as const) {
     const names = new Set<string>()
     for (const page of data.pages) {
@@ -218,7 +229,9 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
   const data = loadExport(paths.exportJson)
   const inventory = readJson<Inventory>(path.join(paths.state, 'inventory.json'))
   const assetMap = readJson<AssetMap>(path.join(paths.state, `assets-${dataset}.json`))
-  const muxMap = readJson<MuxMap>(path.join(paths.state, 'mux-map.json'))
+  const mp4Map = readMp4Map(paths)
+  const videoMap = readVideoAssetMap(paths, dataset)
+  if (!videoMap) throw new Error(`validate: ${videoAssetMapPath(paths, dataset)} does not exist; run the convert and videos steps`)
   const transformed = readNdjson(ndjsonPath(paths, dataset))
   const schema = await loadStudioSchema()
   const client = sanityClient(dataset, secrets)
@@ -227,7 +240,9 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
   const all = await client.fetch<Doc[]>(`*[!(_id in path("_.**")) && !(_id in path("versions.**"))]`)
   const byId = new Map(all.map((d) => [d._id, d]))
   const assets = all.filter((d) => d._type === 'sanity.imageAsset' || d._type === 'sanity.fileAsset')
-  const content = all.filter((d) => !d._type.startsWith('sanity.') && d._type !== 'mux.apiKey' && d._id !== 'secrets.mux')
+  // Documents under `secrets.` hold tokens; they are never read into a report (the videos check
+  // only looks at their ids and types).
+  const content = all.filter((d) => !d._type.startsWith('sanity.') && !d._id.startsWith('secrets.'))
   const checks: Check[] = []
 
   // --- counts ---------------------------------------------------------------------------
@@ -259,20 +274,35 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
     const check = new Check('assets')
     const assetBySha = new Map(assets.map((a) => [`${a._type === 'sanity.imageAsset' ? 'image' : 'file'}:${String(a.sha1hash)}`, a]))
     const expectedKeys = new Set<string>()
+    const mediaIdByPath = new Map(Object.entries(inventory.mediaFiles).map(([id, p]) => [p, Number(id)]))
     for (const file of inventory.files) {
-      if (file.folder === 'media') continue
-      const type = file.folder === 'documents' ? 'file' : 'image'
+      const type = file.folder === 'documents' || file.folder === 'media' ? 'file' : 'image'
       expectedKeys.add(`${type}:${file.sha1}`)
       const asset = assetBySha.get(`${type}:${file.sha1}`)
-      if (!asset) check.fail(`${file.path}: no ${type} asset with sha1 ${file.sha1}`)
-      else if (assetMap.files[file.path] !== asset._id) check.fail(`${file.path}: asset map says ${assetMap.files[file.path]}, dataset has ${asset._id}`)
-      else if ((asset.source as {name?: string} | undefined)?.name !== 'wagtail') check.fail(`${asset._id}: source.name is not "wagtail"`)
+      const source = asset?.source as {name?: string; id?: string; url?: string} | undefined
+      if (!asset) {
+        check.fail(`${file.path}: no ${type} asset with sha1 ${file.sha1}`)
+      } else if (file.folder === 'media') {
+        // A video's original: the asset the video blocks keep in `original`.
+        const mediaId = mediaIdByPath.get(file.path)
+        const mapped = mediaId === undefined ? undefined : videoMap.videos[String(mediaId)]?.original.assetId
+        if (mediaId === undefined) check.fail(`${file.path}: no Wagtail media record uses this file`)
+        else if (mapped !== asset._id) check.fail(`${file.path}: video map says ${mapped}, dataset has ${asset._id}`)
+        else if (source?.name !== ASSET_SOURCE_NAME || source.id !== mediaAssetSourceId(mediaId) || source.url !== gcsPublicUrl(file.path)) {
+          check.fail(`${asset._id}: source is ${JSON.stringify(source)}, expected {name: "${ASSET_SOURCE_NAME}", id: "${mediaAssetSourceId(mediaId)}", url: <bucket URL>}`)
+        }
+      } else if (assetMap.files[file.path] !== asset._id) {
+        check.fail(`${file.path}: asset map says ${assetMap.files[file.path]}, dataset has ${asset._id}`)
+      } else if (source?.name !== ASSET_SOURCE_NAME) {
+        check.fail(`${asset._id}: source.name is not "${ASSET_SOURCE_NAME}"`)
+      }
     }
-    const migrated = assets.filter((a) => (a.source as {name?: string} | undefined)?.name === 'wagtail')
+    const migrated = assets.filter((a) => (a.source as {name?: string} | undefined)?.name === ASSET_SOURCE_NAME)
     check.expect(migrated.length === expectedKeys.size, `${migrated.length} assets have source wagtail, the bucket has ${expectedKeys.size} distinct content files`)
     const images = migrated.filter((a) => a._type === 'sanity.imageAsset').length
     const files = migrated.filter((a) => a._type === 'sanity.fileAsset').length
-    check.summary = `${inventory.files.filter((f) => f.folder !== 'media').length} bucket files (videos excluded) -> ${expectedKeys.size} distinct assets; dataset has ${images} image + ${files} file assets from wagtail`
+    const videoFiles = inventory.files.filter((f) => f.folder === 'media').length
+    check.summary = `${inventory.files.length} bucket files (${videoFiles} videos) -> ${expectedKeys.size} distinct assets; dataset has ${images} image + ${files} file assets from wagtail`
     checks.push(check)
 
     const hashes = new Check('hashes')
@@ -344,11 +374,6 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
         const target = byId.get(ref._ref)
         if (target) return
         if (ref._weak && byId.has(`drafts.${ref._ref}`) && ref._strengthenOnPublish) return
-        const pendingMedia = /^mux-video-(\d+)$/.exec(ref._ref)
-        if (pendingMedia && muxMap.pending.some((p) => p.mediaId === Number(pendingMedia[1]))) {
-          refs.fail(`${at}: ${ref._ref} does not exist yet (video pending on Mux: free plan limit)`)
-          return
-        }
         refs.fail(`${at}: ${ref._ref} does not exist`)
       })
     }
@@ -510,8 +535,13 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
           const file = item.file as {asset?: {_ref?: string}} | undefined
           check.expect(item._type === 'stlModel' && file?.asset?._ref === assetMap.documents[String(value.file)] && item.scale === value.scale, `${where}: STL model differs`)
         } else if (block.type === 'media') {
-          const asset = item.asset as {asset?: {_ref?: string}} | undefined
-          check.expect(item._type === 'video' && asset?.asset?._ref === `mux-video-${String(block.value)}`, `${where}: video differs`)
+          const assets = videoMap.videos[String(block.value)]
+          const file = item.file as {asset?: {_ref?: string}} | undefined
+          const original = item.original as {asset?: {_ref?: string}} | undefined
+          check.expect(
+            item._type === 'video' && assets !== undefined && file?.asset?._ref === assets.mp4.assetId && original?.asset?._ref === assets.original.assetId,
+            `${where}: video differs (media ${String(block.value)})`,
+          )
         } else {
           check.fail(`${where}: unknown block type`)
         }
@@ -666,27 +696,137 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
     checks.push(check)
   }
 
-  // --- mux ------------------------------------------------------------------------------
+  // --- videos ---------------------------------------------------------------------------
   {
-    const check = new Check('mux')
-    const mux = new MuxClient(secrets)
+    const check = new Check('videos')
+
+    // No Mux left: no mux.* document (mux.videoAsset, mux.apiKey), no secrets.mux token document
+    // and no object of a mux.* type anywhere (the old block shape {asset: {_type: "mux.video"}}).
+    const muxDocuments = all.filter((d) => d._type.startsWith('mux.') || d._id === 'secrets.mux').map((d) => d._id)
+    check.expect(muxDocuments.length === 0, `Mux documents remain: ${muxDocuments.join(', ')}`)
+    for (const doc of content) {
+      walk(doc, doc._id, (value, at) => {
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+          const type = (value as {_type?: unknown})._type
+          if (typeof type === 'string' && type.startsWith('mux.')) check.fail(`${at}: object of the Mux type ${type}`)
+        }
+      })
+    }
+
+    // The media blocks of the migrated revisions, in order, and the video blocks in the dataset.
+    const expectedBlocks = new Map<string, number>()
+    for (const source of sources) {
+      for (const block of source.stream ?? []) {
+        if (block.type === 'media') expectedBlocks.set(`${source.docId}.${source.field}[_key=="${block.id}"]`, block.value as number)
+      }
+    }
+    const actualBlocks: {where: string; block: PTObject}[] = []
+    for (const doc of content) {
+      for (const field of schema.portableTextFields[doc._type] ?? []) {
+        for (const item of (doc[field] as PTItem[] | undefined) ?? []) {
+          if (item._type === 'video') actualBlocks.push({where: `${doc._id}.${field}[_key=="${item._key}"]`, block: item as PTObject})
+        }
+      }
+    }
+    check.expect(
+      actualBlocks.length === expectedBlocks.size,
+      `${actualBlocks.length} video blocks in ${dataset}, the Wagtail revisions have ${expectedBlocks.size} media blocks`,
+    )
+
+    const fileAsset = (id: string | undefined) => {
+      const asset = id ? byId.get(id) : undefined
+      return asset?._type === 'sanity.fileAsset' ? asset : undefined
+    }
     let ready = 0
-    for (const media of [...data.media].sort((a, b) => a.id - b.id)) {
-      const doc = byId.get(`mux-video-${media.id}`)
-      const pending = muxMap.pending.find((p) => p.mediaId === media.id)
-      if (!doc) {
-        check.fail(`media ${media.id}: no mux-video-${media.id} document${pending ? ` (pending: ${pending.reason})` : ''}`)
+    for (const {where, block} of actualBlocks) {
+      const before = check.failures.length
+      const mediaId = expectedBlocks.get(where)
+      if (mediaId === undefined) {
+        check.fail(`${where}: video block without a Wagtail media block`)
         continue
       }
-      const live = await mux.getAsset(String(doc.assetId))
-      check.expect(live.status === 'ready', `mux-video-${media.id}: Mux asset ${String(doc.assetId)} is ${live.status}`)
-      check.expect(doc.status === 'ready', `mux-video-${media.id}: document status is ${String(doc.status)}`)
-      check.expect(live.passthrough === `wagtail-media-${media.id}`, `mux-video-${media.id}: passthrough ${String(live.passthrough)}`)
-      check.expect((live.playback_ids ?? []).some((p) => p.id === doc.playbackId && p.policy === 'public'), `mux-video-${media.id}: playbackId is not a public playback id of the asset`)
-      check.expect(live.video_quality === 'basic', `mux-video-${media.id}: video_quality ${String(live.video_quality)}`)
-      if (live.status === 'ready') ready++
+      const expected = videoMap.videos[String(mediaId)]
+      const converted = mp4Map.videos[String(mediaId)]
+      if (!expected || !converted) {
+        check.fail(`${where}: media ${mediaId} is not in the video map or the MP4 map`)
+        continue
+      }
+      const extraKeys = Object.keys(block).filter((k) => !['_type', '_key', 'file', 'original', 'conversion'].includes(k))
+      check.expect(extraKeys.length === 0, `${where}: unexpected fields ${extraKeys.join(', ')}`)
+      const fileRef = (block.file as {asset?: {_ref?: string}} | undefined)?.asset?._ref
+      const originalRef = (block.original as {asset?: {_ref?: string}} | undefined)?.asset?._ref
+      const conversion = (block.conversion ?? {}) as Record<string, unknown>
+      const mp4 = fileAsset(fileRef)
+      const original = fileAsset(originalRef)
+      if (!mp4) check.fail(`${where}: file -> ${fileRef ?? '(none)'} is not a file asset in ${dataset}`)
+      if (!original) check.fail(`${where}: original -> ${originalRef ?? '(none)'} is not a file asset in ${dataset}`)
+      if (mp4 && original) {
+        const mp4Source = mp4.source as {name?: string; id?: string} | undefined
+        const originalSource = original.source as {name?: string; id?: string} | undefined
+        check.expect(mp4.mimeType === OUTPUT_MIME_TYPE, `${where}: ${mp4._id} has mimeType ${String(mp4.mimeType)}, expected ${OUTPUT_MIME_TYPE}`)
+        check.expect(mp4.extension === 'mp4', `${where}: ${mp4._id} has extension ${String(mp4.extension)}`)
+        check.expect(
+          mp4Source?.name === CONVERTED_ASSET_SOURCE_NAME && mp4Source.id === original._id,
+          `${where}: ${mp4._id} has source ${JSON.stringify(mp4Source)}, expected {name: "${CONVERTED_ASSET_SOURCE_NAME}", id: "${original._id}"}`,
+        )
+        check.expect(originalSource?.name === ASSET_SOURCE_NAME && originalSource.id === mediaAssetSourceId(mediaId), `${where}: original ${original._id} is not the Wagtail upload of media ${mediaId}`)
+        check.expect(original.sha1hash === converted.source.sha1, `${where}: original ${original._id} has sha1 ${String(original.sha1hash)}, the bucket file ${converted.source.sha1}`)
+        check.expect(
+          original.mimeType === originalMimeType(converted.source.filename),
+          `${where}: original ${original._id} has mimeType ${String(original.mimeType)}, expected ${originalMimeType(converted.source.filename)}`,
+        )
+        check.expect(mp4._id === expected.mp4.assetId && original._id === expected.original.assetId, `${where}: assets differ from ${videoAssetMapPath(paths, dataset)}`)
+        // The MP4 is the convert step's checked output, or an existing conversion the videos step
+        // downloaded and checked the same way.
+        const expectedSha1 = expected.mp4.origin === 'convert' ? converted.output.sha1 : expected.mp4.sha1
+        check.expect(mp4.sha1hash === expectedSha1, `${where}: ${mp4._id} has sha1 ${String(mp4.sha1hash)}, the checked MP4 ${expectedSha1}`)
+        const conversionsOfOriginal = assets.filter((a) => {
+          const src = a.source as {name?: string; id?: string} | undefined
+          return src?.name === CONVERTED_ASSET_SOURCE_NAME && src.id === original._id
+        })
+        check.expect(conversionsOfOriginal.length === 1, `${where}: ${conversionsOfOriginal.length} video-to-mp4 assets for ${original._id}, expected 1`)
+      }
+      check.expect(conversion.status === 'ready', `${where}: conversion.status is ${JSON.stringify(conversion.status)}, expected "ready"`)
+      check.expect(conversion.sourceAssetId === originalRef, `${where}: conversion.sourceAssetId ${String(conversion.sourceAssetId)} is not the original ${String(originalRef)}`)
+      check.expect(conversion.outputAssetId === fileRef, `${where}: conversion.outputAssetId ${String(conversion.outputAssetId)} is not the file ${String(fileRef)}`)
+      check.expect(conversion.settingsVersion === SETTINGS_VERSION, `${where}: conversion.settingsVersion ${String(conversion.settingsVersion)}, current ${SETTINGS_VERSION}`)
+      check.expect(
+        typeof conversion.updatedAt === 'string' && !Number.isNaN(Date.parse(conversion.updatedAt)),
+        `${where}: conversion.updatedAt ${JSON.stringify(conversion.updatedAt)} is not a datetime`,
+      )
+      check.expect(!videoNeedsConversion(block as Parameters<typeof videoNeedsConversion>[0]), `${where}: needs conversion by the contract rule (the video-to-mp4 Function would convert it)`)
+      if (check.failures.length === before) ready++
     }
-    check.summary = `${ready}/${data.media.length} videos ready on Mux${muxMap.pending.length ? `, ${muxMap.pending.length} pending (${muxMap.pending[0]!.reason})` : ''}`
+    // MP4s that passed the convert step only through src/conversion-deviations.ts.
+    for (const converted of Object.values(mp4Map.videos).sort((a, b) => a.mediaId - b.mediaId)) {
+      if (converted.deviation) {
+        check.explained.push(`media ${converted.mediaId} (${converted.source.filename}): ${converted.deviation.problems.join('; ')}. ${converted.deviation.explanation}`)
+      }
+    }
+
+    // Exactly one MP4 per Wagtail video: no stray conversions of the migrated originals. (MP4s the
+    // video-to-mp4 Function makes from Studio uploads are not the migration's.)
+    const originalIds = new Set(Object.values(videoMap.videos).map((v) => v.original.assetId))
+    const mp4Assets = assets.filter((a) => {
+      const src = a.source as {name?: string; id?: string} | undefined
+      return src?.name === CONVERTED_ASSET_SOURCE_NAME && originalIds.has(String(src.id))
+    })
+    check.expect(
+      mp4Assets.length === data.media.length && originalIds.size === data.media.length,
+      `${mp4Assets.length} assets with source ${CONVERTED_ASSET_SOURCE_NAME} made from the ${originalIds.size} migrated originals, expected ${data.media.length}`,
+    )
+
+    // Every MP4 is served by the CDN with the right type and size.
+    let served = 0
+    for (const asset of mp4Assets) {
+      const url = String(asset.url)
+      const response = await fetch(url, {method: 'HEAD', signal: AbortSignal.timeout(60_000)})
+      const type = response.headers.get('content-type')
+      const length = Number(response.headers.get('content-length'))
+      if (response.status === 200 && type === OUTPUT_MIME_TYPE && length === asset.size) served++
+      else check.fail(`${asset._id}: HEAD ${url} answered ${response.status}, ${type}, ${length} bytes (asset size ${String(asset.size)})`)
+    }
+    check.summary = `${ready}/${expectedBlocks.size} video blocks are ready MP4s (settings ${SETTINGS_VERSION}); ${served}/${mp4Assets.length} MP4s served by the CDN; ${muxDocuments.length} Mux documents`
     checks.push(check)
   }
 

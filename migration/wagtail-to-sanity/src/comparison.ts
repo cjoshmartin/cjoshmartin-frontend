@@ -11,7 +11,11 @@ export type Doc = {_id: string; _type: string; [field: string]: unknown}
 
 export const SYSTEM_FIELDS = new Set(['_rev', '_createdAt', '_updatedAt', '_system'])
 export const ASSET_TYPES = new Set(['sanity.imageAsset', 'sanity.fileAsset'])
-export const MUX_SECRETS_ID = 'secrets.mux'
+/**
+ * Documents under `secrets.` hold tokens (plugins keep API keys there). The comparison never reads
+ * them, only lists their ids.
+ */
+export const SECRETS_PATH = 'secrets.**'
 
 export function sha256(text: string): string {
   return createHash('sha256').update(text).digest('hex')

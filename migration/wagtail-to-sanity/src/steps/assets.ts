@@ -3,7 +3,9 @@
  *
  * Uploads every content file of the bucket mirror to the target dataset: every original image
  * (including ones no record or page uses), every document file (including the one without a
- * record) and the media thumbnails. Videos go to Mux instead (steps/mux.ts).
+ * record) and the media thumbnails. Videos are converted to MP4 (steps/convert.ts) and uploaded
+ * together with their originals by the videos step (steps/videos.ts), which uses the same
+ * metadata check.
  *
  * Sanity names assets by content (image-<sha1>-<w>x<h>-<ext>, file-<sha1>-<ext>), so files with
  * identical bytes become one asset and reruns never create duplicates. Before uploading, the step
@@ -31,7 +33,8 @@ import type {Inventory, InventoryFile} from './extract'
 export interface AssetSource {
   name: string
   id: string
-  url: string
+  /** Where the bytes came from. Converted MP4s have none: they were made by the migration. */
+  url?: string
 }
 
 export interface PlannedAsset {
@@ -148,7 +151,7 @@ export interface ExistingAsset {
 /** The asset fields this step sets. Only these are compared, written and recorded. */
 const METADATA_FIELDS = ['title', 'description', 'originalFilename', 'source'] as const
 
-type AssetMetadataSource = Pick<ExistingAsset, (typeof METADATA_FIELDS)[number]>
+export type AssetMetadataSource = Pick<ExistingAsset, (typeof METADATA_FIELDS)[number]>
 
 /** The metadata this step sets, in a comparable form (missing fields are null). */
 function metadataOf(asset: AssetMetadataSource): Record<(typeof METADATA_FIELDS)[number], unknown> {
@@ -181,11 +184,14 @@ export interface AssetMetadataEdit {
  * Anything else changed outside this migration. Without a record, only metadata that names this
  * migration as its source counts, because the first run adopts assets uploaded by others (the
  * testimonial photos WP2 uploaded).
+ *
+ * `previous` is the state file of the step's last run: state/assets-<dataset>.json for this step,
+ * state/videos-<dataset>.json for the videos step.
  */
 export function findAssetMetadataEdits(
   planned: readonly PlannedAsset[],
   existingByKey: ReadonlyMap<string, ExistingAsset>,
-  previous: AssetMap | null,
+  previous: {assets: Record<string, AssetMetadataSource>} | null,
 ): AssetMetadataEdit[] {
   const edits: AssetMetadataEdit[] = []
   for (const asset of planned) {

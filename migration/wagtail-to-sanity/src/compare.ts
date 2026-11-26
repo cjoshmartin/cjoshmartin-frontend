@@ -18,9 +18,9 @@
  *                 transformed/<dataset>/data.ndjson tie the datasets to the transform output
  *   ndjson        sha256 of both transformed files, and the ids of documents that differ
  *
- * `secrets.mux` (the Mux plugin's token document) is never read into the report: only whether it
- * exists is listed. Writes reports/wp3/compare-<a>-<b>.json and .md (ids and hashes only, no
- * content) and exits non-zero when the datasets differ.
+ * Documents under `secrets.` (tokens) are never read into the report: only their ids are listed.
+ * Writes reports/wp3/compare-<a>-<b>.json and .md (ids and hashes only, no content) and exits
+ * non-zero when the datasets differ.
  */
 import {existsSync, readFileSync} from 'node:fs'
 import path from 'node:path'
@@ -28,7 +28,7 @@ import {parseArgs} from 'node:util'
 
 import {
   ASSET_TYPES,
-  MUX_SECRETS_ID,
+  SECRETS_PATH,
   comparable,
   countByType,
   differingFields,
@@ -66,13 +66,13 @@ async function main(): Promise<void> {
   const read = async (dataset: Dataset) => {
     log(`compare: reading ${dataset}`)
     const docs = await sanityClient(dataset, secrets).fetch<Doc[]>(
-      `*[!(_id in path("_.**")) && _id != $secrets]`,
-      {secrets: MUX_SECRETS_ID},
+      `*[!(_id in path("_.**")) && !(_id in path($secrets))]`,
+      {secrets: SECRETS_PATH},
     )
-    const hasMuxSecrets = await sanityClient(dataset, secrets).fetch<boolean>(`defined(*[_id == $secrets][0]._id)`, {
-      secrets: MUX_SECRETS_ID,
+    const secretIds = await sanityClient(dataset, secrets).fetch<string[]>(`*[_id in path($secrets)]._id`, {
+      secrets: SECRETS_PATH,
     })
-    return {docs, byId: new Map(docs.map((d) => [d._id, d])), hasMuxSecrets}
+    return {docs, byId: new Map(docs.map((d) => [d._id, d])), secretIds: [...secretIds].sort()}
   }
   const left = await read(a)
   const right = await read(b)
@@ -200,7 +200,7 @@ async function main(): Promise<void> {
       byteIdentical: ndjson[a].sha256 === ndjson[b].sha256,
       differentIds: ndjsonDifferent,
     },
-    muxSecretsDocument: {[a]: left.hasMuxSecrets, [b]: right.hasMuxSecrets},
+    secretsDocuments: {[a]: left.secretIds, [b]: right.secretIds},
     differences,
   }
   const base = path.join(paths.reports, 'wp3', `compare-${a}-${b}`)
@@ -218,7 +218,7 @@ async function main(): Promise<void> {
     `- Compared ${compared} ids present in both: ${identical} identical (assets ignoring uploadId and the dataset name in path/url), ${explained.length} explained, ${differentDocuments.length} different.`,
     `- Portable Text: ${portableText.fields[a]} / ${portableText.fields[b]} blockContent fields, ${portableText.blocks[a]} / ${portableText.blocks[b]} blocks. Digest ${a} \`${portableText.digest[a]!.slice(0, 16)}\`, ${b} \`${portableText.digest[b]!.slice(0, 16)}\` (NDJSON: \`${portableText.digest[`${a} NDJSON`]!.slice(0, 16)}\`, \`${portableText.digest[`${b} NDJSON`]!.slice(0, 16)}\`).`,
     `- NDJSON: ${a} \`${ndjson[a].sha256.slice(0, 16)}\`, ${b} \`${ndjson[b].sha256.slice(0, 16)}\` (${result.ndjson.byteIdentical ? 'byte-identical' : `${ndjsonDifferent.length} documents differ`}).`,
-    `- \`secrets.mux\` (not compared): ${a} ${left.hasMuxSecrets ? 'present' : 'absent'}, ${b} ${right.hasMuxSecrets ? 'present' : 'absent'}.`,
+    `- \`secrets.*\` documents (not compared): ${a} ${left.secretIds.length ? left.secretIds.join(', ') : 'none'}, ${b} ${right.secretIds.length ? right.secretIds.join(', ') : 'none'}.`,
     '',
     `| Type | ${a} | ${b} |`,
     '|---|---|---|',

@@ -5,31 +5,35 @@
  *
  * Steps, in order (all of them unless --steps is given):
  *   extract    unzip + verify the export, mirror the bucket, hash and reconcile files
- *   assets     upload every content file to the dataset (content-addressed, so reruns reuse);
- *              refuses before writing if asset metadata changed since its last run
- *              (state/assets-<dataset>.json)
- *   mux        create or reuse a Mux asset per Wagtail media item and wait until it is ready
+ *   assets     upload every image, document and video thumbnail to the dataset (content-addressed,
+ *              so reruns reuse); refuses before writing if asset metadata changed since its last
+ *              run (state/assets-<dataset>.json)
+ *   convert    convert every Wagtail video to MP4 with studio/functions/video-to-mp4/settings.ts
+ *              and check each output (video-mp4/, state/video-mp4.json); reruns reuse unchanged
+ *              MP4s
+ *   videos     upload each video's original and its MP4 as file assets (the MP4 with source
+ *              video-to-mp4, reusing an existing conversion of the original); same metadata
+ *              check as assets (state/videos-<dataset>.json)
  *   ascii      generate testimonial ASCII art from the uploaded photos (WP2 generator)
  *   transform  build every Sanity document and write NDJSON to transformed/<dataset>/
  *   import     refuse if migration documents changed in the dataset since the last import
  *              (state/imported-<dataset>.json), validate the NDJSON with the Studio schema,
  *              import it with --replace, prune documents a previous run created that the
- *              transform no longer produces, record what is now in the dataset
- *   validate   counts, references, Portable Text integrity, hashes, Mux status, text parity
- *              and `sanity documents validate`; writes reports/validation-<dataset>.json
+ *              transform no longer produces (including the mux.videoAsset documents of
+ *              earlier runs), record what is now in the dataset
+ *   validate   counts, references, Portable Text integrity, hashes, videos (contract v2, no
+ *              Mux left), text parity and `sanity documents validate`; writes
+ *              reports/validation-<dataset>.json
  *
  * Steps that only run when named in --steps:
  *   baseline   record an untouched dataset that was imported before imports kept a record
- *   videos     create only the missing mux.videoAsset documents (createIfNotExists) and
- *              change nothing else; the follow-up for videos Mux refused, once the Studio is
- *              in use (`--steps mux,videos`)
  *
  * Every step is deterministic and rerunnable; rerunning the whole pipeline converges to the
  * same dataset content.
  *
  * When the run includes `import`, its Studio-edit check also runs before the first step, so a run
- * that the import would refuse stops before any step writes to the dataset or to Mux. The import
- * checks again, because the dataset can change while the run is in progress.
+ * that the import would refuse stops before any step writes to the dataset. The import checks
+ * again, because the dataset can change while the run is in progress.
  *
  * Options:
  *   --dataset <staging|production>   required
@@ -37,15 +41,10 @@
  *   --steps a,b,c                    run only these steps (each still reads the state of the
  *                                    steps before it from state/)
  *   --no-gcs-sync                    reuse the local bucket mirror instead of running gsutil
- *   --allow-pending-videos           when Mux refuses new assets (free plan limit), record the
- *                                    videos as pending and run the remaining steps; validation
- *                                    still fails until every video is on Mux. The transform refuses
- *                                    pending videos without it. With production it also needs
- *                                    --confirm-production.
  *   --discard-studio-edits           let the import overwrite or delete migration documents
  *                                    that changed in the dataset since the last import, and the
- *                                    assets step overwrite asset metadata that changed since its
- *                                    last run (both refuse otherwise and list them)
+ *                                    assets and videos steps overwrite asset metadata that changed
+ *                                    since their last run (all refuse otherwise and list them)
  *   --data-dir <path>                migration data folder (default ~/cjoshmartin-migration)
  */
 import {parseArgs} from 'node:util'
@@ -53,10 +52,10 @@ import {parseArgs} from 'node:util'
 import {DATASETS, dataPaths, loadSecrets, type Dataset} from './config'
 import {log} from './util'
 
-const STEPS = ['extract', 'assets', 'mux', 'ascii', 'transform', 'import', 'validate'] as const
+const STEPS = ['extract', 'assets', 'convert', 'videos', 'ascii', 'transform', 'import', 'validate'] as const
 /** Steps that never run by default; their position in this list is their order in a run. */
-const EXTRA_STEPS = ['baseline', 'videos'] as const
-const ALL_STEPS = ['baseline', ...STEPS, 'videos'] as const
+const EXTRA_STEPS = ['baseline'] as const
+const ALL_STEPS = ['baseline', ...STEPS] as const
 type Step = (typeof ALL_STEPS)[number]
 
 async function main(): Promise<void> {
@@ -66,7 +65,6 @@ async function main(): Promise<void> {
       'confirm-production': {type: 'boolean', default: false},
       steps: {type: 'string'},
       'no-gcs-sync': {type: 'boolean', default: false},
-      'allow-pending-videos': {type: 'boolean', default: false},
       'discard-studio-edits': {type: 'boolean', default: false},
       'data-dir': {type: 'string'},
     },
@@ -121,10 +119,15 @@ async function main(): Promise<void> {
         })
         break
       }
-      case 'mux': {
-        const {migrateVideos} = await import('./steps/mux')
-        await migrateVideos(paths, loadSecrets(paths), {
-          allowPendingVideos: values['allow-pending-videos'],
+      case 'convert': {
+        const {convertVideos} = await import('./steps/convert')
+        await convertVideos(paths)
+        break
+      }
+      case 'videos': {
+        const {uploadVideos} = await import('./steps/videos')
+        await uploadVideos(paths, target, loadSecrets(paths), {
+          discardStudioEdits: values['discard-studio-edits'],
         })
         break
       }
@@ -135,7 +138,7 @@ async function main(): Promise<void> {
       }
       case 'transform': {
         const {transform} = await import('./steps/transform')
-        await transform(paths, target, {allowPendingVideos: values['allow-pending-videos']})
+        await transform(paths, target)
         break
       }
       case 'import': {
@@ -148,13 +151,6 @@ async function main(): Promise<void> {
       case 'validate': {
         const {validateDataset} = await import('./steps/validate')
         await validateDataset(paths, target, loadSecrets(paths))
-        break
-      }
-      case 'videos': {
-        const {addMissingVideos} = await import('./steps/videos')
-        await addMissingVideos(paths, target, loadSecrets(paths), {
-          allowPendingVideos: values['allow-pending-videos'],
-        })
         break
       }
     }
