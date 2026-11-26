@@ -4,6 +4,14 @@ Rewritten 2026-11-26 at about 10:30 UTC, after Mux was dropped. It replaces the 
 (written at 01:05 UTC, last in commit `1018045`), whose Mux content is superseded. The plan is
 [`../sanity-migration-plan.md`](../sanity-migration-plan.md), amended the same day.
 
+> **Later on 2026-11-26 (not reflected in the sections written before it).** After this report,
+> every asset was stripped of location and personal metadata and Functions now strip new uploads
+> ([`reports/privacy-review.md`](reports/privacy-review.md)). Then both datasets were deleted and
+> created again from verified exports, so that the History API no longer serves the deleted
+> assets ([`reports/dataset-recreate.md`](reports/dataset-recreate.md)). Validation now has 13
+> checks and passes on both datasets. The current state is at the top of `dataset-recreate.md`;
+> its open owner decision is [item 23](#unresolved-findings).
+
 ## Overall status
 
 **Everything in the plan is built, deployed and verified, with one change you decided this
@@ -326,6 +334,7 @@ None of these blocks the site. Items 1 to 3 are about the old infrastructure, no
 | 20 | low (WP6 F5) | 4 local stashes in `~/code/cjoshmartin.com/cjoshmartin-backend` contain key files. | `git stash clear` there when you no longer need them. |
 | 21 | info | GitHub reports Dependabot alerts on the default branch (63 at the overnight push). | Review Dependabot separately. |
 | 22 | high (owner action, privacy review round 2) | **Deleted uploads with personal metadata can stay in the asset CDN's cache for up to 30 days.** Deleting a Sanity asset does not purge `cdn.sanity.io`. From this machine none of the 26 location-bearing URLs answers 200 (18:37 UTC), but 3 deleted videos and 58 deleted images per dataset still do, and other edges may hold more. New uploads are read privately, and no document names a deleted upload any more (`privacy-review.md`, round 2). | Send `~/cjoshmartin-migration/privacy/recheck2/cdn-purge-request.md` to Sanity support (it lists every path; it stays outside the repository). Until it is done or until 2026-12-26, run `node migration/verify/src/deleted-asset-cdn-probe.mjs` (command in `privacy-review.md`). Keep `PRIVACY_LINK_KEY` (in `secrets.env` and the three privacy Functions) safe. |
+| 23 | medium (owner decision, dataset recreate, fix rounds 1 and 2) | **Data an upload asks Sanity to extract stays readable without a token in the History API** for the retention period (90 days), although upload-privacy removes it from the asset document within seconds. Nothing in the repository asks for location, EXIF or camera data (`uploadAsset` and `studio/test/upload-metadata.test.ts`), but any client with a write token can. A reader needs the asset id, the sha1 of the original bytes. Deleting with `purge` would remove such history, but needs the `editHistory` permission, which only an Enterprise custom role grants. | Decide: private datasets with a read token in the frontend (a Vercel env change), an Enterprise custom role so the Functions can purge the uploads they delete, or Sanity's answer to the support email (not sent; see `reports/dataset-recreate.md`, fix round 2). Meanwhile check `npx sanity@latest functions logs upload-privacy` for `WARN`. |
 
 ## Blocked steps (exact commands)
 

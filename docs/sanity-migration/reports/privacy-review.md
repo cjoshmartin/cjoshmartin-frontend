@@ -3,6 +3,13 @@
 Owner decision (2026-11-26): strip location and personal metadata from every asset the public
 datasets serve, without re-encoding, for the existing assets and for every future upload.
 
+> **Later, 2026-11-26 20:40 to 21:10 UTC (not reflected below).** Both datasets were deleted and
+> created again from verified exports. Until then, the History API still served the earlier
+> revisions of the asset documents this work deleted, without a token, to anyone with their ids.
+> Since then it knows none of the 356 deleted ids probed. The current state, and the open owner
+> decision about data that API clients ask Sanity to extract, are in
+> [dataset-recreate.md](dataset-recreate.md).
+
 ## Round 1 (2026-11-26, 13:30 to 16:30 UTC)
 
 Fix package for the 16 findings of the metadata-stripping work: package M (the migration's privacy

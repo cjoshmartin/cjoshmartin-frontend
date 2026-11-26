@@ -18,6 +18,14 @@ Status: **approved**, built and verified (see the morning report) · Written 202
 > state and the owner's remaining steps are in
 > [`docs/sanity-migration/morning-report.md`](sanity-migration/morning-report.md).
 
+> **Note, 2026-11-26 (after the plan).** Two later changes are not written into the sections
+> below. Every asset was stripped of location and personal metadata, and Functions strip new
+> uploads ([`docs/sanity-migration/reports/privacy-review.md`](sanity-migration/reports/privacy-review.md)).
+> Then both datasets were deleted and created again from verified exports, so that the History API
+> no longer serves the deleted assets
+> ([`docs/sanity-migration/reports/dataset-recreate.md`](sanity-migration/reports/dataset-recreate.md),
+> which has the current state).
+
 ## 1. Goal
 
 Retire the Django/Wagtail backend (`backend.cjoshmartin.com`, Dokku on 159.203.93.178) and the GCS media bucket (`images-for-cms`) as content sources. Move every page, snippet, image, document, and video into a new Sanity project. The Next.js frontend reads from Sanity. A weekly GitHub Actions job backs up the Sanity dataset to a private GCS bucket, and only writes a backup when the data has changed.

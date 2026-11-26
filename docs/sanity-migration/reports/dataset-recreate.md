@@ -1,9 +1,45 @@
 # Work package RECREATE: recreate staging and production from verified clean exports
 
+## Current status (2026-11-26, 23:45 UTC)
+
+**Done: both datasets were deleted and created again from the verified exports, and two fix rounds
+followed.** This report was first written at 20:35 UTC, while step 3 was blocked. The sections from
+[Status when first written](#status-when-first-written-2035-utc-blocked-at-step-3) to
+[Local files](#local-files-not-committed) are kept as that record: they describe the state and the
+plan before the run, not the run.
+
+- **The recreate** (the main session, along the steps of
+  [To finish](#to-finish-in-order-once-step-3-is-allowed)):
+  - the four Functions were removed first;
+  - staging (import from 20:40:54 UTC) and production (import from 21:00:07 UTC) were deleted and
+    created again as public datasets with `scripts/recreate-dataset.sh`, from the verified exports;
+  - `restore-assets` had nothing to patch (0 of 173 assets in each dataset), the schemas were
+    deployed again, and validation passed 13 of 13 on both;
+  - `history-check`: 0 of the 356 deleted ids per dataset have a transaction, and 0 anonymous
+    probes returned content. It reported FAIL only because of the system documents the creation
+    writes; it passes since [fix round 1](#fix-round-1-2026-11-26-about-2150-to-2240-utc)
+    (finding 3);
+  - the Functions were deployed again (`OP-hm7sskpxmd`) and `PRIVACY_LINK_KEY` was set again.
+- **[Fix round 1](#fix-round-1-2026-11-26-about-2150-to-2240-utc):** the 40 unmarked images
+  were marked, `history-check` takes the time before the creation, upload-privacy keeps a reference
+  it saw during its wait, and a guard test against uploads that ask for location.
+- **[Fix round 2](#fix-round-2-2026-11-26-about-2310-to-2345-utc):** one checked helper for every
+  upload that can be an image and a wider guard test, this status, and the corrected compare note.
+  The History API finding was confirmed live again; a purge would remove such history, but needs a
+  permission that no predefined role grants (403 for the migration's write token).
+- **Open (owner):** data that an API client outside the repository asks Sanity to extract stays
+  readable without a token in the History API (finding 1 of both fix rounds), and the support
+  email is not sent. The CDN copies of deleted assets expire by 2026-12-26.
+- **Not pushed:** `origin/sanity-migration` is at `b18c179`. The local commits after it (the
+  privacy work, the recreate tooling and reports, both fix rounds: 16 before this round's report
+  commit) fast-forward it.
+
+## Status when first written (20:35 UTC): blocked at step 3
+
 Date: 2026-11-26, 20:03 to 20:35 UTC. Branch `sanity-migration`, starting at `fffb772`. Commits:
 `925277d` (tooling) and the commit of this report. Nothing was pushed.
 
-## Status: blocked at step 3. No dataset was changed.
+At that time no dataset was changed:
 
 - **Staging, steps 1 and 2: done, all checks pass.** Validation passes 13 of 13. The snapshot,
   the History API baseline and the export are taken. The export holds exactly the snapshot, and
@@ -40,7 +76,7 @@ The staging History API baseline was taken at 20:11 to 20:14 UTC.
   history does not expire soon. Sanity's history page says 3 days for the Free plan; the dataset's
   setting is what applies here.
 
-The production baseline was not taken (see [Status](#status-blocked-at-step-3-no-dataset-was-changed)).
+The production baseline was not taken (see [Status when first written](#status-when-first-written-2035-utc-blocked-at-step-3)).
 
 ## Step 1: pre-check (staging)
 
@@ -411,8 +447,11 @@ and counts the documents that `IMAGE_PRIVACY_FILTER` matches.
   0, upload-privacy's sweep 0, images without `privacy` 0.
 - **Validation, 13 of 13:** production 22:18 to 22:20 (`privacy`: 173 assets, 0 with personal
   metadata, 99/99 copies marked), staging 22:29 to 22:31.
-- `npm run recreate -- compare` against the pre-recreate snapshots would now differ by these 40
-  `privacy` fields. That is expected.
+- `npm run recreate -- compare` against the pre-recreate snapshots now reports FAIL in both
+  datasets, as expected, with two differences: these 40 `privacy` fields, and the `members` of the
+  system documents `_.groups.sanity.editor` and `_.groups.write` (the four Function robots; see
+  [fix round 2, finding 4](#finding-4-compare-differs-in-two-group-documents-too)). Corrected in
+  fix round 2: this note named only the first.
 - The `UPLOADED_SINCE` comment in `image-privacy/trigger.ts` now says that the date no longer
   separates the migration's images from new ones, and that the marks do.
 
@@ -556,3 +595,253 @@ indirection with `rm`. It was rewritten without either and run.
 | `data/` | the Function logs (JSON, millisecond times), the repro records, the mark results (they name the 40 image ids), the history-check results, the Blueprint info before and after |
 | `logs/` | every run |
 | `fixtures/` | the warning test's synthetic JPEG |
+
+---
+
+## Fix round 2 (2026-11-26, about 23:10 to 23:45 UTC)
+
+This round fixes the four findings of the recheck of fix round 1.
+
+- **Code:** commit `68615f5`.
+- **Functions:** deployed twice, built with `npm_config_platform=linux npm_config_arch=arm64`, 4
+  updates and nothing destroyed each time:
+  - `OP-my6te6d4ga` (23:26:37 to 23:27:21 UTC), from the working tree;
+  - `OP-vzue263ewu` (23:32:41 to 23:33:31 UTC), from `68615f5`. The working tree of the first
+    deploy differed from it only in a comment of `privacy/constants.ts` (see
+    [Finding 2](#finding-2-the-guard-test-caught-only-literal-requests)).
+
+  After each deploy, `functions env list` shows `PRIVACY_LINK_KEY` on `video-to-mp4`,
+  `image-privacy` and `upload-privacy`, and no variable on `testimonial-ascii-art`. The deploys
+  started no Function run.
+- **Data:** only staging test data, all deleted again (see
+  [Staging test data](#staging-test-data-of-round-2)). No dataset was deleted or created, no
+  Function was removed, and the datasets stay public. Nothing was pushed.
+
+| # | Severity | Finding | Verdict | Fix |
+|---|---|---|---|---|
+| 1 | medium | A location an API client requests stays readable without a token in the History API | Confirmed live again | Not fixable in the repository. The owner's options are narrowed: a purge would remove such history, but it needs the `editHistory` permission, which only an Enterprise custom role grants (403 for the migration's write token). |
+| 2 | low | The guard test caught only literal requests for location, EXIF or camera data | Confirmed | Fixed: one checked upload helper for every upload that can be an image; the test checks it on the wire, fails on any `meta` parameter whatever its value, and states what it cannot see. |
+| 3 | low | `dataset-recreate.md` opened with "Status: blocked at step 3. No dataset was changed." | Confirmed | Fixed: a current status at the top. Dated notes in the privacy reports, the morning report (new item 23) and the plan point here. |
+| 4 | low | The report said compare differs only in the 40 privacy fields | Confirmed in both datasets | Fixed: the note names the group members too. |
+
+### Finding 1: History API, checked again
+
+**Confirmed again, 23:15 UTC on staging** (local script; it prints key names and statuses only):
+
+| | T4's upload `image-30001f5f` | The warning test's upload `image-9fce4f63` |
+|---|---|---|
+| Transactions | 5, the last a delete | 5, the last a delete |
+| First revision, without a token | 21:38:38.087: HTTP 200, `metadata` has `location` and `exif` | 22:26:43.715: HTTP 200, `metadata` has `image` |
+| The 3 revisions after it, without a token | 200, without them | 200, without it |
+| The deleted state | 200, no document | 200, no document |
+| Transaction list without a token | 401 | 401 |
+| CDN path of the upload | 404 | 404 |
+
+So a reader needs the id, the sha1 of the original bytes, as the recheck said. T4's data is
+synthetic (fake coordinates and serial number); the warning test's `image` holds only a synthetic
+`Software` string. Both stay for the retention period (90 days, the datasets'
+`_.retention._maximum_project`), until about 2027-02-24.
+
+**A remedy that exists, and why it is not available here.** Sanity's docs ("Purge document history
+when you delete", Mutation and Actions API references) describe `delete` with `purge: true`, which
+removes every transaction of the document from the History API at once. Purging needs the
+`editHistory` permission. No predefined role grants it, Administrator included; only a custom role
+made with the Access API does, and custom roles are an Enterprise feature. Checked on staging:
+
+- a scratch document `recreate-fix-r2-purge-probe` (a note only) was created at 23:16:08 UTC;
+- a dry run of `delete` with `purge: true` answered **403**: `Insufficient permissions; permission
+  "editHistory" required`;
+- the document was then deleted without purge.
+
+A dry-run purge of T4's already deleted id answered 200 with no result: a delete of a missing
+document checks nothing, so that says nothing about the permission. Purge was not tried on any real
+document.
+
+With `editHistory`, the Functions could delete the uploads they replace with `purge`. They replace
+and delete an upload whose bytes hold location or camera data, so the revision with the extracted
+data would go with it. That is a design option, not tested.
+
+**Not changed:** the datasets stay public, the retention is not changed, nothing was purged.
+
+**Still the owner's call**, in the order of what it closes:
+
+1. Private datasets, with a read token in the frontend. This closes the History API to anonymous
+   readers. It changes Vercel's environment.
+2. An Enterprise custom role with `editHistory` for the Functions' robot, and `purge` on their
+   deletes of uploads. This closes it for uploads the Functions delete.
+3. Sanity's answer to the support email. The draft asks whether a public dataset's History API can
+   require a token.
+
+Until then, nothing in the repository asks for location, EXIF or camera data (finding 2 below), and
+upload-privacy logs a WARN, with key names only, when any client does.
+
+### Finding 2: the guard test caught only literal requests
+
+**Confirmed.** The recheck's four forms (`extract: LIST`, `new URLSearchParams({meta: 'exif'})`,
+`client.request({query: {meta: ['location']}})` and Python `params={"meta": "location"}`) were not
+caught. The literal forms were.
+
+**Fix at the cause: one helper, checked where it runs, and a scan that does not depend on values.**
+
+- **`studio/functions/privacy/upload.ts`, `uploadAsset(client, kind, body, options)`.** It is
+  structurally typed, so it works with every package's @sanity/client.
+  - `extract` takes only `IMAGE_METADATA_OPTIONS` values, in TypeScript and at run time.
+  - At run time it also refuses, before any request: any other value (`location`, `exif`, `image`,
+    `none`, wrong case), `extract` on a file upload, a non-list, and any option it does not list
+    (for example `meta` or `query`).
+  - An image upload without `extract` asks for `IMAGE_METADATA_OPTIONS` explicitly.
+- **Every upload that can be an image now goes through it:**
+  - the image-privacy Function's copy upload (`image-privacy/sanity.ts`);
+  - `testimonial-ascii-art/scripts/compare-with-python.ts`;
+  - the migration's `assets` step (type known only at run time) and `privacy` step (image or file).
+
+  The six file uploads (video-to-mp4's MP4 and stripped original, upload-privacy's stripped image
+  file, the migration's videos, and the two video live-check scripts) still call @sanity/client: a
+  file asset gets no image metadata, and the test refuses `extract` in them.
+- **`studio/test/upload-metadata.test.ts`**, rewritten. It checks:
+  - `IMAGE_METADATA_OPTIONS` against a fixed list in the test, so adding `location` to the constant
+    fails;
+  - the Studio schema, as before;
+  - `uploadAsset` and the image-privacy Function's store, against a local HTTP server with the real
+    @sanity/client: the `meta` parameters on the wire, that nothing is sent when a call is refused,
+    and, as a positive control, that the client itself sends whatever `extract` asks for;
+  - the files git tracks or would track. Before, it walked the disk and read the Functions' ignored
+    `.build/` bundles too. It fails on:
+    - an `assets.upload` that can be an image outside the helper, a non-call reference such as
+      `.bind`, or a computed name;
+    - `extract` in a file upload;
+    - **any `meta` request parameter, whatever its value**: `meta=` (URL, shell, Python keyword), an
+      object or dict key whose value is not an object, a shorthand key in a query, URLSearchParams
+      `set`/`append`, `['meta', …]`/`("meta", …)` pairs, and `.meta =`/`['meta'] =` assignments;
+    - a literal `extract` or `metadata` list with `location`, `exif` or `image`, as before.
+  - 26 forms the scan must catch (the recheck's four among them), and 13 forms the repository uses
+    for other things that it must allow, such as `import.meta`, a box named `meta`, destructuring
+    and a parameter with an object type. The helper's own upload call is allowed only in the
+    helper.
+
+  Its header now states the limits. Not seen: a parameter name built at run time, an object key
+  after a comment line, the assets object reached under another name, and uploads from outside the
+  repository. For those, upload-privacy's WARN line is the only signal.
+- **upload-privacy's WARN text** ended with "Upload without `meta=location`, exif or image", which
+  the scan reads as a parameter. It now ends "Never ask an upload for location, exif or image
+  (@sanity/client's extract, the HTTP API's meta parameter)". The test that checks the WARN still
+  passes.
+
+**A side effect, caught and undone.** A comment added to `privacy/constants.ts` changed the
+migration's stripper fingerprint (`STRIPPER_SOURCES` in `migration/wagtail-to-sanity/src/privacy/copies.ts`
+hashes that file). Validation then refused to run: "privacy-map.json was made with other stripper
+code". The comment was removed, so `constants.ts` equals its last commit, and validation ran. The
+first deploy carried that comment; the second was built from the commit.
+
+**Checks:**
+
+- **On disk.** Temporary untracked files with the recheck's four forms (an `.mjs` and a `.py`) gave
+  4 problems: the image upload with `extract: LIST`, both `{meta: …}` and the Python dict. They were
+  then removed.
+- **Mutations**, applied together in one run, then undone (both files compared by sha1 afterwards):
+  `'location'` added to `IMAGE_METADATA_OPTIONS`, and image-privacy's upload changed back to
+  `client.assets.upload('image', …)`. 4 tests fail:
+  - the fixed-list check names `location`;
+  - the refusal check, because `location` is then allowed;
+  - the repository scan flags the direct upload at its line;
+  - the reach check finds `uploadAsset` calls in 3 files instead of 4.
+- **TypeScript.** A `// @ts-expect-error` on `extract: ['lqip', 'location']` in the test: the
+  Studio's `tsc --noEmit` passes, so TypeScript refuses `location`.
+- **Suites:**
+  - Studio: 122 of 122 tests (74 before);
+  - `privacy` 41, `image-privacy` 32, `upload-privacy` 21, migration 100 (all pass);
+  - typecheck clean in the Studio, `privacy`, `image-privacy`, `upload-privacy`,
+    `testimonial-ascii-art` and the migration;
+  - ESLint clean on the test (the Functions are outside its scope).
+- **Live, after each deploy** (staging, a synthetic random-pixel 64×64 PNG with a `tIME` chunk,
+  uploaded through `uploadAsset`; a scratch testimonial draft that uses it):
+
+  | | after `OP-my6te6d4ga` (23:28:52) | after `OP-vzue263ewu` (23:33:55) |
+  |---|---|---|
+  | upload-privacy | wait ended after 0.1 s: used by a document | the same |
+  | image-privacy | stripped `tIME`, moved the reference, deleted the upload in 6.4 s | the same, in 6.2 s |
+  | Copy (`source.name` `image-privacy`, `privacy.status` `stripped`) | `metadata`: `blurHash`, `dimensions`, `hasAlpha`, `isOpaque`, `lqip`, `palette`, `thumbHash` | the same |
+  | First revision of the copy and of the upload, without a token | 200, the same keys; no `location`, `exif` or `image` | the same |
+
+- **Function logs since 23:00 UTC:** image-privacy 2 runs, upload-privacy 4 (the 2 uploads and the
+  2 draft deletes, "nothing to do"), testimonial-ascii-art 2, video-to-mp4 none. All INFO: no
+  `WARN`, no `ERROR`.
+- **Validation, staging,** 23:30:57 to 23:33:12 UTC: 13 of 13 pass. `privacy`: 173 assets, 0 with
+  personal metadata, 99/99 copies marked.
+
+### Finding 3: the report's status
+
+**Confirmed.** The top of this report said "Status: blocked at step 3. No dataset was changed.",
+after the recreate and fix round 1.
+
+**Fixed:**
+
+- **This report** opens with [Current status](#current-status-2026-11-26-2345-utc). The old status
+  section is renamed "Status when first written (20:35 UTC)" and kept as the record, with the plan
+  sections after it.
+- **Dated notes** at the top of [privacy-review.md](privacy-review.md),
+  [privacy-verification.md](privacy-verification.md), the
+  [morning report](../morning-report.md) and the [plan](../../sanity-migration-plan.md) say that
+  the datasets were recreated after they were written, and point here. Their bodies are not
+  rewritten: they record what was true then.
+- **The morning report** has a new unresolved item 23: the History API decision of finding 1.
+
+### Finding 4: compare differs in two group documents too
+
+**Confirmed in both datasets.** `npm run recreate -- compare` against the pre-recreate snapshots,
+23:16 UTC:
+
+| | staging (snapshot of 20:39) | production (snapshot of 20:56) |
+|---|---|---|
+| Equal | 239 of 281 | 241 of 283 |
+| Differing documents | 40, all in `privacy` only | 40, all in `privacy` only |
+| Missing / extra | 0 / 0 | 0 / 0 |
+| System documents differing | `_.groups.sanity.editor` and `_.groups.write`, in `members` | the same |
+| Members then → now | 5 → 5: 4 replaced | 1 → 5: 4 added |
+| Asset sha1 lists, counts per type | equal | equal |
+| Result | FAIL, as expected | FAIL, as expected |
+
+- **The four new members are the Function robots.** The members of both groups are identical in
+  both datasets now.
+- **Production's snapshot** was taken while the Functions were removed. The 21:05 redeploy added the
+  robots.
+- **Staging's snapshot** (20:39) still lists the four robots of the Functions deployed before the
+  recreate. The redeploy created new ones.
+
+**Fixed:** the note in fix round 1, finding 2 now names both differences. Anyone who reruns
+`compare` against these snapshots should expect exactly these two.
+
+### Staging test data of round 2
+
+- **Created:**
+  - the purge probe document (a note only), 23:16:08, deleted at once without purge;
+  - two scratch testimonial drafts (`drafts.recreate-fix-r2-…`) with one synthetic PNG upload each.
+    image-privacy made a copy of each and deleted the upload.
+- **Deleted** at 23:30:05 and 23:34:15 UTC: both drafts and both copies, each copy checked
+  referenced by its draft only.
+- **Afterwards:** staging has 110 images, 63 files, 0 scratch documents and 0 assets created since
+  23:00. Validation (above) ran between the two tests.
+- **History:** these documents' revisions stay in the History API for the retention period. None
+  holds a location, EXIF or camera data: the first revisions were checked (table above).
+
+### Blocked steps
+
+None. No command was denied. One foreground `sleep` before reading the Function logs was refused by
+the shell tool, and the logs were read without it.
+
+### Still open
+
+1. **Finding 1 (owner):** choose between private datasets with a read token, an Enterprise custom
+   role with `editHistory` (purge), or Sanity's answer. The support email
+   (`~/cjoshmartin-migration/dataset-exports/cdn/sanity-support-cdn-purge-email.md`) is not sent.
+2. **Not pushed:** the local commits fast-forward `origin/sanity-migration` (`b18c179`).
+
+### Local files (not committed)
+
+`~/cjoshmartin-migration/recreate-fix-r2/` (mode 700):
+
+| Path | What |
+|---|---|
+| `scripts/` | the History API probe, the purge probes, the live image-privacy check, the cleanup |
+| `data/` | the probe results, both compares, the Blueprint info before and after, the Function logs (JSON), the live check results, the cleanup records |
+| `logs/` | every run, including both deploys and the plan |

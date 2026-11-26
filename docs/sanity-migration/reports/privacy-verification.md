@@ -5,6 +5,13 @@ migration's privacy step, [wp3-migration.md](wp3-migration.md#privacy-personal-m
 and [privacy-functions.md](privacy-functions.md)). This package changed no code and no content
 except its own scratch data on staging, which it deleted.
 
+> **Later, 2026-11-26 20:40 to 21:10 UTC (not reflected below).** Both datasets were deleted and
+> created again from verified exports. Until then, the History API still served the earlier
+> revisions of the asset documents the privacy work deleted, without a token, to anyone with their
+> ids. Since then it knows none of the 356 deleted ids probed. The current state, and the open
+> owner decision about data that API clients ask Sanity to extract, are in
+> [dataset-recreate.md](dataset-recreate.md).
+
 ## Verdict
 
 **Not done yet: two public video originals still contain the exact GPS location.** Everything else
