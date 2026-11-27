@@ -864,7 +864,7 @@ after the recreate and fix round 1.
 
 **Fixed:**
 
-- **This report** opens with [Current status](#current-status-2026-11-26-2345-utc). The old status
+- **This report** opens with [Current status](#current-status-2026-11-27-0030-utc). The old status
   section is renamed "Status when first written (20:35 UTC)" and kept as the record, with the plan
   sections after it.
 - **Dated notes** at the top of [privacy-review.md](privacy-review.md),

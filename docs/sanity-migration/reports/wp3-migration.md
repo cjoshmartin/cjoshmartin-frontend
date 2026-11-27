@@ -817,7 +817,8 @@ both. Making a copy again gives the same bytes; the integration test checks this
   were no longer marked as discarded);
 - changed a video `duration_ts` from 9407 to 9408.
 
-Instead, [`src/privacy/isobmff.ts`](../../../migration/wagtail-to-sanity/src/privacy/isobmff.ts)
+Instead, `src/privacy/isobmff.ts` (removed in `94f27e0`, when the migration moved to the shared
+stripper [`studio/functions/privacy/isobmff-video.ts`](../../../studio/functions/privacy/isobmff-video.ts))
 edits the boxes in place:
 
 - `moov/udta`, `moov/meta`, the `udta`/`meta` of kept tracks, and every track that is not `vide` or
