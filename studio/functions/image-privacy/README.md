@@ -1,0 +1,67 @@
+# image-privacy
+
+Sanity Function that replaces every image added to a document that carries location or other
+personal metadata with a losslessly stripped copy (`../privacy/image-strip.ts`), points every
+reference at the copy, and deletes the upload. Images without personal metadata are left as they
+are. Contract: `docs/sanity-migration/schema-contract.md`, "Privacy".
+
+| File | What it is |
+| --- | --- |
+| `trigger.ts` | Event filter (follows `asset->` to the asset's `privacy` field) and projection, the watched fields per type, the same rule in TypeScript, and the reference path finder. |
+| `orchestrator.ts` | One run: for each image that needs work, lease, download, strip, upload the copy, mark it, repoint, delete. `createImageAssetProcessor` does this for one asset; the upload-privacy Function uses it for uploads no document uses. |
+| `sanity.ts` | The ImageStore on @sanity/client: raw-perspective patches with revision checks, references, guarded delete, download of the stored bytes (`?dlRaw=` with the Function's token), upload of the copy. |
+| `index.ts` | The handler. |
+| `test/` | `npm test`: the filter against the rule (groq-js), the fields against `studio/schema.json`, and the orchestrator with the real stripper on an in-memory store. |
+
+## How it works
+
+1. **Trigger.** `create` and `update` of `blogPost`, `project`, `flexPage`, `testimonial`,
+   `homePage`, `person` and `service`, drafts and release versions included, in `production` and
+   `staging`, when an
+   image in a watched field (single images, hero media, Portable Text image blocks) references an
+   asset that was uploaded since `UPLOADED_SINCE` (2026-11-26; older images belong to the
+   migration's privacy step) and whose `privacy` is missing, from another strip version,
+   `replaced`, a stale `processing` (older than 10 minutes) or a due `pending` (older than 10
+   minutes). The trigger is the content document, not the asset: a Studio upload creates the
+   asset before it patches the reference in, and by the time the document's event arrives the
+   reference exists. The live test waited 8 s between upload and reference: nothing ran before.
+2. **Lease.** `privacy` = `processing` with this run as `holder`, revision-checked on the asset.
+3. **Check.** The stored bytes come from `<url>?dlRaw=` with the Function's token (that response
+   is `private, no-store`, so it is never cached). The plain image URL usually serves a re-encoded
+   rendition, but not always: it returns the stored bytes for all GIFs and for some PNGs and
+   JPEGs (22 of the 110 migrated images), so the stored file itself must be clean. Size and sha1
+   are checked. No personal metadata: `privacy` = `clean`, nothing else changes.
+4. **Copy.** The stripped bytes are uploaded with the upload's file name, `source: {name:
+   "image-privacy", id: <the upload's digest>}` (`privacy/provenance.ts`: HMAC-SHA256 of the
+   upload's id with `PRIVACY_LINK_KEY`, a Function environment variable; never the id, which names
+   the deleted upload's CDN URL) and only the placeholders and palette extracted. The copy must
+   have the upload's dimensions (crops and hotspots are fractions). It is marked `stripped` before
+   anything points at it, and the upload is marked `replaced` (any `metadata.location`, `exif` or
+   `image` Sanity extracted is removed from it).
+5. **Repoint and delete.** Every document that references the upload (raw perspective: drafts,
+   published, release versions) gets `<path>._ref` = the copy, with a revision check, and a
+   testimonial's `asciiArtSource` moves with its image (so the ASCII art is not made again from
+   the same pixels); crop, hotspot, alt, caption and layout are untouched. A version in a release
+   that can no longer be edited (scheduled, published, archived) is not written. Then the upload is
+   deleted if nothing references it; a reference added meanwhile is moved in the next round (5
+   rounds), and after that the filter matches `replaced` on that document's next event (or the
+   upload-privacy sweep deletes it once nothing uses it).
+6. **Failures.** A file the stripper cannot handle: `failed` (final for this strip version), shown
+   in the Studio as an error on the field (the file stays public with its metadata while a document
+   uses it, so the document cannot be published with it; once nothing uses it, the upload-privacy
+   Function deletes it). Download, upload and API problems: `pending`, retried by
+   the first event at least 10 minutes later. An unexpected error is also thrown, so it is in the
+   Function logs.
+
+No loops: the copy is marked before references move to it, checked uploads are `clean`,
+`replaced` or `failed`, and patches on asset documents are not events of the watched types.
+
+## Commands
+
+```sh
+npm ci
+npm test
+npm run typecheck
+# from studio/ (the Blueprint): see ../video-to-mp4/README.md for the arm64 environment
+SANITY_PROJECT_ID=j3vdh6ti npx sanity@latest functions logs image-privacy --stack ST-jc4gwa3c4t
+```

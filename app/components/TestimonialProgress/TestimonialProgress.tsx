@@ -2,13 +2,13 @@
 
 import { useState } from "react";
 import styles from './TestimonialProgress.module.css'
-import type { FromAPI } from "@/app/components/Testimonial";
+import type { TestimonialView } from "@/app/components/Testimonial";
 
 const TESTIMONIAL_CYCLE_DURATION_SECONDS = 30;
 
 interface TestimonialProgressProps {
-  all?: FromAPI[];
-  onAdvance: (testimonial: FromAPI['testimonial']) => void;
+  all?: TestimonialView[];
+  onAdvance: (testimonial: TestimonialView) => void;
 }
 
 export default function TestimonialProgress({ all, onAdvance }: TestimonialProgressProps) {
@@ -35,7 +35,7 @@ export default function TestimonialProgress({ all, onAdvance }: TestimonialProgr
 
     setShownIndices(shown);
     setTestIndex(newIndex);
-    onAdvance(all[newIndex].testimonial);
+    onAdvance(all[newIndex]);
   };
 
   if (!all || all.length <= 1) {

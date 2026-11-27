@@ -13,6 +13,10 @@ import { config } from "@fortawesome/fontawesome-svg-core";
 import AnimationContainer from './components/layout/AnimationContainer';
 import LoaderContainer from './components/Loader/LoaderContainer';
 import LazyAsciiFluid from './components/layout/LazyAsciiFluid';
+import { draftMode } from 'next/headers';
+import { VisualEditing } from 'next-sanity/visual-editing';
+import { SanityLive } from '@/sanity/lib/live';
+import { DisableDraftMode } from './components/DisableDraftMode/DisableDraftMode';
 
 config.autoAddCss = false;
 
@@ -38,6 +42,8 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode
 }) {
+  const { isEnabled: isDraftMode } = await draftMode();
+
   return (
     <html lang="en">
       <body className={inter.className}>
@@ -65,6 +71,14 @@ export default async function RootLayout({
             </div>
         </PlausibleProvider>
         <GoogleAnalytics gaId="G-P8XH0GSQTV" />
+        {/* Live Content API: published edits appear without a redeploy; in Draft Mode it also streams draft changes. */}
+        <SanityLive />
+        {isDraftMode && (
+          <>
+            <VisualEditing />
+            <DisableDraftMode />
+          </>
+        )}
       </body>
     </html>
   );

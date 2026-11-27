@@ -1,36 +1,17 @@
-import { FocusModes } from "../Context/FocusMode";
+import { stegaClean, type StegaBranded } from "@sanity/client/stega";
+import type { HOME_PAGE_QUERY_RESULT } from "@/sanity.types";
+import { getImageDimensions, hasAsset, originalImageUrl } from "@/sanity/lib/image";
+import PortableTextBody from "../PortableTextBody/PortableTextBody";
 import LoadingImage from "../LoadingImage/LoadingImage";
 import styles from "./service.module.css";
 
-interface ImageObj {
-  id: number;
-  title: string;
-  file: string;
-  width: number;
-  height: number;
-  created_at: string;
-  focal_point_x: number | null,
-  focal_point_y: number | null,
-  focal_point_width: number | null,
-  focal_point_height: number | null,
-  file_size: number,
-  file_hash: string,
-  collection: number,
-  uploaded_by_user: number
-}
-export interface ServiceObj {
-  service: {
-    title: string,
-    description?: string,
-    link?: string,
-    link_text?: string,
-    image: ImageObj
-    audience: FocusModes
-  }
-}
+/** A service as HOME_PAGE_QUERY returns it (already filtered to the page's audience). */
+export type ServiceData = NonNullable<
+  NonNullable<StegaBranded<NonNullable<HOME_PAGE_QUERY_RESULT>>["services"]>[number]
+>;
 
 interface ServiceProps {
-  service: ServiceObj
+  service: ServiceData
   index: number
 }
 
@@ -53,41 +34,48 @@ function ServiceLink({link, link_text, children}: {link?: string, link_text?: st
 
 function Service({service, index }: ServiceProps) {
 
-  const {title, description, image, link, link_text} = service.service
+  const {title, description, image, linkText} = service
+  const link = stegaClean(service.link) ?? undefined
+  const imageDimensions = hasAsset(image) ? getImageDimensions(image) : undefined
 
 
   return (
-    <ServiceLink link={link} link_text={link_text}>
+    <ServiceLink link={link} link_text={linkText ?? undefined}>
       <div
         className={styles.container}
         style={{
           flexDirection: index % 2 === 0 ? "row" : "row-reverse",
         }}
       >
-        <LoadingImage
-          src={image.file}
-          width={image.width}
-          height={image.height}
-          wrapperStyle={{ width: "350px", height: (350 * image.height) / image.width, flexShrink: 0 }}
-          style={{
-            width: "350px",
-            height: "auto",
-          }}
-          alt={image.title}
-        />
+        {hasAsset(image) && imageDimensions && (
+          <LoadingImage
+            src={originalImageUrl(image)}
+            width={imageDimensions.width}
+            height={imageDimensions.height}
+            wrapperStyle={{ width: "350px", height: (350 * imageDimensions.height) / imageDimensions.width, flexShrink: 0 }}
+            style={{
+              width: "350px",
+              height: "auto",
+            }}
+            alt={stegaClean(image.alt) ?? ""}
+          />
+        )}
         <div className={styles.textContainer} >
           <h3>
             {title}
           </h3>
-          <div dangerouslySetInnerHTML={{ __html: description || "" }} />
+          <div>
+            <PortableTextBody value={description} />
+          </div>
           {link && link.length > 0 && (
             <div
               style={{
                 color: "var(--secondary-color)",
                 textDecoration: "underline",
               }}
-              dangerouslySetInnerHTML={{ __html: link_text ?? "" }}
-            />
+            >
+              <p>{linkText}</p>
+            </div>
           )}
         </div>
       </div>
@@ -95,7 +83,7 @@ function Service({service, index }: ServiceProps) {
   );
 }
 
-export function Services({services, project_audience}: {services: ServiceObj[], project_audience: FocusModes}) {
+export function Services({services}: {services: ReadonlyArray<ServiceData | null>}) {
     return (
       <div
         style={{
@@ -113,12 +101,10 @@ export function Services({services, project_audience}: {services: ServiceObj[], 
           }}
         >
           {services
-            ?.filter((service) =>
-              service.service.audience.includes(project_audience)
-            )
+            .filter((service): service is ServiceData => service !== null)
             .map((service, index) => (
               <Service
-                key={service.service.title}
+                key={service._id}
                 service={service}
                 index={index}
               />

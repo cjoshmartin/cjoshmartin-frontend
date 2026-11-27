@@ -1,44 +1,49 @@
 'use client'
 
-import TypeIt from "typeit-react";
-import { stripHtml } from "string-strip-html";
-
 import styles from './Testimonial.module.css'
-import { useEffect, useState } from "react";
-import { RandomIntFromInterval } from "@/app/randomIntFromInterval";
+import { Fragment, useState } from "react";
 import { motion } from "framer-motion";
 import TestimonialProgress from "@/app/components/TestimonialProgress";
 import LoadingImage from "@/app/components/LoadingImage/LoadingImage";
-
-interface TestimonialImage {
-  title: string;
-  value: string;
-  url?: string;
-}
-
-interface TestimonialObject {
-  image?: TestimonialImage;
-  first_name?: string;
-  last_name?: string;
-  job_title?: string;
-  relationship?: string;
-  link?: string;
-  body: string;
-}
-
-export interface FromAPI {
- testimonial: TestimonialObject
-}
+import type { TestimonialView } from "./testimonialView";
+import type { AsciiArt } from "./asciiArt";
 
 interface TestimonialProps {
-  testimonial: TestimonialObject;
+  testimonial?: TestimonialView;
   title?: string,
-  all?: FromAPI[],
+  all?: TestimonialView[],
   shouldHideImage?: boolean
 }
 
+/**
+ * The parsed art as React elements: the same spans, line breaks and whitespace the stored markup
+ * describes, without ever injecting the markup itself.
+ */
+function AsciiArtContent({ art }: { art: AsciiArt }) {
+  const pieces = art.pieces.map((piece, index) => {
+    if (piece.type === "char") {
+      return (
+        <span key={index} style={{ color: piece.color }}>
+          {piece.text}
+        </span>
+      );
+    }
+    if (piece.type === "br") {
+      return <br key={index} />;
+    }
+    return <Fragment key={index}>{piece.text}</Fragment>;
+  });
+  return (
+    <>
+      {art.leading}
+      {art.wrapped ? <span>{pieces}</span> : pieces}
+      {art.trailing}
+    </>
+  );
+}
+
 export default function Testimonial({ testimonial, title, all, shouldHideImage }: TestimonialProps) {
-  const [test , setTest] = useState<TestimonialObject>(testimonial);
+  const [test , setTest] = useState<TestimonialView | undefined>(testimonial);
   const [isRevealed, setIsRevealed] = useState<boolean>(false);
 
   if(!test){
@@ -69,7 +74,7 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
         animate={{ opacity: 1, y: 0 }}
         transition={{ ease: "easeOut", duration: 0.5 }}
         exit={{ opacity: 0, y: 20 }}
-        key={test.job_title}
+        key={test.jobTitle}
       >
         <div
           className={styles.imageWrapper}
@@ -84,15 +89,14 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
           <div
             className={styles.image}
             style={{ opacity: isRevealed ? 0 : 1 }}
-            dangerouslySetInnerHTML={{
-              __html: test?.image?.value ?? "",
-            }}
-          />
-          {test?.image?.url && (
+          >
+            {test.asciiArt && <AsciiArtContent art={test.asciiArt} />}
+          </div>
+          {test.imageUrl && (
             <LoadingImage
               className={styles.revealedImage}
-              src={test.image.url}
-              alt={test.image.title}
+              src={test.imageUrl}
+              alt={test.imageAlt}
               fill
               sizes="208px"
               loading="eager"
@@ -101,7 +105,7 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
           )}
         </div>
         <div className={styles.contentContainer}>
-          {test?.body && stripHtml(test.body)?.result}
+          {test.body}
           <div
             className={styles.infoContainer}
             style={{
@@ -109,15 +113,15 @@ export default function Testimonial({ testimonial, title, all, shouldHideImage }
             }}
           >
             <h3>
-              <a href={test?.link} target="blank">
-                {test.first_name} {test.last_name}
+              <a href={test.link} target="blank">
+                {test.firstName} {test.lastName}
               </a>
             </h3>
             {/* eslint-disable-next-line react/jsx-no-comment-textnodes */}
             <h3>//</h3>
             {!shouldHideImage && (
               <>
-                <h3>{test.job_title}</h3>
+                <h3>{test.jobTitle}</h3>
                 {/* eslint-disable-next-line react/jsx-no-comment-textnodes */}
                 <h3>//</h3>
               </>

@@ -8,30 +8,22 @@ import { faArrowUpRightFromSquare } from '@fortawesome/free-solid-svg-icons';
 import { motion } from 'framer-motion';
 import { CalculateReadTime } from '@/app/components/CalculateReadTime/CalculateReadTime';
 import { isNoContent } from '../../components/PortfolioPreview/isNoContent';
+import type { ProjectListingData } from './projectListing';
 
 interface ProjectListingItemProps {
-    data: any
-}
-
-function getThumbnail(content_image?: any, preview_image?: any, content_visuals?: any[]) {
-  if (content_image) return content_image;
-  if (preview_image) return preview_image;
-
-  const firstImageVisual = content_visuals?.find((visual) => visual.type === "image");
-  return firstImageVisual?.value;
+    data: ProjectListingData
 }
 
 export default function ProjectListingItem({ data }: ProjectListingItemProps) {
   const {
-    project_type, title, content_image, preview_image, content_visuals, client, medium, technologies, intro, meta, website,body
+    projectType: project_type, title, imageAlt, client, mediums: medium, technologies, intro, slug, website, hasBody, thumbnail, readMinutes
   } = data;
 
-    const noContent = isNoContent(website, body);
-    const thumbnail = getThumbnail(content_image, preview_image, content_visuals);
+    const noContent = isNoContent(website, hasBody);
   return (
     <motion.a
       whileHover={{ scale: 1.01 }}
-      href={noContent ? website : `/projects/${meta.slug}`}
+      href={noContent ? website : `/projects/${slug}`}
       target={noContent ? "_blank" : undefined}
       className={generateClassList([
         styles.projectContainer,
@@ -45,7 +37,7 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
           width={thumbnail?.width ?? 480}
           height={thumbnail?.height ?? 320}
           url={thumbnail?.url}
-          alt={title}
+          alt={imageAlt}
           className={styles.projectImage}
         />
         {noContent && (
@@ -66,7 +58,7 @@ export default function ProjectListingItem({ data }: ProjectListingItemProps) {
       <div className={styles.projectDetails}>
         <div className={styles.projectInfo}>
           <h2>{title}</h2>
-          {!noContent && <CalculateReadTime body={body} />}
+          {!noContent && <CalculateReadTime minutes={readMinutes} />}
           {client && <h3 style={{ fontWeight: "400" }}>Client: {client}</h3>}
           <h4>Medium: {medium?.join(", and ")}</h4>
           <h5>Technologies: {technologies.join(", ")}</h5>

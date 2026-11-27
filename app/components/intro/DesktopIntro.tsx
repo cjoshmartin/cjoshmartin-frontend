@@ -1,35 +1,31 @@
 'use client'
 
-import Image from 'next/image'
 import styles from './intro.module.css'
 import { motion } from 'framer-motion'
 import ShowImage from '@/app/blog/_compoents/ShowImage/ShowImage'
 
 interface AuthorImageData {
-    file: string,
-    title: string,
+    url: string,
+    alt: string,
     width: number,
     height: number,
 }
 
-interface AuthorData {
-  first_name: string,
-  last_name: string,
-  location: string, 
-  job_title: string,
-  bio?: string, 
-  email?: string, 
+/** The home page author, prepared on the server (attribute values have stega removed). */
+export interface IntroAuthor {
+  firstName?: string,
+  lastName?: string,
+  location?: string,
+  jobTitle?: string,
+  email?: string,
   github?: string,
-  image: AuthorImageData
-
-}
-interface AuthorEntryData {
-  author: AuthorData
+  image?: AuthorImageData
 }
 
 interface DesktopIntroProps {
-  blog_authors?: AuthorEntryData[],
-  bio: string,
+  author?: IntroAuthor,
+  /** The rendered home page bio. */
+  bio: React.ReactNode,
 }
 
 enum LinkType {
@@ -65,17 +61,14 @@ function ClickableLink(props: ClickableLinkProps) {
 }
 
 export default function DesktopIntro(props: DesktopIntroProps){
-  let author: AuthorData | undefined = undefined;
-  if (props?.blog_authors && props?.blog_authors.length > 0) {
-    author = props?.blog_authors[0]?.author;
-  }
+  const author = props.author;
 
   return (
       <div className={styles.intro}>
         <ShowImage
-          url={author?.image?.file ?? ""}
-          alt={author?.image?.title ?? ""}
-          width={author?.image.width}
+          url={author?.image?.url ?? ""}
+          alt={author?.image?.alt ?? ""}
+          width={author?.image?.width}
           height={author?.image?.height}
           className={styles.profileImage}
            initial={{opacity: 0, x: 20 }} 
@@ -86,16 +79,16 @@ export default function DesktopIntro(props: DesktopIntroProps){
         <div className={styles.introText}>
             <h1>Who Am I?</h1>
           <h2>
-            {author?.first_name} {author?.last_name}
+            {author?.firstName} {author?.lastName}
           </h2>
-          <h2>{author?.job_title}</h2>
+          <h2>{author?.jobTitle}</h2>
           <h2>{author?.location}</h2>
           <ClickableLink
             link={author?.email ?? "contact@cjoshmartin.com"}
             type={LinkType.email}
           />
           {author?.github && <ClickableLink link={author?.github} />}
-          <div dangerouslySetInnerHTML={{__html: props.bio}}/>
+          <div>{props.bio}</div>
         </div>
       </div>
   );

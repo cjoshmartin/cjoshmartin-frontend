@@ -1,28 +1,37 @@
 import { ProjectType } from '../components/PortfolioPreview/ProjectType';
-import { PageTypes } from '../PageTypes';
-import { Metadata, ResolvingMetadata } from 'next';
-import { getPages } from '../components/api/pages';
-import { ProjectFilteration } from './__components/ProjectFilteration';
+import { Metadata } from 'next';
+import { ProjectFilteration, type ProjectSearchParams } from './__components/ProjectFilteration';
 import { FocusModes } from '../components/Context/FocusMode';
+import { sanityFetch } from '@/sanity/lib/live';
+import { PROJECTS_LIST_QUERY } from '@/sanity/lib/queries';
+import { toProjectListingData } from './__components/projectListing';
+
+/** Every listed (not unlisted) developer-audience project, newest first. */
 async function getResults(){
-  return getPages({type:PageTypes.PROJECT.toLowerCase(), project_audience: FocusModes.Developer})
+  const { data } = await sanityFetch({
+    query: PROJECTS_LIST_QUERY,
+    params: { audience: FocusModes.Developer },
+  })
+  return data.map(toProjectListingData)
 }
 type Props = {
-  params: Promise<{ id: string }>
-  searchParams: any
+  searchParams: Promise<ProjectSearchParams>
 }
 
-export async function generateMetadata(props: Props, parent: ResolvingMetadata): Promise<Metadata> {
+export async function generateMetadata(props: Props): Promise<Metadata> {
   const searchParams = await props.searchParams;
 
-  const ProjectLookUpText = {
+  const ProjectLookUpText: Record<string, string> = {
     [ProjectType.Personal]: 'Personal',
     [ProjectType.Client]: 'Client',
   }
 
-  const projecTypeText=(searchParams?.project_type
-            ? // @ts-ignore
-              ProjectLookUpText[searchParams?.project_type]
+  const projectType = Array.isArray(searchParams?.project_type)
+    ? searchParams.project_type[0]
+    : searchParams?.project_type
+
+  const projecTypeText=(projectType
+            ? ProjectLookUpText[projectType]
             : "All")
            + " Projects"
   return {
@@ -30,13 +39,12 @@ export async function generateMetadata(props: Props, parent: ResolvingMetadata):
   }
 }
 
-export default async function Page(props: any) {
+export default async function Page(props: Props) {
   const searchParams = await props.searchParams;
-  const homePageData = (await getResults())
-  .filter((project: any) => !project.is_unlisted);
+  const homePageData = await getResults();
 
 
   return (
-      <ProjectFilteration homePageData={homePageData} searchParams={searchParams} />
+      <ProjectFilteration homePageData={homePageData} searchParams={searchParams ?? {}} />
   )
 }

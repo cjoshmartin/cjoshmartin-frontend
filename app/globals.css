@@ -198,6 +198,16 @@ body{
   aspect-ratio: 16 / 9;
 }
 
+/*
+  Rich-text headings (PortableTextBody) scroll to just below the top of the
+  page when their #anchor is targeted, like the per-heading <style> the old
+  Wagtail renderer injected.
+*/
+.rich-text-heading:target {
+  padding-top: 100px;
+  margin-top: -100px;
+}
+
 .anchor-pound {
   opacity: 0;
   transition: opacity 0.3s ease-in-out;

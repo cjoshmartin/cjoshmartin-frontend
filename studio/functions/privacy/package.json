@@ -1,0 +1,21 @@
+{
+  "name": "privacy-strip",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Lossless removal of location and personal metadata from images and videos, shared by the image-privacy and video-to-mp4 Sanity Functions. No runtime dependencies.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "tsx --test test/*.test.ts",
+    "test:media": "tsx --test test/*.integration.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.4",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3"
+  }
+}

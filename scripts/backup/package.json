@@ -1,0 +1,25 @@
+{
+  "name": "cjoshmartin-sanity-backup",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Weekly change-only backups of the cjoshmartin.com Sanity dataset to a private GCS bucket, and restores from them.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "backup": "node backup.mjs",
+    "restore": "node restore.mjs",
+    "test": "node --test --test-reporter=spec \"test/**/*.test.mjs\"",
+    "test:gcs-emulator": "node --test --test-reporter=spec \"integration/**/*.test.mjs\""
+  },
+  "dependencies": {
+    "@google-cloud/storage": "^8.4.0",
+    "modern-tar": "^0.8.6"
+  },
+  "devDependencies": {
+    "@sanity/import": "^7.1.1",
+    "@sanity/mutator": "^6.25.0"
+  }
+}
