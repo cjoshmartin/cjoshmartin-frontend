@@ -1,7 +1,47 @@
 # cjoshmartin.com: Wagtail → Sanity migration plan
 
 Status: **approved**, built and verified (see the morning report) · Written 2026-11-26 · Amended
-2026-11-26 (Mux dropped)
+2026-11-26 (Mux dropped; personal metadata stripped from every asset, D17; datasets recreated to
+drop their public edit history, D18)
+
+> **Amended 2026-11-26: both datasets recreated to drop their public edit history (owner
+> decision, D18).** The History API of a public dataset returns the earlier revisions of published
+> documents and asset documents to anyone who has the id, for the dataset's retention period (90
+> days here). After D17 it still served the documents of the deleted unstripped assets and the
+> copies' earlier revisions that named them. So on 2026-11-26 both datasets were deleted and
+> created again as public datasets from verified exports (staging import from 20:40:54 UTC,
+> production from 21:00:07 UTC), with the Functions removed during the import and deployed again
+> after it. Since then the History API knows none of the deleted ids, and the asset CDN served none
+> of the 670 deleted paths probed from this machine. What new history can contain is in D18 and
+> §15.
+>
+> D16, D18, §11 (new item 12), §12 (test 30a), §13, §14, §15 and §16 are updated in place. The
+> reports are
+> [`dataset-recreate.md`](sanity-migration/reports/dataset-recreate.md) (the run, two fix rounds
+> and the current state) and
+> [`recreate-verification.md`](sanity-migration/reports/recreate-verification.md); the rules are
+> "Document history" in the contract's Privacy section.
+
+> **Amended 2026-11-26: location and personal metadata stripped (owner decision, D17).** Every
+> asset the public datasets serve is stripped of GPS/location and personal metadata **without
+> re-encoding**: photos keep their pixels, orientation and ICC profile; video originals keep their
+> video and audio samples byte for byte, with rotation, colour, HDR and Dolby Vision. The migration
+> replaced 99 of the 173 assets of each dataset (70 images, 29 video originals) with checked
+> copies and deleted the unstripped ones; the other 40 images were checked and marked `clean`.
+> Every later upload is stripped by Sanity Functions (`image-privacy`, `upload-privacy`, and
+> `video-to-mp4`, which strips before it converts), and the unstripped upload is deleted once
+> nothing references it. The old bucket `images-for-cms`,
+> and the live Wagtail site that links to it, still serve the unstripped originals publicly until
+> teardown step 6; the owner chose that timing.
+>
+> D16, D17, §2, §4, §5, §8, §9, §10, §11 (new item 11), §12 (tests 30 and the new 30a), §13, §14,
+> §15 and §16 are updated in place. The rules are in "Privacy (location and personal metadata)" in
+> [`schema-contract.md`](sanity-migration/schema-contract.md#privacy-location-and-personal-metadata);
+> the reports are
+> [`privacy-functions.md`](sanity-migration/reports/privacy-functions.md),
+> [`wp3-migration.md`](sanity-migration/reports/wp3-migration.md) (last section),
+> [`privacy-verification.md`](sanity-migration/reports/privacy-verification.md) and
+> [`privacy-review.md`](sanity-migration/reports/privacy-review.md).
 
 > **Amended 2026-11-26: Mux dropped (owner decision).** Every video is stored in Sanity as an MP4
 > file asset, converted with the fixed settings in `studio/functions/video-to-mp4/settings.ts`
@@ -17,14 +57,6 @@ Status: **approved**, built and verified (see the morning report) · Written 202
 > [`docs/sanity-migration/schema-contract.md`](sanity-migration/schema-contract.md); the current
 > state and the owner's remaining steps are in
 > [`docs/sanity-migration/morning-report.md`](sanity-migration/morning-report.md).
-
-> **Note, 2026-11-26 (after the plan).** Two later changes are not written into the sections
-> below. Every asset was stripped of location and personal metadata, and Functions strip new
-> uploads ([`docs/sanity-migration/reports/privacy-review.md`](sanity-migration/reports/privacy-review.md)).
-> Then both datasets were deleted and created again from verified exports, so that the History API
-> no longer serves the deleted assets
-> ([`docs/sanity-migration/reports/dataset-recreate.md`](sanity-migration/reports/dataset-recreate.md),
-> which has the current state).
 
 ## 1. Goal
 
@@ -50,6 +82,7 @@ Success means:
 | Disqus | comment threads keyed on the **numeric Wagtail page id** | Must be preserved. |
 | Frontend | Next 16.3, React 19.2, on Vercel (GitHub `cjoshmartin/cjoshmartin-frontend`, public; it moved from the `cjoshmartin-com` organization, same repository id `737918690`, and the old path only redirects) | DNS is GoDaddy (`domaincontrol.com`). |
 | Backend repo | local + Dokku remote only, **no GitHub** | `secrets.json` (GCP service-account key) is committed in 4 commits. |
+| Personal metadata (measured 2026-11-26, added with D17) | 11 content files with a location: 6 photos with EXIF GPS, 5 iPhone videos with a QuickTime location (2 of them also in an iOS draft movie header inside `mdat`) | Most phone files also carry maker notes, serials and unique ids, camera and device models, capture times, face regions or timed-metadata tracks. Under the D17 policy, 99 of the 173 Sanity assets of each dataset had something to remove (70 images, 29 video originals); the 29 MP4s, 3 STL models and 2 PDFs had no location. |
 
 The full frontend data contract is in §6. It comes from a file-by-file audit of every field the frontend reads.
 
@@ -72,7 +105,9 @@ The full frontend data contract is in §6. It comes from a file-by-file audit of
 | D13 | Tags | `medium` and `technology` become **reference documents**. Duplicates that differ only by case or whitespace are merged, and every merge is listed in the report. |
 | D14 | Scope | **All content and all files.** Every page and snippet migrates. Unpublished pages and pending changes become Sanity drafts. Every content file in the bucket is uploaded, including unreferenced ones. Renditions and Django static files are excluded. |
 | D15 | `/about` | Redirects to `/` permanently. |
-| D16 | Overnight pre-approvals | Josh pre-approved: Sanity project setup and writes, ~~Mux uploads~~ (superseded: Mux dropped), pushing a GitHub branch and opening a PR (never merging), and Vercel **Preview-scoped** env vars. Everything irreversible waits for the morning. On 2026-11-26 Josh also approved dropping Mux: deleting the Mux assets and the `mux.videoAsset` documents, removing the Mux code, and deploying the `video-to-mp4` Function. |
+| D16 | Overnight pre-approvals | Josh pre-approved: Sanity project setup and writes, ~~Mux uploads~~ (superseded: Mux dropped), pushing a GitHub branch and opening a PR (never merging), and Vercel **Preview-scoped** env vars. Everything irreversible waits for the morning. On 2026-11-26 Josh also approved dropping Mux: deleting the Mux assets and the `mux.videoAsset` documents, removing the Mux code, and deploying the `video-to-mp4` Function. Later that day, with D17, he approved replacing assets in both datasets with stripped copies, deleting an unstripped asset once it is replaced and nothing references it (raw perspective, drafts and versions included), and deploying the privacy Functions; with D18, deleting and creating both datasets again from verified exports, with the Functions removed during the import and deployed again after it. |
+| D17 | Personal metadata | **All personal metadata is stripped losslessly from every asset, existing and future, by the Functions' strippers; an unstripped upload is deleted once its copy replaces it.** Decided 2026-11-26. The existing assets were stripped by the migration's `privacy` step with the same strippers (`studio/functions/privacy/`), every upload is stripped by the `image-privacy`, `video-to-mp4` and `upload-privacy` Functions. Photos: pixels untouched (no recompression), orientation and ICC profile kept; GPS, location, maker notes, serials, unique ids, device and capture data, people, comments, XMP/IPTC and EXIF thumbnails removed. Video originals: video and audio samples byte for byte (rotation, colour, HDR and Dolby Vision kept); location, QuickTime keys and user data, timed-metadata (`mebx`) and other data tracks, creation times, handler names and unused `mdat` bytes removed. Converted MP4s and resized CDN images carry no metadata. Nothing in the repository asks Sanity to extract EXIF, camera or location data from an upload (`uploadAsset`, a guard test). Not covered yet: PDF and STL metadata, and capture dates in file names (owner decisions). The old bucket `images-for-cms` keeps serving the unstripped originals publicly until teardown step 6 (the owner chose that timing; D11). The full policy is in the contract's "Privacy" section. |
+| D18 | Public edit history | **Both datasets were deleted and created again from verified exports on 2026-11-26, to drop their public edit history.** Decided 2026-11-26, after D17. The History API of a public dataset returns earlier revisions of published documents and asset documents without a token to anyone who has the id, for the retention period (90 days, the datasets' `_.retention._maximum_project`); listing a document's transactions needs a token. Before the recreate it still served the deleted unstripped assets' documents (344 of 356 deleted ids readable on staging, 192 on production); after it, none. From now on it records every change again, so for 90 days it can hold: the first revision of every upload, including an unstripped one, for the seconds to a minute before a Function replaces and deletes it (file name, sha1, size and previews made from the same pixels as the copy; a Studio upload extracts no EXIF, camera or location data); location, EXIF or camera data that an API client outside the repository asks Sanity to extract (upload-privacy removes it from the asset document within seconds and logs a WARN, but the first revision keeps it); and the earlier revisions of anything withdrawn later. Removing such history again takes another recreate, a `purge` delete (needs the `editHistory` permission, an Enterprise custom role) or private datasets (owner decisions). |
 
 ### Defaults I'm choosing (say so before approving if you want something different)
 
@@ -93,8 +128,11 @@ Sanity Studio (cjoshmartin.sanity.studio, code in studio/)
    │  edits                    ▲ Presentation tool iframes the site
    ▼                           │
 Sanity Content Lake  ──────────┤  dataset: production (staging = rehearsal + restore tests)
-   │  ├─ images/files on cdn.sanity.io (each video = converted MP4 + kept original, both file assets)
-   │  ├─ Function: video-to-mp4 (on a video upload: ffmpeg → MP4, original kept)
+   │  ├─ images/files on cdn.sanity.io (each video = converted MP4 + kept original, both file assets;
+   │  │    every asset stripped of location and personal metadata, D17)
+   │  ├─ Function: video-to-mp4 (on a video upload: strip the original in place → ffmpeg → MP4)
+   │  ├─ Function: image-privacy (on an image change: lossless copy without metadata, repoint, delete)
+   │  ├─ Function: upload-privacy (on an asset upload or a document deletion: unused uploads)
    │  └─ Function: testimonial-ascii-art (on image change)
    ▼
 Next.js on Vercel (defineLive + draft mode + VisualEditing; <video> plays the MP4 from cdn.sanity.io)
@@ -103,6 +141,8 @@ GitHub Actions weekly ──► private GCS bucket cjoshmartin-sanity-backups (s
 ```
 
 Amended 2026-11-26: there is no Mux. Videos are served from Sanity's CDN like every other file.
+The Free plan's datasets are public (D1), so every asset is stripped before it stays in a dataset
+(D17).
 
 ## 5. Sanity content model
 
@@ -139,6 +179,14 @@ Assets get Sanity's own content-hash IDs. Videos are file assets too (the conver
 original), so there are no video documents. (Until 2026-11-26 each Mux video had a
 `mux-video-<mediaId>` document; superseded, and all of them are deleted.)
 
+(Added 2026-11-26, D17.) A stripped copy gets a new content-hash id, so stripping replaces an asset:
+the copy is uploaded, every reference moves to it, and the unstripped asset is deleted. Asset
+documents carry a `privacy` field: `status` (`stripped`, `clean`, `replaced`, `processing`,
+`pending` or `failed`), the stripper `version` (`image-strip-v1`, `video-strip-v2`), what was
+`removed` (names only) and `strippedFromDigest`, a keyed HMAC of the upload's id. A copy never
+names the deleted upload, because an asset id is its CDN path. Migrated copies keep `source:
+{name: "wagtail", id}` without `url` (that URL is the unstripped bucket object).
+
 ### Document types
 
 | Sanity type | Comes from | Fields |
@@ -159,21 +207,30 @@ The `DEV`/`MAK` and `CLI`/`PER` codes stay as stored values, with human-readable
 - `seo`: `title`, `description`. Replaces `seo_title` and `search_description`.
 - `youtube`: `url`.
 - `imageBlock`: `image`, `alt`, `caption`, `layout` (`fullwidth`, `left`, or `right`).
+- Every image field and type (amended 2026-11-26, D17) accepts JPEG, PNG, WebP, GIF, AVIF and TIFF
+  only (the formats that can be stripped losslessly) and asks Sanity to extract only `blurhash`,
+  `thumbhash`, `lqip` and `palette`, never `exif`, `image` (camera) or `location`.
 - `codeBlock`: uses `@sanity/code-input`, with the language list `python, javascript, json, css, markup, html, go, bash, yaml, cpp`.
 - `stlModel`: `file` (`.stl` only), `scale` (an integer from 1 to 1000).
 - `video` (video contract v2, amended 2026-11-26; it was ~~`asset` (`mux.video`)~~, superseded):
   - `file`: the file the site plays (`accept: "video/*"`, required); after conversion, the MP4
-  - `original`: the file as uploaded; read-only, hidden while empty, kept but never served
+  - `original`: the file as uploaded, stripped of location and personal metadata in place (D17);
+    read-only, hidden while empty, kept but never linked by the site (like every file of a public
+    dataset, anyone who finds its URL can download it)
   - `conversion` (read-only): `status` (`pending`, `processing`, `ready` or `failed`), `message`,
-    `sourceAssetId`, `outputAssetId`, `settingsVersion`, `updatedAt`
+    `sourceAssetId`, `outputAssetId`, `settingsVersion`, `originalStripped` and `stripVersion`
+    (added with D17), `updatedAt`
   - a block needs conversion when `file.asset._ref` is set and differs from
     `conversion.outputAssetId`
+  - an upload the strippers cannot handle is taken out of the block (`file` and `original` unset,
+    `conversion` `failed` with a message and no asset id) and deleted (D17)
 - `divider`.
 
 **PT annotations:**
 - `link`: `href`, `openInNewTab`.
 - `internalLink`: a reference to `blogPost`, `project`, `flexPage`, or `homePage`.
-- `fileLink`: a reference to a file asset.
+- `fileLink`: a reference to a file asset; PDF only since 2026-11-26 (D17: a photo or video attached
+  as a file would be served exactly as uploaded).
 
 ### Rich text and StreamField mapping
 
@@ -293,6 +350,10 @@ Existing comments are kept, per `CLAUDE.md`, unless they describe code that is d
   `VideoConversionWatcher` (`studio/components/`) is the root input of every document type that can
   hold a video. While a document's form is open, it checks the draft and the published document
   every minute and restarts a stuck conversion.
+- (Added 2026-11-26, D17.) Under every image, `ImagePrivacyInput` shows live what the image-privacy
+  Function is doing ("Checking...", "Removing location and camera data...", "Location and camera
+  data removed", a retry warning, or an error). A ready video block's subtitle adds "Original kept
+  without location data"; a block whose upload could not be stripped shows "Upload removed: ...".
 
 **Validation**
 - Required fields, and slugs unique per type.
@@ -302,6 +363,11 @@ Existing comments are kept, per `CLAUDE.md`, unless they describe code that is d
 - (Added 2026-11-26.) A `video` needs a `file` whose asset is a `video/*` file. A conversion that
   failed for the current file under the current settings is an error, so the document cannot be
   published until the editor replaces or removes the video.
+- (Added 2026-11-26, D17.) Errors: an image whose format cannot be stripped losslessly (not JPEG,
+  PNG, WebP, GIF, AVIF or TIFF), an image whose personal metadata the image-privacy Function could
+  not remove (`privacy.status` `failed`: the file stays public with that data while a document uses
+  it), a `fileLink` that is not a PDF, and a video block whose upload was removed. Warnings: an
+  image whose stripping is still pending or waiting to be retried.
 
 **Deploy**
 - `sanity deploy` with `autoUpdates: true`.
@@ -345,9 +411,58 @@ Existing comments are kept, per `CLAUDE.md`, unless they describe code that is d
     video's fault (a download, the API, the deployed binary) gets a retryable `pending`.
 - **Recursion guard:** each patch it writes leaves the block converted, `processing`, `failed` or
   `pending` for its current file, which the filter skips.
+- **Privacy (amended 2026-11-26, D17).** Before converting, the Function strips the upload: in
+  place for QuickTime/MP4 (metadata boxes, data tracks and their samples, creation times, handler
+  names and every unused `mdat` byte become zeros or `free` boxes of the same size, so every
+  sample, edit list, time stamp, display matrix, colour, HDR and Dolby Vision box stays byte for
+  byte), and with an ffmpeg stream copy for other containers. ffmpeg then checks that every packet
+  and every stream description is unchanged. The copy (`source.name` `video-to-mp4-original`) is
+  converted and becomes `original`; an upload with nothing personal is kept (`clean`). Once the copy
+  exists the block leaves the upload whatever the conversion does (`failed` and `pending` point
+  `file` at the copy), and the upload is deleted once nothing references it. An upload that cannot
+  be stripped (larger than about 480 MB for `/tmp`, refused by both strippers, a failed check) is
+  taken out of every block and deleted, with a message. The Function runs on release versions too
+  (`includeAllVersions`) and never writes a version whose release is locked. It reads every upload
+  with its token and a unique query parameter, so unstripped bytes never enter the public CDN cache
+  under the guessable URL. Copies record a keyed digest of the upload (`PRIVACY_LINK_KEY`, a
+  Function environment variable), never its id.
 - **Deploy:** `npx sanity@latest blueprints deploy` from `studio/`, always with
   `npm_config_platform=linux npm_config_arch=arm64` in the environment. Without them the deploy
   bundles the Mac's ffmpeg, and every conversion fails its binary check.
+
+**Function `image-privacy`** (same Blueprint, added 2026-11-26 for D17; code in
+`studio/functions/image-privacy/`, shared strippers in `studio/functions/privacy/`, design in
+`docs/sanity-migration/reports/privacy-functions.md` and `privacy-review.md`)
+- **Trigger:** `create` and `update`, drafts and release versions included, in both datasets, on a
+  document of the watched types with an image whose asset was uploaded since 2026-11-26 and still
+  needs work (no `privacy`, another stripper version, `replaced`, a stale lease or a due retry). 2
+  GB, 300 s. Since the recreate (D18) every asset's `_createdAt` is the import time, so the
+  `privacy` mark, not the date, separates checked images: all 110 images carry one (70 `stripped`,
+  40 `clean`), and the filter matches no document.
+- **What it does:** reads the stored bytes (`?dlRaw=` with its token), and when they hold anything
+  personal writes a copy with a pure TypeScript stripper (no exiftool: the runtime has no perl):
+  the coded image byte for byte, orientation and ICC kept, same dimensions. JPEG, PNG, WebP, GIF,
+  AVIF and TIFF. It moves every reference in drafts, published documents and active release
+  versions to the copy (`asset._ref` only, so crop, hotspot, alt, caption and layout stay; a
+  testimonial's `asciiArtSource` moves too), then deletes the upload. A clean image is only marked
+  `clean`.
+
+**Function `upload-privacy`** (same Blueprint, added 2026-11-26 for D17; code in
+`studio/functions/upload-privacy/`)
+- **Trigger:** `create` of an image or file asset uploaded since 2026-11-26 that the migration or a
+  Function did not make, and `delete` of a content document, draft or release version. 2 GB, 900 s.
+- **What it does:** removes any `metadata.location`, `exif` or `image` an API client asked Sanity to
+  extract into the asset document and logs a WARN (the upload's first revision keeps that data in
+  the History API, D18), waits up to 60 s for a document to use the upload (a reference seen once
+  is final: the Functions above then handle it), and otherwise strips it with the same strippers
+  and deletes it; an upload the strippers fail on is deleted. Every run logs how its wait ended.
+  Each run also sweeps up to five earlier unused uploads that still have their metadata. There is
+  no scheduled sweep: it needs the one-way promotion of the Blueprint stack to the organization and
+  a robot token (owner decision).
+- **Uploads from code** (added 2026-11-26, D18): every upload in the repository that can be an
+  image goes through `uploadAsset` (`studio/functions/privacy/upload.ts`), which lets Sanity
+  extract only `blurhash`, `thumbhash`, `lqip` and `palette`, and `studio/test/upload-metadata.test.ts`
+  fails on a `meta` request parameter or a direct image upload.
 
 ## 9. Migration pipeline (`migration/wagtail-to-sanity/`)
 
@@ -366,7 +481,7 @@ Scripts are committed. Data lives outside the repo in `~/cjoshmartin-migration/`
    - Every issue is logged per record, and anything unexpected fails the transform.
    - Output is `transformed/*.ndjson`, plus a mapping report.
 3. **Assets**
-   - Upload **all** content images and files from local disk to Sanity, with `source: {name:"wagtail", id, url}` and the title set.
+   - Upload **all** content images and files from local disk to Sanity, with `source: {name:"wagtail", id, url}` and the title set. (Amended 2026-11-26, D17: a file with personal metadata is uploaded only as its stripped copy, whose `source` has no `url`.)
    - Build a map from Wagtail id to Sanity asset id.
    - Re-runs don't create duplicates because Sanity names assets by their hash.
 4. **Videos** (amended 2026-11-26: Mux dropped; the ~~`mux` step~~ is superseded and no longer exists)
@@ -376,13 +491,21 @@ Scripts are committed. Data lives outside the repo in `~/cjoshmartin-migration/`
    - After `import`, `prune-mp4s` deletes the MP4s of the Wagtail videos made with other settings once nothing references them.
    - Wagtail media thumbnails are uploaded as image assets, with `source` linking them to their media id.
 
-   The steps of a full run, in order: `extract`, `assets`, `convert`, `videos`, `ascii`, `transform`, `import`, `prune-mp4s`, `validate`.
+   The steps of a full run, in order: `extract`, `privacy` (added 2026-11-26, D17), `assets`, `convert`, `videos`, `ascii`, `transform`, `import`, `prune-mp4s`, `validate`.
 5. **ASCII art:** generate `asciiArt` for every testimonial using the shared generator.
 6. **Import**
    - Run `sanity datasets import --replace` into **`staging`**.
    - Validate (§11).
    - Fix and repeat until validation passes.
    - Then import the same files into **`production`** and validate again.
+
+**Privacy step** (added 2026-11-26, D17; `src/steps/privacy.ts`, report `wp3-migration.md` last section and `privacy-review.md`):
+
+- Scans every content file of the bucket mirror and every asset of the dataset (exiftool `-ee`, the track list, the boxes outside the samples, STL headers) with rules `personal-metadata-v2`, the same policy as the Functions.
+- Makes each copy locally with the Functions' own strippers (`studio/functions/privacy/image-strip.ts`, `isobmff-video.ts`), always from the Wagtail original, and checks it independently: images by decoded pixels with ImageMagick and ffmpeg, the orientation, a byte-identical ICC profile and every kept tag; videos by per-stream packet hashes with time stamps and byte positions, the stream descriptions, the bytes outside the changed ranges and a byte-level scan for location signatures. Copies are listed in `~/cjoshmartin-migration/privacy/privacy-map.json`, which records a fingerprint of the stripper code; a change of that code remakes every copy.
+- Uploads each copy with the old asset's title, file name and `source` (without `url`), marks it (`privacy.status` `stripped`, its version, `strippedFromDigest`), moves every use (references, `asciiArtSource`, `conversion.*AssetId`, the MP4s' `source.id`) in one revision-checked transaction per dataset, then deletes the old asset once nothing references it.
+- The `assets` and `videos` steps upload only stripped copies. Reruns change nothing. `loadSecrets` needs `PRIVACY_LINK_KEY` for the digests.
+- Result in each dataset: 99 assets replaced (70 images, 29 video originals); the MP4s kept their bytes.
 
 **Content freeze:** nobody edits Wagtail between the export and cutover. Anything changed there won't be migrated.
 
@@ -414,6 +537,8 @@ archive/                                    # one-time: wagtail export zip, dump
    - upload each asset whose `assets/...<sha1>` object doesn't exist yet. Videos are ordinary file assets (each converted MP4 and its kept original), so they are stored once under `assets/files/` like every other file, and a restore keeps their `source`, so restored blocks need no new conversion. (Amended 2026-11-26: the ~~Mux step and `assets/mux/`~~ are superseded; the bucket never held them.)
    - upload the snapshot files, then write the marker
 4. **Size check:** fail if the bucket is larger than 4 GB. Each dataset now holds about 466 MiB of assets (261 MiB of it video originals and 86 MiB MP4s), so the first snapshot of a dataset is about that size; later snapshots add only new assets.
+
+(Added 2026-11-26, D17.) Backups store what the dataset holds, so only stripped copies: the real GCS bucket does not exist yet, and its first snapshot comes after the strip. The restore keeps every asset field that is not derived from the file, `privacy` and `source` included. The overnight test backups in `~/cjoshmartin-migration/backup-test/` predate the strip and hold unstripped originals; they are local only and on the cleanup list.
 
 **Restore:** `scripts/backup/restore.mjs --snapshot <ts> --dataset <name>` rebuilds a standard Sanity import tarball (`data.ndjson` plus `images/` and `files/` with `_sanityAsset` directives) and runs `sanity datasets import --replace`.
 
@@ -463,6 +588,17 @@ archive/                                    # one-time: wagtail export zip, dump
     - all 29 MP4s, downloaded anonymously from the CDN, match the checked files
     - in real browsers (Chrome for Testing and WebKit), every video starts on its own, muted, inline and looping, with controls, and plays its MP4
     - the deployed `video-to-mp4` Function converts a real upload on `staging` and passes the same checks; the scratch document and assets are deleted afterwards
+11. **Privacy** (added 2026-11-26, D17)
+    - the migration's `validate` has a 13th check, `privacy`: it downloads every asset of the dataset (images with `?dlRaw=` and a token) and requires that the scan (exiftool `-ee`, the Functions' strippers, tracks, unused `mdat` bytes, STL headers) finds nothing personal, that no asset document holds `metadata.location` or `metadata.exif`, that no unstripped upload is left, that every copy is marked, that every remaining `source.url` serves exactly the asset's bytes, and that no document (drafts and versions included) names an asset id that is not in the dataset
+    - `hashes` compares a stripped image with its Wagtail original by decoded pixels; `videos` requires each stripped original to have the Wagtail upload's audio and video packets
+    - every copy is checked when it is made: identical decoded pixels (two decoders), orientation and ICC profile for images; identical packets with time stamps, stream descriptions and the bytes outside the changed ranges for videos
+    - an independent verification with its own scripts (no repository code): every stored and public asset byte of both datasets and the CDN renditions scanned for the location fingerprints of the local originals, personal tags, and non-zero unused `mdat` bytes; the copies compared with the originals; the old URLs probed
+    - the Functions are tested live on staging with generated media that carries fake location data: a photo in a draft, a video in a draft, a failed conversion, a release version, an image uploaded as a file, an unused upload, an unstrippable upload, and a testimonial photo
+12. **History** (added 2026-11-26, D18)
+    - before a dataset is deleted, `npm run recreate -- snapshot`, `verify-export` (the export holds exactly the snapshot, and every exported file passes both privacy scans) and `history-baseline` (every deleted id found in local files, with its transactions and anonymous reads)
+    - after the import: `restore-assets`, validation (13 checks), `compare` with the snapshot, and `history-check --created-after <the time recreate-dataset.sh prints before the create>`: no deleted id has a transaction or an anonymous read at any time or revision the baseline saw, and no current document has a transaction before the dataset's creation
+    - an independent probe without a token of every deleted id found in local files and of the current documents at old times and revisions, a scan of every asset through the public CDN, and a probe of every deleted CDN path
+    - result on 2026-11-26: PASS on both datasets (356 deleted ids each, 0 with a transaction, 0 anonymous reads with content; the independent probe: 389 and 387 ids, 25,686 probes, 0 documents; 0 of 670 deleted CDN paths served)
 
 ## 12. Manual UI tests (for you, in the morning, on the Vercel Preview URL unless noted)
 
@@ -532,7 +668,26 @@ Mark each item pass or fail. Anything that fails blocks the merge.
     - discarding the draft reverts it
     - (Vercel preview protection may block the iframe; if so, check this one on production after merge)
 29. On a staging copy of a testimonial (use the dataset switcher), change the photo. Within about a minute `asciiArt` updates.
-30. In the **staging** workspace, open a blog post (a new one is simplest: fill the required title, slug, date, intro and audience), add a video block to its body and upload a `.mov` (an iPhone clip is ideal). Watch the block's subtitle change to "Converting to MP4..." and then, usually within a minute, "Ready". Open the block: **File** is now `<your file name>.mp4`, and **Original upload** (read-only) holds your `.mov`. Publish, then run the site locally against staging (`NEXT_PUBLIC_SANITY_DATASET=staging npm run dev`) and open `http://localhost:3000/blog/<slug>`: the video autoplays muted on a loop, its source is a `https://cdn.sanity.io/files/j3vdh6ti/staging/<sha1>.mp4` URL with `type="video/mp4"`, and the `.mov` appears nowhere on the page. Delete the test post afterwards. (Rewritten 2026-11-26; it used to go to ~~Mux~~.)
+30. In the **staging** workspace, open a blog post (a new one is simplest: fill the required title, slug, date, intro and audience), add a video block to its body and upload a `.mov` (an iPhone clip is ideal). Watch the block's subtitle change to "Converting to MP4..." and then, usually within a minute, "Ready. Original kept without location data". Open the block: **File** is now `<your file name>.mp4`, and **Original upload** (read-only) holds your `.mov` without its metadata (same name, new asset; D17, checked in test 30a). Publish, then run the site locally against staging (`NEXT_PUBLIC_SANITY_DATASET=staging npm run dev`) and open `http://localhost:3000/blog/<slug>`: the video autoplays muted on a loop, its source is a `https://cdn.sanity.io/files/j3vdh6ti/staging/<sha1>.mp4` URL with `type="video/mp4"`, and the `.mov` appears nowhere on the page. Delete the test post afterwards. (Rewritten 2026-11-26; it used to go to ~~Mux~~.)
+30a. *(Added 2026-11-26, D17.)* Privacy of uploads, in the **staging** workspace (the test post of test 30 is fine). Use a photo and a video taken on a phone with location services on (check first: `exiftool -ee -G1 -a <file> | grep -iE 'gps|location'` prints lines).
+    - Set the post's content image to the photo, open its crop tool and set a crop and a hotspot, and add alt text. Within about 15 s the line under the image says "Location and camera data removed". The crop, the hotspot and the alt text are still the ones you set (open the crop tool again).
+    - Add a video block with the video. It becomes "Ready. Original kept without location data" (test 30).
+    - In Vision (staging), run `*[_id in ["<post id>", "drafts.<post id>"]]{_id, contentImage{crop, hotspot, alt, "url": asset->url, "privacy": asset->privacy.status}, "videos": body[_type == "video"]{"original": original.asset->url, "mp4": file.asset->url, "privacy": original.asset->privacy.status}}`: the image's `privacy` is `stripped` and its crop and hotspot are yours; each video's `privacy` is `stripped`.
+    - Download the three stored files and check them. The stored image needs the Viewer token (`?dlRaw=`); file URLs are public:
+
+      ```sh
+      set -a; . ~/cjoshmartin-migration/secrets.env; set +a
+      curl -sf -H "Authorization: Bearer $SANITY_READ_TOKEN" "<image url>?dlRaw=" -o /tmp/t30a-photo
+      curl -sf "<original url>" -o /tmp/t30a-original
+      curl -sf "<mp4 url>" -o /tmp/t30a.mp4
+      exiftool -ee -a -G1 -s --ICC_Profile:all /tmp/t30a-photo /tmp/t30a-original /tmp/t30a.mp4 | grep -iE 'gps|location|latitude|longitude|make|model|serial'
+      LC_ALL=C grep -c -a -E 'ISO6709|quicktime\.location|[+-][0-9]{2}\.[0-9]{4}[+-][0-9]{3}\.[0-9]{4}' /tmp/t30a-original
+      ```
+
+      The `exiftool | grep` prints nothing and the byte search prints `0`. (On the files you uploaded, both find something.) Zeroed dates (`0000:00:00`) are expected.
+    - The uploads themselves are gone: `*[_type in ["sanity.imageAsset", "sanity.fileAsset"] && _createdAt > "<the UTC time you started this test>"]{_id, originalFilename, "privacy": privacy.status, "source": source.name}` lists only the copies (`stripped`) and the MP4, never an asset with `privacy` `replaced` or none. (Use the start time, not the date: since the recreate every migrated asset was created on 2026-11-26.)
+    - Nothing was extracted into the History API (D18): from `studio/`, `npx sanity@latest functions logs upload-privacy --stack ST-jc4gwa3c4t | grep WARN` shows no line from your test. A WARN would mean an upload asked Sanity for location, EXIF or camera data, which then stays readable without a token for 90 days; Studio uploads never ask.
+    - Delete the test post, then the copies and the MP4 from `studio/`: `npx sanity@latest documents delete --dataset=staging <asset id> <asset id> <asset id>` (they hold nothing personal, but `npm run compare` lists them until they are gone; their revisions stay in the History API for 90 days, D18). Then `rm /tmp/t30a-*`.
 31. Edit and publish a typo fix on production. It appears on the site within seconds, not an hour. Then revert it. *(Bug 11)*
 
 **H. Backups** (after merge and running `setup-gcp.sh`)
@@ -585,24 +740,33 @@ Schema and Studio → migration into staging → validation → import into prod
 ### Morning, with you
 
 The morning report's "Morning sequence" is the current, detailed version of this list (updated
-2026-11-26 for the Mux removal).
+2026-11-26 for the Mux removal, and 2026-11-27 for D17 and D18).
 
 1. Read the morning report: what passed, every allowlisted difference, any blocked steps.
-2. Run the manual tests A–G (§12) on the Preview URL (test 30 against staging, as written there).
-3. Approve, then I add the Production env vars on Vercel and you merge. Then run test 16 and test 28 (Disqus and Visual Editing) on production if they couldn't be checked on Preview. Then set up the revalidation webhook and `SANITY_REVALIDATE_SECRET` (added 2026-11-26).
-4. Backups:
+2. Run the manual tests A–G (§12) on the Preview URL (tests 30 and 30a against staging, as written
+   there).
+3. *(Optional, added 2026-11-27.)* Send the drafted email to Sanity support
+   (`~/cjoshmartin-migration/dataset-exports/cdn/sanity-support-cdn-purge-email.md`, outside the
+   repository). Its CDN purge request is probably moot: after the recreate none of the 670 deleted
+   asset paths is served, and the cached copies expire by 2026-12-26 at the latest. Its question
+   whether a public dataset's History API can require a token still matters (D18).
+4. Approve, then I add the Production env vars on Vercel and you merge. Then run test 16 and test 28 (Disqus and Visual Editing) on production if they couldn't be checked on Preview, and test 31.
+5. Set up the revalidation webhook and `SANITY_REVALIDATE_SECRET` (added 2026-11-26).
+6. Backups:
    - `! gcloud auth login` as the `com-cjoshmartin` owner
    - I run `setup-gcp.sh` and set the GitHub secrets and variables
    - you run tests H (32–36)
-5. Teardown, with your go-ahead. I prepare every command. The steps marked *you* need your credentials or SSH.
+7. Teardown, with your go-ahead. I prepare every command. The steps marked *you* need your credentials or SSH.
    - **you:** run `ssh dokku@159.203.93.178 postgres:list`, then `postgres:export <svc> > ~/cjoshmartin-migration/final/wagtail-final.dump`
    - **me:** upload that dump, the export zip, `dumpdata`, and the GCS file list to `archive/`
    - **me:** push the scrubbed backend repo to a private repo and archive it
    - **you, or me with permission:** `apps:destroy` and `postgres:destroy` on Dokku
    - **you:** delete the `backend` A record in GoDaddy
-   - **me:** make `images-for-cms` private and delete the `file-upload-2024` service-account keys (no video depends on the bucket any more: all 29 originals and their MP4s are in Sanity)
+   - **me:** make `images-for-cms` private and delete the `file-upload-2024` service-account keys (no video depends on the bucket any more: all 29 originals and their MP4s are in Sanity). Until then the old bucket and the live Wagtail site keep serving the unstripped originals, 11 of them with a location (your timing, D17).
    - **you:** tests I (37–41)
-6. **You** (added 2026-11-26): revoke the Mux access token in the Mux dashboard, and delete the Mux account if you no longer want it. Nothing uses it, and it holds no assets.
+8. **You** (added 2026-11-26): revoke the Mux access token in the Mux dashboard, and delete the Mux account if you no longer want it. Nothing uses it, and it holds no assets.
+9. **You** (added 2026-11-26, D17 and D18): decide the open privacy points: PDF and STL metadata, capture dates in file names, a scheduled sweep, and whether to close the History API to anonymous readers (private datasets on a paid plan, or an Enterprise custom role so the Functions can purge what they delete).
+10. **You** (optional, added 2026-11-27): remove the two temporary permission rules added for the recreate, if they are still there: `Bash(npx sanity@latest blueprints deploy *)` and `Bash(migration/wagtail-to-sanity/scripts/recreate-dataset.sh *)` in the `permissions.allow` list of `~/code/cjoshmartin.com/.claude/settings.local.json`.
 
 ### Rollback
 
@@ -640,6 +804,26 @@ The PR is opened by me after WP8, using `gh pr create` from `sanity-migration`. 
 | **Review and fix rounds** | read-only, then the owning paths | Review of the whole Mux removal and two fix rounds. Report `reports/mux-removal-review.md`. |
 | **Ship** | this plan, the morning report, the PR description | Docs and PR updated, branch pushed, Preview checked. |
 
+**Metadata stripping (2026-11-26, D17).** A third workflow on the same branch:
+
+| Package | Owns | Output and acceptance |
+|---|---|---|
+| **F Functions** | `studio/` (Functions, schema, Studio), the contract's Privacy section | Shared lossless strippers (`studio/functions/privacy/`), the `image-privacy` Function, stripping in `video-to-mp4`, Studio accept lists and status lines; deployed and tested live on staging. Report `reports/privacy-functions.md`. |
+| **M Migration** | `migration/wagtail-to-sanity/` | The `privacy` step: the existing assets of both datasets replaced by verified copies and the unstripped ones deleted; a `privacy` validation check (13 of 13). Report `reports/wp3-migration.md`, last section. |
+| **Verify** | read-only, report only | Independent scan of every asset, the CDN renditions and the old URLs, live tests and a browser check of the site. Report `reports/privacy-verification.md`. |
+| **Review** | read-only | Review of both packages' code. |
+| **Fix rounds 1 and 2, rechecks 1 and 2** | the owning paths | 16 + 7 findings; one policy, in-place video stripping, `mdat` zeroing, `upload-privacy`, release versions, keyed digests, private reads, unstrippable uploads removed. Report `reports/privacy-review.md`. |
+| **Ship** | this plan, the morning report, the PR description | Stopped before it pushed; its work is done by the ship package of D18 below. |
+
+**Dataset recreate (2026-11-26, D18).** A fourth workflow on the same branch:
+
+| Package | Owns | Output and acceptance |
+|---|---|---|
+| **Recreate** | `migration/wagtail-to-sanity/` (`npm run recreate`, `scripts/recreate-dataset.sh`); the main session for the deletes, the imports and the Function removal | Snapshots, verified exports and History API baselines; both datasets deleted and created again; assets restored, schemas deployed, validation 13 of 13, compare, `history-check`; Functions deployed again. Report `reports/dataset-recreate.md`. |
+| **Verify** | read-only, report only | History API probes of every deleted id, a public CDN scan of every asset, live Function tests, a browser check of the site, the old CDN paths. Report `reports/recreate-verification.md`. |
+| **Fix rounds 1 and 2, rechecks 1 and 2** | the owning paths | 5 + 4 findings: the 40 unmarked images marked, `history-check --created-after`, upload-privacy's wait, a WARN on extracted data, the `uploadAsset` helper and its guard test. Report `reports/dataset-recreate.md` (fix rounds). |
+| **Ship** | this plan, the reports, the morning report, the PR description; the full sha1s of deleted assets in tracked files | Docs updated for D17 and D18, deleted-asset ids shortened to 8 hex digits, secrets, ids and coordinates scanned, branch pushed, PR updated, Preview checked. Report: the morning report. |
+
 ## 15. Risks and how they're handled
 
 | Risk | Mitigation |
@@ -654,7 +838,14 @@ The PR is opened by me after WP8, using `gh pr create` from `sanity-migration`. 
 | Content edited in Wagtail after the export | Content freeze from export time to cutover. The export manifest records the export time. |
 | A Studio video upload is not converted (added 2026-11-26) | The site never plays an unconverted upload: the block renders nothing until it is `ready`. A failed conversion is a validation error, so it cannot be published unnoticed. Problems that are not the video's fault are retried after 10 minutes. A stuck run is restarted while the document is open in the Studio; documents nobody opens wait for their next edit (a scheduled sweep would need a one-way Blueprint stack promotion, owner decision). |
 | The Function is deployed with the wrong ffmpeg (added 2026-11-26) | It checks the binary's sha256 before use and records a retryable `pending` with a "redeploy" message. Always deploy with `npm_config_platform=linux npm_config_arch=arm64`; npm 11 warns that these variables stop working in its next major version. |
-| Kept originals are public (added 2026-11-26) | The Free plan only allows public datasets, so an anonymous query lists every original and its CDN URL, and 5 of the 29 Wagtail originals are iPhone clips with a GPS location tag (the MP4s carry no metadata). The old site served the same files from the public bucket. Owner decision: accept, strip metadata from the originals, or keep them out of the public dataset. |
+| Kept originals are public (added 2026-11-26) | The Free plan only allows public datasets, so an anonymous query lists every original and its CDN URL, and 5 of the 29 Wagtail originals are iPhone clips with a GPS location tag (the MP4s carry no metadata). The old site served the same files from the public bucket. ~~Owner decision: accept, strip metadata from the originals, or keep them out of the public dataset.~~ **Decided: D17.** Every original, every image and every future upload is stripped losslessly; the datasets hold no location or personal metadata (validated, and scanned independently). The originals stay downloadable by anyone who finds them, now without metadata. |
+| Deleted unstripped assets stay reachable (added 2026-11-26, D17; amended for D18) | Deleting an asset does not purge the asset CDN: an edge that served a file keeps it for up to 30 days (`s-maxage=2592000`), and the History API (90 days, readable without a token on a public dataset for published documents and asset documents) kept the deleted uploads' documents and the revisions that named them. Mitigations: the Functions read uploads privately (token plus a unique query parameter, so nothing enters the public cache), copies record a keyed digest instead of the upload id, and **D18**: both datasets were deleted and created again, after which the History API knew none of the 356 deleted ids per dataset and the CDN served none of the 670 deleted paths (deleting a dataset appears to purge its paths). The cached copies expire by 2026-12-26 at the latest; `migration/verify/src/deleted-asset-cdn-probe.mjs` re-probes them, and the drafted support email asks for a purge (optional now). |
+| The old bucket and site still serve the unstripped originals (added 2026-11-26, D17) | `images-for-cms` is public and the live Wagtail site links its files, including the 11 with a location, until teardown step 6. The owner chose that timing. Nothing in the Sanity datasets links to the bucket copies of stripped files any more. |
+| New uploads are public until a Function replaces them (added 2026-11-26, D17; amended for D18) | The window is a few seconds for an image used by a document (4.9 s measured), about a minute for an unused upload and tens of seconds for a video; anyone who knows or watches for the upload (the Listen API accepts anonymous connections on a public dataset) could fetch it then. Its first revision stays in the History API for 90 days (D18): file name, sha1 and the previews, and, only if an API client asked Sanity to extract them, location, EXIF or camera data. Studio uploads never ask, every upload from the repository goes through `uploadAsset`, a guard test fails on a `meta` request parameter, and upload-privacy removes extracted data within seconds and logs a WARN. A strip in the browser before the upload, private datasets (a paid plan) or an Enterprise custom role with `editHistory` (so the Functions could `purge` what they delete) would close it: owner decisions. |
+| The edit history is public again (added 2026-11-27, D18) | From the recreate on, the History API records every change and returns earlier revisions of published documents and asset documents without a token to anyone with the id, for 90 days: also the earlier revisions of anything withdrawn later (an image deleted to take it off the site keeps its name and previews there). Listing a document's transactions needs a token. Mitigations: what is stored is already stripped (D17), drafts are not returned, and `history-check` and the verification's probes show what a dataset's history holds. Removing it again takes another recreate (`scripts/recreate-dataset.sh`, owner approval), `purge` deletes (Enterprise) or private datasets (a paid plan). |
+| Something cannot be stripped (added 2026-11-26, D17) | An upload the strippers cannot handle (a video above about 480 MB for the Function's `/tmp`, a corrupt file, a format the in-place stripper and the stream copy both refuse) is removed from its blocks and deleted, with a message; a failed image is a validation error. PDF and STL files are not stripped by any Function yet (owner decision on the design in `privacy-review.md`). Location written into the video samples themselves (SEI user data of some dash cams and drones) stays, by the bit-identical rule; it is documented in the Studio help text. |
+| The stripper or its tools change (added 2026-11-26, D17) | The stripper versions (`image-strip-v1`, `video-strip-v2`) and a fingerprint of the stripper code make the migration remake every copy and the Functions re-check uploads. The Function's ffmpeg is pinned (7.0.2, sha256 checked); the media tests also pass with the local ffmpeg 9.1. |
+| An import or restore into a dataset that lacks the assets while the Functions are deployed (added 2026-11-27, D18) | `sanity datasets import` uploads each file first and sets `source` and `privacy` in a later patch, so upload-privacy would see every new asset document as an unchecked upload, and `testimonial-ascii-art` would regenerate the art while the references are missing. A restore into a dataset that already holds the same files (test 35, into staging) creates no asset documents. Otherwise remove the Functions first and deploy them again after the import, then set `PRIVACY_LINK_KEY` again, as the D18 recreate did (`reports/dataset-recreate.md`, step 3 and "The run"). |
 
 ## 16. Secrets and where they live
 
@@ -663,5 +854,6 @@ The PR is opened by me after WP8, using `gh pr create` from `sanity-migration`. 
 | Sanity tokens (Editor for migration, Viewer for site, backups, and preview) | `~/cjoshmartin-migration/secrets.env` (mode 600), Vercel env vars (Preview tonight, Production in the morning), GitHub Actions secret `SANITY_BACKUP_TOKEN` (morning) |
 | ~~Mux token~~ (superseded) | No longer used (Mux dropped 2026-11-26; the Mux account holds 0 assets). It still authenticates: revoke it in the Mux dashboard (Settings, Access Tokens), then delete `MUX_TOKEN_ID` and `MUX_TOKEN_SECRET` from `secrets.env`. It was never entered into the Studio, so no `secrets.mux` document exists, and no Vercel or GitHub variable holds it. |
 | Revalidation webhook secret | `SANITY_REVALIDATE_SECRET`: `secrets.env`, the production Vercel env var, and the Sanity webhook "Revalidate cjoshmartin.com" (added 2026-11-26, set up after the merge). |
+| Privacy link key (added 2026-11-26, D17) | `PRIVACY_LINK_KEY` (32 random bytes): `secrets.env` and the environment of the `image-privacy`, `video-to-mp4` and `upload-privacy` Functions (`npx sanity@latest functions env add`; a deploy that updates a Function keeps it, removing a Function drops it, so it was set again after the D18 redeploy). It keys the digests that link a stripped copy to its upload. Losing it loses only those links; rotating it means setting it on the three Functions and rerunning the migration's `--steps privacy,assets,videos` on both datasets. |
 | GCP | No keys. Workload Identity Federation only. |
 | Old leaked `secrets.json` key | Revoked in the morning teardown, and scrubbed from the archived repo's history. |

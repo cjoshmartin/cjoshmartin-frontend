@@ -563,7 +563,10 @@ matrix (rotation), edit lists and the technical data a decoder needs.
 - Trigger: create and update of the watched document types (drafts and release versions included)
   with an image whose asset was uploaded since 2026-11-26T00:00:00Z and still needs work (no
   `privacy`, another version, `replaced`, a stale `processing`, a due `pending`). The filter follows
-  `asset->`.
+  `asset->`. Since both datasets were recreated on 2026-11-26, every asset's `_createdAt` is the
+  import time, so the date no longer separates the migrated images from new ones; the `privacy`
+  mark does. The 40 migrated images that had none were checked the Function's way and marked
+  `clean` (`reports/dataset-recreate.md`, fix round 1), so the filter matches no migrated image.
 - An image with nothing personal is left alone (marked `clean`).
 - The copy keeps the coded image byte for byte (identical decoded pixels), the orientation and the
   ICC profile, and has the upload's dimensions, so crops and hotspots stay right. Every reference
@@ -617,10 +620,11 @@ in their bytes. The converted MP4 is re-encoded and does not carry it. The Studi
 
 **Uploads no document uses** (upload-privacy Function, `studio/functions/upload-privacy`): on the
 creation of an image or file asset (not one the migration or a Function made) it removes any
-location or EXIF data Sanity extracted into the asset document at once, waits a minute for a
-document to use the upload (then the Functions above handle it), and otherwise strips it the same
-way (a copy, then the upload is deleted; an image uploaded as a file asset gets a file copy; an
-upload the strippers fail on is deleted). On every upload and every deleted document (a publish, a
+location, EXIF or camera data Sanity extracted into the asset document at once (and logs a WARN,
+because the upload's first revision keeps that data in the History API; see "Document history"
+below), waits a minute for a document to use the upload (then the Functions above handle it), and
+otherwise strips it the same way (a copy, then the upload is deleted; an image uploaded as a file
+asset gets a file copy; an upload the strippers fail on is deleted). On every upload and every deleted document (a publish, a
 discarded draft, an archived release) it also sweeps up to five earlier unused uploads that still
 have their metadata (never checked, `replaced` but not deleted, `failed`, a due retry). There is no
 scheduled sweep (it would need the Blueprint stack promoted to the organization and a robot token:
@@ -637,14 +641,44 @@ GET with a unique query parameter or with a token, it answered 404. So:
 - the Functions read every upload with a unique `privacyFetch` query parameter and their token
   (`studio/functions/privacy/private-fetch.ts`), so the unstripped bytes never enter the public
   cache under the guessable URL;
-- no public document names a deleted upload (see "Provenance without pointers");
+- no current document names a deleted upload (see "Provenance without pointers"); for the
+  History API see "Document history" below;
 - the uploads the privacy work deleted on 2026-11-26 may still be cached where something fetched
   them before (the verification scans, the Functions' round-1 code). The owner's purge request to
   Sanity support lists every path (kept outside the repository, because it names where the
   unstripped bytes were), and `migration/verify/src/deleted-asset-cdn-probe.mjs` re-probes them;
-  run it until 2026-12-26 (30 days after the last deletion).
+  run it until 2026-12-26 (30 days after the last deletion). After the datasets were recreated,
+  the verification found none of 670 deleted paths served (deleting a dataset appears to purge its
+  CDN paths; deleting one asset does not), so the purge request is optional now.
 - an editor's own browser fetches an upload's plain URL only if the editor opens it (the Studio's
   file input shows the name, not the file).
+
+**Document history (History API).** Sanity keeps every transaction of a dataset for its
+retention period, 90 days here (`_.retention._maximum_project`). On a public dataset the History
+API returns a published document or an asset document by id, at a time or a revision, without a
+token; listing a document's transactions needs a token, and drafts are not returned. So a deleted
+asset's document, and the earlier revisions of every document, stay readable by anyone who has the
+id. That is why both datasets were deleted and created again from verified exports on 2026-11-26
+(owner decision D18, `reports/dataset-recreate.md`): the History API then knew none of the 356
+deleted ids per dataset. From then on it records every change, and it can hold:
+
+- the first revision of every upload, including an unstripped one, for the few seconds to a minute
+  before a Function replaces and deletes it: its file name, its sha1 (its CDN path, which answers
+  404 after the delete because the Functions read uploads privately), its size and its previews
+  (LQIP, BlurHash, ThumbHash, palette), which come from the same pixels the stripped copy serves.
+  Studio uploads extract no EXIF, camera or location data;
+- data an API client asks Sanity to extract (`meta=location`, `exif` or `image` in the HTTP API,
+  `extract` in @sanity/client). upload-privacy removes it from the asset document within seconds
+  and logs a WARN, but the first revision keeps it for 90 days. Nothing in this repository asks
+  for it: every upload that can be an image goes through `uploadAsset`
+  (`studio/functions/privacy/upload.ts`), which allows only `IMAGE_METADATA_OPTIONS` (`blurhash`,
+  `thumbhash`, `lqip`, `palette`), and `studio/test/upload-metadata.test.ts` fails on a `meta`
+  request parameter or an image upload outside the helper. Uploads made outside the repository are
+  not covered. Deleting with `purge: true` would remove such history, but needs the `editHistory`
+  permission, which only an Enterprise custom role grants; making the datasets private would close
+  the History API to anonymous readers. Both are owner decisions;
+- the earlier revisions of anything withdrawn later, for example an image deleted to take it off
+  the site.
 
 **Files**: `fileLink` annotations accept PDF documents only (`options.accept: ".pdf,application/pdf"`
 and a validation error for any other file): a photo or video attached as a file would be served
@@ -675,9 +709,12 @@ Errors:
 - `stlModel` without an `.stl` file, or `scale` not an integer in 1..1000.
 - `video` without a `file`, or whose `file` asset is missing or not a `video/*` MIME type;
   `conversion.status` outside its list; a `video` whose MP4 conversion failed for its current file;
-  `imageBlock` without an image; `fileLink` without a file; `code` with blank code.
+  `imageBlock` without an image; `fileLink` without a file, or with a file that is not a PDF;
+  `code` with blank code.
 - An image (any image field or type) whose asset's format cannot be stripped losslessly (not
-  JPEG, PNG, WebP, GIF, AVIF or TIFF, for example an SVG or HEIC picked from the media browser).
+  JPEG, PNG, WebP, GIF, AVIF or TIFF, for example an SVG or HEIC picked from the media browser),
+  or whose location and camera data the image-privacy Function could not remove
+  (`privacy.status` `failed`; corrected 2026-11-27, this was listed under the warnings).
 - Redirect `source`/`destination` format, duplicate `source`, `destination` equal to `source`.
 - Duplicate `medium` or `technology` title ignoring case.
 - Strong references to documents that don't exist or aren't published (Sanity's own check).
@@ -685,8 +722,8 @@ Errors:
 Warnings (reported, never fail `npm run validate`): missing image alt text, testimonial without a
 photo, service link without link text, SEO title over 70 or description over 160 characters,
 Sanity's own "File type ... is not accepted" for a non-video `file`, and an image whose location
-and camera data the image-privacy Function could not remove (yet): `privacy.status` `failed`,
-`pending` or `replaced`.
+and camera data the image-privacy Function has not removed yet: `privacy.status` `pending` or
+`replaced`.
 
 All 29 migrated video blocks are contract v2 and `ready` (`h264-crf23-max1920-v2`), and no
 `mux.*` document is left: `npm run validate` and `npm run validate:staging` report 0 errors (on

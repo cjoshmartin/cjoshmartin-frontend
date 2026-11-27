@@ -707,6 +707,12 @@ keep their video and audio streams byte for byte, with their rotation and colour
 package cleaned the assets that are already in `staging` and `production`. Future uploads belong to
 the image-privacy and video-to-mp4 Functions (another package).
 
+> **Later, 2026-11-26 (not reflected below).** The privacy review widened the policy (rules v2) and
+> replaced 99 assets per dataset, not 24 ([privacy-review.md](privacy-review.md)). The deleted
+> assets' documents and the copies' earlier revisions then stayed readable without a token in the
+> History API until both datasets were deleted and created again from verified exports
+> ([dataset-recreate.md](dataset-recreate.md), which has the current state).
+
 ### Result
 
 - **24 assets in each dataset had personal metadata: 15 images and 9 video originals.** Each one

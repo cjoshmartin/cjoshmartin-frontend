@@ -8,6 +8,15 @@ unstripped upload is deleted. The Studio only accepts image formats that can be 
 losslessly and never asks Sanity to extract EXIF, camera or location data. Open issues are listed
 at the end.
 
+> **Later, 2026-11-26 (not reflected below).** The [privacy review](privacy-review.md) changed this
+> design: video originals are stripped in place (`video-strip-v2`) instead of by a stream copy, a
+> third Function (`upload-privacy`) handles uploads no document uses, copies record a keyed digest
+> instead of the upload's id, and the Functions read uploads privately. Finding 3 below is wrong:
+> the plain image CDN URL serves 22 of the 110 images per dataset as stored (review R2-6). Then
+> both datasets were deleted and created again, so that the History API no longer serves the
+> deleted uploads ([dataset-recreate.md](dataset-recreate.md), which has the current state). The
+> rules in force are in "Privacy" in [`schema-contract.md`](../schema-contract.md).
+
 Owner decision being implemented (2026-11-26): strip location and personal metadata from every
 asset the public datasets serve, without re-encoding; keep orientation and ICC profile for photos
 and the streams, rotation and colour tags for videos; delete an unstripped upload once a stripped

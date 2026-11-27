@@ -9,12 +9,18 @@ datasets serve, without re-encoding, for the existing assets and for every futur
 > Since then it knows none of the 356 deleted ids probed. The current state, and the open owner
 > decision about data that API clients ask Sanity to extract, are in
 > [dataset-recreate.md](dataset-recreate.md).
+>
+> **Corrections, 2026-11-27 (ship package).** The unpushed commits of this work were rewritten on
+> 2026-11-26 to shorten two asset ids (see R2-1, "What remains"), so the commit hashes below were
+> updated to the rewritten commits (`94f27e0`, `88ddbbf`, `8640da6`, `745ecdb`). Two statements
+> below are qualified in place: the round 2 verdict on documents that name a deleted upload, and
+> the statement that the repository held no full id of a location-bearing deleted video.
 
 ## Round 1 (2026-11-26, 13:30 to 16:30 UTC)
 
 Fix package for the 16 findings of the metadata-stripping work: package M (the migration's privacy
 step), the independent verification (`privacy-verification.md`) and the code review. Commits
-`45be6a8`, `5d834c0`, `144a0b3` and this report. Inputs:
+`94f27e0`, `88ddbbf`, `8640da6` and this report. Inputs:
 [wp3-migration.md](wp3-migration.md#privacy-personal-metadata-stripped-from-every-existing-asset-work-package-m-2026-11-26),
 [privacy-functions.md](privacy-functions.md), [privacy-verification.md](privacy-verification.md).
 
@@ -132,7 +138,7 @@ rules behind it were narrower than the Functions' (finding 3). Both are fixed be
       format), the unchanged bytes outside the changed ranges, and the new byte-level scan.
   - A copy made under older rules or stripper code is replaced by the current copy of its bucket
     original, never by a copy of the copy.
-  - The privacy map records a fingerprint of the stripper sources (`5d834c0`) and starts over when
+  - The privacy map records a fingerprint of the stripper sources (`88ddbbf`) and starts over when
     it changes. A copy that comes out with the same bytes keeps its strip time, so nothing
     changes in the dataset.
   - The PDFs' `Creator`, `Producer` and dates stay (see open points).
@@ -147,7 +153,7 @@ rules behind it were narrower than the Functions' (finding 3). Both are fixed be
 
 Confirmed for `fb1e00d` alone: that commit imported `studio/functions/privacy/constants.ts`, which
 was committed in the next commit, `e521d46`. History is not rewritten (the branch is pushed). At
-`144a0b3`, every file the migration imports from `studio/functions` is tracked.
+`8640da6`, every file the migration imports from `studio/functions` is tracked.
 
 ### 5. Presentation preview secrets and the comparison (low)
 
@@ -357,7 +363,7 @@ cleaned up, 0 documents and 0 assets left):
 
 ## Round 2 (2026-11-26, 17:30 to 19:30 UTC)
 
-Fix package for the 7 findings of recheck 1, an independent re-check of round 1. Commits `a47b845`
+Fix package for the 7 findings of recheck 1, an independent re-check of round 1. Commits `745ecdb`
 (code, tests, contract and READMEs) and the commit of this report. Deployed: Blueprint operation
 `OP-8zw5cnw4xr` (4 Functions), the Studio and 2/2 schemas, and a new Function environment variable
 `PRIVACY_LINK_KEY` on image-privacy, video-to-mp4 and upload-privacy. The 99 stripped copies of
@@ -370,7 +376,9 @@ each dataset were updated, and the changes were tested live on staging.
   content-addressed CDN path. The copies now record a keyed digest instead
   (`privacy.strippedFromDigest`, HMAC-SHA256 with the owner's key), and so do the Functions'
   copies, also in `source.id`. A new validation check fails on any document that names an asset
-  that is not in the dataset.
+  that is not in the dataset. (Note added 2026-11-27: this holds for the current documents. Their
+  earlier revisions stayed readable without a token in the History API until the datasets were
+  recreated; see the note at the top.)
 - **The Functions no longer put unstripped uploads into the CDN's public cache.** On staging with
   fresh assets: after an anonymous GET of a file's plain URL and the deletion, the plain URL still
   answered 200. After a GET with a unique query parameter, or with a token, it answered 404. Every
@@ -447,6 +455,10 @@ each dataset were updated, and the changes were tested live on staging.
   - 70 image and 29 video copies per dataset got the new `privacy` field, 99 per dataset.
   - The independent pointer scan (`recheck2/scripts/deleted_pointer_scan.py`, against the 155
     and 152 deleted ids) then found 0 pointers in either dataset, down from 99.
+  - (Note added 2026-11-27.) That scan read the current documents only. Their earlier revisions,
+    with `privacy.strippedFrom`, and the deleted asset documents themselves stayed readable without
+    a token in the History API until both datasets were recreated at 20:40 to 21:10 UTC
+    ([dataset-recreate.md](dataset-recreate.md)).
 - **What remains** (the CDN copies made before the fix):
   - `recheck2/cdn-purge-request.md` (outside the repository) lists all 307 deleted paths, the 26
     with a location first, with a ready message for Sanity support. Sending it is the owner's step.
@@ -462,6 +474,16 @@ each dataset were updated, and the changes were tested live on staging.
     answers 404 from this machine. The bucket object it names is public anyway until the WP6
     lockdown. It is in the purge request. A unit test in this round briefly used a real deleted id
     and was changed to a fake one before the commit.
+  - **Corrected 2026-11-27 (ship package).** The first sentence was not true when it was written.
+    The unpushed commit of the first verification report (`privacy-verification.md`) named the
+    full ids of the two location-bearing video copies with the `hoov` leftover (see round 1). On
+    2026-11-26, before any push, the main session rewrote the unpushed commits
+    (`git filter-branch`) to shorten both ids, so neither was ever pushed. The photo's sha1 above
+    was pushed (since `7192d8e`), and so were 13 other full sha1s of deleted assets: 7 more in
+    `discrepancies.ts`, 1 in `src/conversion-deviations.ts`, 3 in `test/imageDimensions.test.ts`
+    and 2 in `a1-studio-video.md`; none of those held a location. The ship package shortened all
+    of them to 8 hex digits on 2026-11-27 (the code compares those sha1s by prefix). They stay in
+    the pushed history, which is not rewritten.
 - **Limit of the check.** The 404 results show what the edge near this machine caches. A
   Function's reads reach an edge near its Lambda. The mechanism is the same everywhere (the cache
   key includes the query string, and requests with a token were not cached), and the request
@@ -636,6 +658,10 @@ after 64.7 s.
    `node migration/verify/src/deleted-asset-cdn-probe.mjs --ids
    ~/cjoshmartin-migration/privacy/recheck2/deleted-ids.json --location
    ~/cjoshmartin-migration/privacy/recheck2/location-ids.json` now and then.
+   (Updated 2026-11-27: the current draft is
+   `~/cjoshmartin-migration/dataset-exports/cdn/sanity-support-cdn-purge-email.md`. After the
+   recreate the verification found 0 of 670 deleted paths served, so the purge part is optional;
+   its question whether a public dataset's History API can require a token still matters.)
 2. **Keep `PRIVACY_LINK_KEY` safe** (`secrets.env`, and the three Functions' environment).
    - Rotating it means setting the new key on the three Functions (`sanity functions env add`) and
      in `secrets.env`, then re-marking the migration's copies (`--steps privacy,assets,videos`).

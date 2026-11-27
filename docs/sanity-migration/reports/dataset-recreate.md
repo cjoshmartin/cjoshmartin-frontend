@@ -1,14 +1,16 @@
 # Work package RECREATE: recreate staging and production from verified clean exports
 
-## Current status (2026-11-26, 23:45 UTC)
+## Current status (2026-11-27, 00:30 UTC)
 
-**Done: both datasets were deleted and created again from the verified exports, and two fix rounds
-followed.** This report was first written at 20:35 UTC, while step 3 was blocked. The sections from
+**Done: both datasets were deleted and created again from the verified exports, independently
+verified, and fixed in two rounds. The branch is pushed.** This report was first written at 20:35
+UTC, while step 3 was blocked. The sections from
 [Status when first written](#status-when-first-written-2035-utc-blocked-at-step-3) to
 [Local files](#local-files-not-committed) are kept as that record: they describe the state and the
-plan before the run, not the run.
+plan before the run, not the run. [The run](#the-run-2026-11-26-2035-to-2110-utc) records what was
+done.
 
-- **The recreate** (the main session, along the steps of
+- **[The recreate](#the-run-2026-11-26-2035-to-2110-utc)** (the main session, along the steps of
   [To finish](#to-finish-in-order-once-step-3-is-allowed)):
   - the four Functions were removed first;
   - staging (import from 20:40:54 UTC) and production (import from 21:00:07 UTC) were deleted and
@@ -20,6 +22,10 @@ plan before the run, not the run.
     writes; it passes since [fix round 1](#fix-round-1-2026-11-26-about-2150-to-2240-utc)
     (finding 3);
   - the Functions were deployed again (`OP-hm7sskpxmd`) and `PRIVACY_LINK_KEY` was set again.
+- **[Verification](recreate-verification.md)** (21:13 to 21:50 UTC): 0 of 389 (staging) and 387
+  (production) deleted ids known to the History API, 25,686 anonymous probes with 0 content; every
+  asset of both datasets scanned through the public CDN with 0 findings; the Functions tested live;
+  the site served all 35 pages; 0 of 670 deleted asset paths served by the CDN.
 - **[Fix round 1](#fix-round-1-2026-11-26-about-2150-to-2240-utc):** the 40 unmarked images
   were marked, `history-check` takes the time before the creation, upload-privacy keeps a reference
   it saw during its wait, and a guard test against uploads that ask for location.
@@ -27,12 +33,89 @@ plan before the run, not the run.
   upload that can be an image and a wider guard test, this status, and the corrected compare note.
   The History API finding was confirmed live again; a purge would remove such history, but needs a
   permission that no predefined role grants (403 for the migration's write token).
+- **Recheck of fix round 2** (23:42 to 00:08 UTC, read-only): every fix confirmed; validation 13
+  of 13 and `history-check` PASS on both datasets. It added a low finding: the guard test's
+  header does not list every upload form its scan misses (see the
+  [morning report](../morning-report.md#unresolved-findings)).
 - **Open (owner):** data that an API client outside the repository asks Sanity to extract stays
   readable without a token in the History API (finding 1 of both fix rounds), and the support
-  email is not sent. The CDN copies of deleted assets expire by 2026-12-26.
-- **Not pushed:** `origin/sanity-migration` is at `b18c179`. The local commits after it (the
-  privacy work, the recreate tooling and reports, both fix rounds: 16 before this round's report
-  commit) fast-forward it.
+  email is not sent. The CDN copies of deleted assets expire by 2026-12-26 at the latest; the
+  verification found none served any more.
+- **Pushed** by the ship package on 2026-11-27, a fast-forward of `origin/sanity-migration` from
+  `b18c179` (the morning report has the commit and the Preview).
+
+## The run (2026-11-26, 20:35 to 21:10 UTC)
+
+Run by the main session after step 3 was allowed, along
+[To finish](#to-finish-in-order-once-step-3-is-allowed). Logs:
+`~/cjoshmartin-migration/dataset-exports/logs/` (local). Times are UTC.
+
+| Step | staging | production |
+|---|---|---|
+| Snapshot before the delete | 20:39:06: 281 documents, equal to the 20:11 snapshot, so the 20:11 export was reused | 20:56:03: 283 documents (96 content documents, 2 Presentation preview-secret drafts, 173 assets, 12 system documents) |
+| Export and `verify-export` | `staging-20261126T201131Z.tar.gz`, PASS at 20:13 ([Step 2](#step-2-export-and-verification-staging)) | `production-20261126T205600Z.tar.gz`, PASS at 20:57: 98/98 documents equal, 173/173 files with their sha1 and size, privacy scan 0 findings, 0 pointers to missing assets |
+| History API baseline (before the delete) | 20:11 to 20:14: 346 of 356 deleted ids with transactions, 344 readable without a token | 20:57 to 20:59: 192 of 356 deleted ids with transactions (181 of them assets), all 192 readable without a token (532 of 1,408 anonymous probes returned the document); 1,920 transactions of current documents, the first at 2026-11-25 18:29:53 |
+| Functions | removed before the first delete: `recreate-dataset.sh` found no Function at 20:40:38 | still removed (checked at 20:59:51) |
+| Delete | 20:40:42 to 20:40:45 | 20:59:55 to 20:59:58 |
+| Create (public) | 20:40:54 | 21:00:07 |
+| Import | 20:40:54 to 20:42:31: 96 documents, 173 assets | 21:00:07 to 21:01:36: 98 documents, 173 assets |
+| `restore-assets` | 0 of 173 to patch; 173/173 equal to the snapshot apart from `_createdAt` (the import time) | the same |
+| Schema deploy | 20:42:51 (`staging` workspace) | 21:01:57 (`production` workspace) |
+| Validation | 13 of 13 (to 20:45:17) | 13 of 13 (21:02 to 21:04:29) |
+| `compare` with the snapshot | 279 of 281 equal; the 2 others are `_.groups.sanity.editor` and `_.groups.write`, whose members are the Function robots, removed with the Functions | 283 of 283 equal |
+| `history-check` (with the import start) | 356 deleted ids, 0 with transactions, 2,654 anonymous probes with 0 content; 281 current documents, 8,553 probes with 0 content; FAIL only on the 11 system documents written by the creation, 1.3 s before the import start | 356 deleted ids, 0 with transactions, 1,764 probes with 0 content; 283 current documents, 4,123 probes with 0 content; FAIL only on the 11 system documents, 1.7 s before the import start |
+| `history-check` again, with `--created-after` ([fix round 1](#finding-3-history-check-reported-fail-on-clean-datasets)) | PASS (`--created-after 2026-11-26T20:40:45Z`) | PASS (`--created-after 2026-11-26T20:59:58Z`) |
+
+After production:
+
+- **Functions back.** Built with `npm_config_platform=linux npm_config_arch=arm64` and deployed as
+  `OP-hm7sskpxmd` (completed 21:07:06 after 1 min 49 s). `PRIVACY_LINK_KEY`
+  was set again on `video-to-mp4`, `image-privacy` and `upload-privacy`. No Function ran between
+  the redeploy and the verification's tests.
+- **Independent verification** ([recreate-verification.md](recreate-verification.md), 21:13 to
+  21:50):
+  - History API: 389 (staging) and 387 (production) deleted ids, 25,686 anonymous probes, 0
+    returned a document, 0 ids with a transaction. 12,676 anonymous reads of current documents at
+    old times and revisions returned nothing.
+  - Every asset of both datasets downloaded through the public CDN without a token (plus `?dl=` and
+    the stored image bytes): 0 location fingerprints, 0 location, identifier or people tags apart
+    from the 2 PDFs' `Creator`, 0 non-zero unused `mdat` bytes, 0 problems from the Functions' own
+    checks.
+  - Validation 13 of 13 on both; the datasets equal each other (280 of 280 shared documents).
+  - Live tests of the Functions on staging with synthetic media and fake coordinates.
+  - The site, built against production: 35 pages, 87 of 87 video runs, 0 broken images, 0
+    requests to a deleted asset, 11 of 11 HTTP checks.
+  - CDN: 0 of 670 deleted asset paths served, against 168 at 20:18 before the recreate. Deleting
+    the dataset appears to have purged them; deleting a single asset does not.
+
+### What the History API holds now
+
+The History API keeps every transaction for the datasets' retention, 90 days
+(`_.retention._maximum_project`). Without a token it returns a published document or an asset
+document by id, at a time or a revision; listing a document's transactions needs a token (401),
+and drafts are not returned. Since the recreate it holds only:
+
+- the creation, the import, the schema deploys and the Function robots' group memberships;
+- the 40 `privacy` marks of [fix round 1](#finding-2-images-without-a-privacy-mark), in both
+  datasets;
+- on staging, the test data of the verification and both fix rounds (all deleted again). One of
+  those revisions, T4's synthetic upload `image-30001f5f…`, holds fake coordinates, a fake serial
+  number and a fake owner until about 2027-02-24; the warning test's `image-9fce4f63…` holds a
+  synthetic `Software` string.
+
+From now on it records every change, so it can also hold:
+
+- the first revision of every upload, including an unstripped one, for the few seconds to a minute
+  before a Function replaces and deletes it. A Studio upload extracts no EXIF, camera or location
+  data, so that revision names the file, its sha1 (which is its CDN path; the Functions read
+  uploads privately, so that path answers 404 after the delete), its size and its previews (LQIP,
+  BlurHash, ThumbHash, palette), which come from the same pixels the stripped copy serves;
+- location, EXIF or camera data that an API client outside the repository asks Sanity to extract
+  (`meta=location`, `exif` or `image`). upload-privacy removes it from the asset document within
+  seconds and logs a WARN, but the first revision keeps it for 90 days (finding 1 of both fix
+  rounds, an owner decision);
+- the earlier revisions of anything withdrawn later, for example an image deleted to take it off
+  the site.
 
 ## Status when first written (20:35 UTC): blocked at step 3
 
@@ -267,6 +350,11 @@ UTC, over:
 | 3: remove the four Functions before the deletes | `cd ~/cjoshmartin-migration/dataset-exports/blueprint/off && npx sanity@latest blueprints deploy --project-id j3vdh6ti --stack ST-jc4gwa3c4t -m "dataset-recreate: remove the four Functions while staging and production are recreated"` (`blueprint.json` with `"resources": []`) | Denied by the Claude Code permission classifier ("Destructive or Unwanted Actions"). Every later step depends on it, so steps 4 to 6 on staging and all production steps were not run. |
 
 ## To finish (in order, once step 3 is allowed)
+
+Done on 2026-11-26: see [The run](#the-run-2026-11-26-2035-to-2110-utc). Step 3.6 used
+`--import-start`, which [fix round 1](#finding-3-history-check-reported-fail-on-clean-datasets)
+replaced with `--created-after`. Step 6 was settled in fix round 1 (the 40 images were checked and
+marked); step 7, the support email, is still the owner's.
 
 1. **Staging export.** Take a new staging `snapshot`. If it equals the 20:11 snapshot exactly
    (`_rev` included), reuse `staging-20261126T201131Z.tar.gz`. Otherwise export again and rerun
