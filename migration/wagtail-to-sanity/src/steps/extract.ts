@@ -14,7 +14,7 @@ import {existsSync, mkdirSync, readdirSync, statSync} from 'node:fs'
 import path from 'node:path'
 
 import {GCS_BUCKET, GCS_CONTENT_FOLDERS, type DataPaths} from '../config'
-import {KNOWN_DISCREPANCIES, type KnownDiscrepancy} from '../discrepancies'
+import {KNOWN_DISCREPANCIES, SHA1_FIELDS, sha1Matches, type KnownDiscrepancy} from '../discrepancies'
 import {collectReferences, type Reference} from '../references'
 import {groupBy, hashFile, log, readJson, run, stableStringify, writeJson} from '../util'
 import {loadExport, type Manifest} from '../wagtail'
@@ -240,9 +240,14 @@ export async function extract(paths: DataPaths, options: {syncGcs: boolean}): Pr
       continue
     }
     // Every observed value must equal the explained one (hashes, files, ids).
+    // A sha1 may be explained by its first 8 hex digits (see src/discrepancies.ts).
     const {explanation: _explanation, ...knownFacts} = known
     for (const [field, value] of Object.entries(knownFacts)) {
-      if (stableStringify(discrepancy[field]) !== stableStringify(value)) {
+      const same =
+        SHA1_FIELDS.has(field) && typeof value === 'string'
+          ? sha1Matches(discrepancy[field], value)
+          : stableStringify(discrepancy[field]) === stableStringify(value)
+      if (!same) {
         problems.push(`discrepancy ${key}: ${field} is ${JSON.stringify(discrepancy[field])}, the explanation expects ${JSON.stringify(value)}`)
       }
     }

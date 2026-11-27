@@ -5,7 +5,7 @@ import { createImageUrlBuilder } from '@sanity/image-url'
 
 import { assetDimensions, croppedDimensions, fitWidth, sizedTo } from '../sanity/lib/imageDimensions.ts'
 
-const ASSET = 'image-5893cbb9d6a1b3a0e8f6f1c4e1f1b6a1c3d2e4f5-1000x667-jpg'
+const ASSET = 'image-5893cbb9-1000x667-jpg'
 const builder = createImageUrlBuilder({ projectId: 'abc123', dataset: 'production' })
 
 /** The `rect` size @sanity/image-url puts in the URL (the whole image when it adds none). */
@@ -69,9 +69,9 @@ describe('sizedTo', () => {
   const assets = [
     ASSET,
     // Sizes from the review: a photo, a wide screenshot and a tall phone screenshot.
-    'image-02b16b06f549eaa3eea9dc86967f5294f82517a6-2194x1646-jpg',
-    'image-8eee92c9cd9f985ed34ff614c6b15005d2682210-2062x1032-png',
-    'image-c0d3fe7198c1136b96cd33350a85a3cc2e027bb2-1284x2778-png',
+    'image-02b16b06-2194x1646-jpg',
+    'image-8eee92c9-2062x1032-png',
+    'image-c0d3fe71-1284x2778-png',
   ]
   const crops = [
     undefined,

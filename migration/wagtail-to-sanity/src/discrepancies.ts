@@ -11,7 +11,28 @@
  * Wagtail stored files through django-storages' Google Cloud backend, which overwrites an object
  * when a new upload has the same name (GS_FILE_OVERWRITE defaults to true) instead of picking a
  * new name. That is the cause of the hash mismatches below.
+ *
+ * A sha1 whose Sanity asset was deleted (the privacy step replaced it with a copy without personal
+ * metadata) is given by its first 8 hex digits only: the repository is public, and a full sha1 is
+ * the deleted asset's id and CDN path. The other sha1s are given in full. Compare a sha1 of this
+ * list with sha1Matches, never with ===.
  */
+
+/** The fields of a discrepancy that hold a sha1 (full, or the first 8 hex digits). */
+export const SHA1_FIELDS: ReadonlySet<string> = new Set(['recordedSha1', 'bucketSha1', 'sha1'])
+
+const FULL_SHA1 = /^[0-9a-f]{40}$/
+const SHA1_PREFIX = /^[0-9a-f]{8}$/
+
+/**
+ * Whether `observed` is the sha1 an explanation names as `explained`: the same string, or a full
+ * sha1 that starts with the 8 hex digits `explained` gives.
+ */
+export function sha1Matches(observed: unknown, explained: string): boolean {
+  if (typeof observed !== 'string') return false
+  if (observed === explained) return true
+  return SHA1_PREFIX.test(explained) && FULL_SHA1.test(observed) && observed.startsWith(explained)
+}
 
 export interface ImageHashMismatch {
   kind: 'image-hash-mismatch'
@@ -63,7 +84,7 @@ export const KNOWN_DISCREPANCIES: KnownDiscrepancy[] = [
     recordId: 3,
     file: 'original_images/bad_ideas.png',
     recordedSha1: '0a0cced9218965ddef92ee014f5789a5efb73294',
-    bucketSha1: '46c0bedf1aa0bf41b2d7a834ebd05c6a9b33f509',
+    bucketSha1: '46c0bedf',
     explanation:
       'Record 3 (uploaded 2024-02-15T18:05:33Z, 908,149 bytes, 2784x1798) points at an object ' +
       'that was rewritten on 2024-08-29T23:44:03Z with 227,110 bytes (992x1166) that are ' +
@@ -78,7 +99,7 @@ export const KNOWN_DISCREPANCIES: KnownDiscrepancy[] = [
     recordId: 7,
     file: 'original_images/IMG_9514.jpg',
     recordedSha1: '52ca3deabbc1f685ffcc894ef4ce5b101a791d22',
-    bucketSha1: 'c447bc435dd3f72270a4c85a57f27be9aa77e02c',
+    bucketSha1: 'c447bc43',
     explanation:
       'Record 7 (2024-02-15, 184x245, 11,160 bytes) and record 28 (2024-03-15T23:27:05Z, ' +
       '4032x3024) use the same file name. The object was created 2024-03-15T23:27:04Z and its ' +
@@ -91,7 +112,7 @@ export const KNOWN_DISCREPANCIES: KnownDiscrepancy[] = [
     recordId: 33,
     file: 'original_images/68210293554__B6DC7299-3528-444D-BE9A-23151FDA681F.jpg',
     recordedSha1: '05ef1cc032a6201729e94fdfb5868d2b4444c0ba',
-    bucketSha1: '94eeebf0e87028418609cd1c49f1006cb841f908',
+    bucketSha1: '94eeebf0',
     explanation:
       'Record 33 (2024-03-17T16:56:17Z) and record 36 (2024-03-17T17:19:14Z) use the same file ' +
       'name. The object was created 2024-03-17T17:19:14Z and its sha1 equals record 36\'s ' +
@@ -104,7 +125,7 @@ export const KNOWN_DISCREPANCIES: KnownDiscrepancy[] = [
     recordId: 80,
     file: 'original_images/Screenshot_2024-08-05_at_4.40.35PM.png',
     recordedSha1: 'b506f937290ceba398b68a37ee2f3f51e57b603f',
-    bucketSha1: 'f392b7b80569e53379bc8cdbbfdf1a1168a2b4c1',
+    bucketSha1: 'f392b7b8',
     explanation:
       'Record 80 (2024-08-05T21:40:51Z) and record 81 (2024-08-05T21:44:28Z) use the same file ' +
       'name. The object was created 2024-08-05T21:44:27Z and its sha1 equals record 81\'s ' +
@@ -116,7 +137,7 @@ export const KNOWN_DISCREPANCIES: KnownDiscrepancy[] = [
     kind: 'image-file-missing',
     recordId: 5,
     file: 'original_images/bad_ideas2.png',
-    recordedSha1: '46c0bedf1aa0bf41b2d7a834ebd05c6a9b33f509',
+    recordedSha1: '46c0bedf',
     explanation:
       'The object no longer exists (its rendition images/bad_ideas2.max-165x165.png from ' +
       '2024-02-15T18:06:23Z shows it once did). Record 5 is not referenced by any migrated ' +
@@ -144,25 +165,25 @@ export const KNOWN_DISCREPANCIES: KnownDiscrepancy[] = [
   {
     kind: 'file-without-record',
     file: 'original_images/IMG_5861.JPG',
-    sha1: '7adc09777b7b791502054e572bdb6e130092627b',
+    sha1: '7adc0977',
     explanation: 'Object created 2024-03-01T07:23:04Z. ' + ORPHAN_NOTE,
   },
   {
     kind: 'file-without-record',
     file: 'original_images/l_9b2d50321e9961d76b0e4ee281eee759.jpg',
-    sha1: 'f991425db8461fbdfa3e896fa4da0ee49cf9111c',
+    sha1: 'f991425d',
     explanation: 'Object created 2024-03-02T04:37:06Z. ' + ORPHAN_NOTE,
   },
   {
     kind: 'file-without-record',
     file: 'original_images/IMG_9232.JPG',
-    sha1: 'aa53a2478ba888752734313d332e0bcf6ee06fc5',
+    sha1: 'aa53a247',
     explanation: 'Object created 2024-08-29T16:09:00Z. ' + ORPHAN_NOTE,
   },
   {
     kind: 'file-without-record',
     file: 'original_images/Sun_Symbol_of_the_National_Flag_of_the_Philippines.svg.png',
-    sha1: '14fe8d4766478cc22e016bb58393091002eacf42',
+    sha1: '14fe8d47',
     explanation: 'Object created 2025-05-29T03:08:33Z. ' + ORPHAN_NOTE,
   },
   {

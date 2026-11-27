@@ -62,7 +62,7 @@ import {compareMediaPackets} from '../privacy/video'
 import {mapLimit} from '../sanity'
 import {describeFindings, personalMetadataExifKeys} from './privacy'
 import {linkHrefFix} from '../content-fixes'
-import {KNOWN_DISCREPANCIES} from '../discrepancies'
+import {KNOWN_DISCREPANCIES, sha1Matches} from '../discrepancies'
 import {migratedRevisions} from '../references'
 import {sanityClient} from '../sanity'
 import {pageDocumentId} from '../transform/documents'
@@ -401,12 +401,18 @@ export async function validateDataset(paths: DataPaths, dataset: Dataset, secret
         else equalPixels++
         continue
       }
-      if (known && known.kind === 'image-hash-mismatch' && asset.sha1hash === known.bucketSha1) {
+      // The explanation gives the bucket sha1 in full or by its first 8 hex digits
+      // (src/discrepancies.ts); the full sha1 is that of the bucket file it names.
+      const bucketSha1 =
+        known?.kind === 'image-hash-mismatch'
+          ? inventory.files.find((f) => f.path === known.file && sha1Matches(f.sha1, known.bucketSha1))?.sha1
+          : undefined
+      if (known && bucketSha1 && asset.sha1hash === bucketSha1) {
         hashes.explained.push(`image ${image.id}: sha1 ${String(asset.sha1hash)} instead of recorded ${image.file_hash}. ${known.explanation}`)
-      } else if (known && known.kind === 'image-hash-mismatch' && privacy.copies[known.bucketSha1]) {
-        const problem = await strippedWithSamePixels(asset, known.bucketSha1)
+      } else if (known && bucketSha1 && privacy.copies[bucketSha1]) {
+        const problem = await strippedWithSamePixels(asset, bucketSha1)
         if (problem) hashes.fail(`image ${image.id}: ${asset._id} ${problem}`)
-        else hashes.explained.push(`image ${image.id}: the stripped copy of bucket sha1 ${known.bucketSha1} (same decoded pixels) instead of recorded ${image.file_hash}. ${known.explanation}`)
+        else hashes.explained.push(`image ${image.id}: the stripped copy of bucket sha1 ${bucketSha1.slice(0, 8)}… (same decoded pixels) instead of recorded ${image.file_hash}. ${known.explanation}`)
       } else {
         hashes.fail(`image ${image.id}: asset sha1 ${String(asset.sha1hash)} != Wagtail file_hash ${image.file_hash}`)
       }

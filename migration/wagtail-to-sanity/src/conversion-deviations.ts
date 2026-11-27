@@ -9,11 +9,15 @@
  * Validation lists every deviation as explained. The video-to-mp4 Function uses the same settings,
  * so a Studio upload like these gets the same result.
  */
+import {sha1Matches} from './discrepancies'
 import type {VerificationProblem} from './video/ffmpeg'
 
 export interface ConversionDeviation {
   mediaId: number
-  /** sha1 of the original file in the bucket. */
+  /**
+   * sha1 of the original file in the bucket. Its first 8 hex digits when that asset was deleted
+   * from the datasets (replaced by a copy without personal metadata), as in src/discrepancies.ts.
+   */
   sourceSha1: string
   settingsVersion: string
   /** sha1 of the MP4 the settings produce (ffmpeg 9.0.1, 11 CPUs: the bytes are reproducible). */
@@ -27,7 +31,7 @@ export interface ConversionDeviation {
 export const CONVERSION_DEVIATIONS: readonly ConversionDeviation[] = [
   {
     mediaId: 14,
-    sourceSha1: '7b6075d008ca3736c08bf5e23ef47e5145b48383',
+    sourceSha1: '7b6075d0',
     settingsVersion: 'h264-crf23-max1920-v2',
     outputSha1: '51f03c9b2dab54d5864685dd9e58d4450384d869',
     checks: ['videoDuration', 'fileDuration'],
@@ -55,7 +59,7 @@ export function matchingDeviation(options: {
   return CONVERSION_DEVIATIONS.find(
     (d) =>
       d.mediaId === options.mediaId &&
-      d.sourceSha1 === options.sourceSha1 &&
+      sha1Matches(options.sourceSha1, d.sourceSha1) &&
       d.settingsVersion === options.settingsVersion &&
       d.outputSha1 === options.outputSha1 &&
       [...d.checks].sort().join(',') === failing.join(','),

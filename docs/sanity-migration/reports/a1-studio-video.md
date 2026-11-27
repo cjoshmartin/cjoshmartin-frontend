@@ -121,8 +121,8 @@ Browser checks (screenshots in `~/cjoshmartin-migration/reports/a1-screenshots/`
 
 **Temporary staging writes (all removed).** For the staging check the Editor token created
 `drafts.a1-video-contract-check` and uploaded two generated 1 s test files
-(`file-91aa38e980855c5ba37ae6513010bfe1dbced98e-mov` and the converted
-`file-5edca04e2407510e7ba0971b15ae02bce9964c52-mp4`, made with `buildFfmpegArgs`). Before
+(`file-91aa38e9…-mov` and the converted
+`file-5edca04e…-mp4`, made with `buildFfmpegArgs`). Before
 uploading, the script refused to reuse an existing asset hash. Only the ASCII Function was deployed
 at the time (`blueprints info`), so no converter ran on the draft. The draft and both assets were
 deleted after the checks; a query for the three ids returns nothing. Nothing was written to
