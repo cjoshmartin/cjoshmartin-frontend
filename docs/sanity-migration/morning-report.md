@@ -315,7 +315,7 @@ Numbers 1 to 23 are those of the earlier versions of this report.
 | 28 | info (D18) | Staging's History API keeps the verification's synthetic test revisions until about 2027-02-24: one with fake coordinates, a fake serial number and owner (`image-30001f5f…`), one with a synthetic `Software` string. They name no real place or person. | None; they expire. |
 | 29 | low (D18 fix round 1, finding 4) | upload-privacy once stripped two uploads a draft already used; the result was identical. The cause is most likely query index lag after a cold start, not proven; a seen reference is now final, and the log names the lag if it happens. | None; watch the `upload-privacy` logs for "the query index lagged". |
 | 30 | low (ship) | The pushed history still holds the full sha1s of 14 deleted assets that this package shortened in the current files: one is a location-bearing photo (`c447bc43…`, in `discrepancies.ts` since `7192d8e`), the others hold no location. Their CDN paths answer 404 and the History API no longer knows them; the photo's bucket object is public until teardown step 6. | Only a history rewrite and a force push would remove them, which is your call and was not done. |
-| 31 | low (ship) | Two temporary permission rules for the recreate are still in `~/code/cjoshmartin.com/.claude/settings.local.json`. | Step 12 (optional). |
+| 31 | resolved | ~~Two temporary permission rules for the recreate are still in `~/code/cjoshmartin.com/.claude/settings.local.json`.~~ | Removed on 2026-11-27 (step 12). |
 
 ## Blocked steps (exact commands)
 
@@ -599,10 +599,11 @@ no longer need them; they hold full asset ids, so keep them local. Keep
 `~/cjoshmartin-migration/gcs/`, `state/`, `privacy/`, `video-mp4/` and `reports/` (the migration's
 inputs, state and evidence).
 
-### 12. Optional: remove the temporary permission rules
+### 12. Done: the temporary permission rules were removed
 
 The recreate needed two rules in the `permissions.allow` list of
-`~/code/cjoshmartin.com/.claude/settings.local.json`. They are still there:
+`~/code/cjoshmartin.com/.claude/settings.local.json`. They were removed on 2026-11-27 after the
+recreate finished (see [`HANDOFF.md`](HANDOFF.md)):
 
 - `Bash(npx sanity@latest blueprints deploy *)`
 - `Bash(migration/wagtail-to-sanity/scripts/recreate-dataset.sh *)`
